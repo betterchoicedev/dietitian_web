@@ -1,5 +1,4 @@
-
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { User } from '@/api/entities';
@@ -35,11 +34,13 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useAuth } from '@/contexts/AuthContext';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
 export default function Layout({ children, currentPageName }) {
   const navigate = useNavigate();
+  const { user, signOut } = useAuth();
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
-  const [user, setUser] = React.useState(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [clients, setClients] = React.useState([]);
   const [selectedClient, setSelectedClient] = React.useState(null);
@@ -174,11 +175,12 @@ export default function Layout({ children, currentPageName }) {
     }
   };
 
-  const handleLogout = async () => {
+  const handleSignOut = async () => {
     try {
-      await User.logout();
+      await signOut();
+      navigate('/login');
     } catch (error) {
-      console.error('Error logging out:', error);
+      console.error('Error signing out:', error);
     }
   };
 
@@ -401,9 +403,9 @@ export default function Layout({ children, currentPageName }) {
                   <UserIcon className="mr-2 h-4 w-4" />
                   <span>Profile</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleLogout}>
+                <DropdownMenuItem onClick={handleSignOut}>
                   <LogOut className="mr-2 h-4 w-4" />
-                  <span>Log out</span>
+                  <span>Sign Out</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
