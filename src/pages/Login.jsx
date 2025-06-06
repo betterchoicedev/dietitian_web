@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -28,14 +29,19 @@ export default function Login() {
     try {
       setError('');
       setLoading(true);
-      const { error } = await signIn({
+      const { error: signInError } = await signIn({
         email: formData.email,
         password: formData.password,
       });
-      if (error) throw error;
+      
+      if (signInError) {
+        throw signInError;
+      }
+      
       navigate('/');
     } catch (error) {
-      setError(error.message);
+      console.error('Login error:', error);
+      setError(error.message || 'Failed to sign in. Please check your credentials and try again.');
     } finally {
       setLoading(false);
     }
@@ -61,6 +67,7 @@ export default function Login() {
                   value={formData.email}
                   onChange={handleChange}
                   required
+                  disabled={loading}
                 />
               </div>
               <div className="flex flex-col space-y-1.5">
@@ -73,12 +80,13 @@ export default function Login() {
                   value={formData.password}
                   onChange={handleChange}
                   required
+                  disabled={loading}
                 />
               </div>
               {error && (
-                <div className="text-sm text-red-500">
-                  {error}
-                </div>
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
               )}
             </div>
           </CardContent>
@@ -88,7 +96,7 @@ export default function Login() {
               className="w-full" 
               disabled={loading}
             >
-              {loading ? 'Logging in...' : 'Login'}
+              {loading ? 'Signing in...' : 'Sign In'}
             </Button>
             <div className="text-sm text-center">
               Don't have an account?{' '}
@@ -96,6 +104,7 @@ export default function Login() {
                 variant="link" 
                 className="p-0" 
                 onClick={() => navigate('/register')}
+                disabled={loading}
               >
                 Register
               </Button>
