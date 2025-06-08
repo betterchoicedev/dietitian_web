@@ -176,50 +176,41 @@ export default function Chat() {
         
         Be professional yet friendly and empathetic.`;
 
-      // Default fallback response in case AI fails
-      let aiResponse = `Thank you for your message${userMessage.image_url ? ' and the food image' : ''}. 
-
-Based on your profile (${clientProfile.gender}, ${clientProfile.age} years old, goal: ${clientProfile.goal}), here are some nutrition insights:
-
-1. Your current calorie target should be approximately ${clientProfile.gender === 'male' ? 
-  (clientProfile.goal === 'lose' ? '1800-2000' : clientProfile.goal === 'gain' ? '2500-2800' : '2200-2400') : 
-  (clientProfile.goal === 'lose' ? '1500-1700' : clientProfile.goal === 'gain' ? '2000-2200' : '1800-2000')} calories per day
-
-2. Focus on getting adequate protein (${clientProfile.goal === 'lose' ? '1.6-2.0' : '1.2-1.6'} g/kg of body weight) to maintain muscle mass
-
-3. Stay well-hydrated with at least 8 glasses of water daily
-
-${userMessage.image_url ? `
-Regarding the food in your image:
-- This appears to be a balanced meal with protein, vegetables, and some carbohydrates
-- Ensure portion sizes align with your calorie goals
-- Consider adding more vegetables for additional volume and nutrients with minimal calories
-` : ''}
-
-Would you like more specific advice on meal timing, portion sizes, or nutrient distribution?`;
-
-      // Try to get AI response, use fallback if it fails
       try {
-        const response = await InvokeLLM({
-          prompt: aiPrompt,
-          add_context_from_internet: false
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            messages: [
+              {
+                role: 'user',
+                content: aiPrompt
+              }
+            ]
+          }),
         });
-        if (response) {
-          aiResponse = response;
-        }
-      } catch (aiError) {
-        console.error('Error getting AI response, using fallback:', aiError);
-      }
 
-      // Update chat with AI response
-      const finalMessages = [...updatedMessages, { role: 'assistant', content: aiResponse }];
-      await ChatEntity.update(selectedChat.id, { messages: finalMessages });
-      
-      // Update local state
-      setSelectedChat(prev => ({
-        ...prev,
-        messages: finalMessages
-      }));
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.detail || 'Failed to get response from AI');
+        }
+
+        // Update chat with AI response
+        const finalMessages = [...updatedMessages, { role: 'assistant', content: data.message }];
+        await ChatEntity.update(selectedChat.id, { messages: finalMessages });
+        
+        // Update local state
+        setSelectedChat(prev => ({
+          ...prev,
+          messages: finalMessages
+        }));
+
+      } catch (error) {
+        console.error('Error getting AI response:', error);
+        setError('Failed to get AI response. Please try again.');
+      }
 
       // Clear form
       setMessage('');

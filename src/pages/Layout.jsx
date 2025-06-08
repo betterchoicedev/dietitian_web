@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { supabase } from '@/lib/supabase';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { 
   FileText, 
   Users, 
@@ -14,7 +15,8 @@ import {
   LogOut,
   ListChecks,
   Activity,
-  ClipboardList
+  ClipboardList,
+  Globe
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -39,6 +41,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 export default function Layout({ children, currentPageName }) {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+  const { language, toggleLanguage, translations } = useLanguage();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [clients, setClients] = useState([]);
@@ -193,7 +196,7 @@ export default function Layout({ children, currentPageName }) {
             {clients.length > 0 && (
               <Select value={selectedClient} onValueChange={handleClientChange}>
                 <SelectTrigger className="w-[300px]">
-                  <SelectValue placeholder="Select a client" />
+                  <SelectValue placeholder={translations.selectClient} />
                 </SelectTrigger>
                 <SelectContent>
                   {clients.map((client) => (
@@ -205,6 +208,16 @@ export default function Layout({ children, currentPageName }) {
               </Select>
             )}
           </div>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleLanguage}
+            className="mr-2"
+          >
+            <Globe className="h-5 w-5" />
+            <span className="ml-2">{translations.switchLanguage}</span>
+          </Button>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -221,7 +234,7 @@ export default function Layout({ children, currentPageName }) {
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleSignOut}>
                 <LogOut className="mr-2 h-4 w-4" />
-                <span>Sign Out</span>
+                <span>{translations.signOut}</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -230,8 +243,16 @@ export default function Layout({ children, currentPageName }) {
 
       {/* Sidebar */}
       <div className={cn(
-        "fixed inset-y-0 left-0 w-64 bg-white border-r transform transition-transform duration-200 ease-in-out z-20",
-        sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+        "fixed inset-y-0 w-64 bg-white border-r transform transition-transform duration-200 ease-in-out z-20",
+        {
+          'translate-x-0': sidebarOpen,
+          '-translate-x-full': !sidebarOpen,
+          'md:translate-x-0': true,
+          'left-0': language === 'en',
+          'right-0': language === 'he',
+          'border-r': language === 'en',
+          'border-l': language === 'he'
+        }
       )}>
         <div className="flex h-16 items-center justify-between px-4 border-b">
           <h1 className="text-xl font-semibold">BetterChoice</h1>
@@ -246,10 +267,10 @@ export default function Layout({ children, currentPageName }) {
         </div>
         
         <nav className="space-y-2 p-4">
-          <Link to={createPageUrl('Dashboard')}>
+          <Link to="/">
             <Button variant="ghost" className="w-full justify-start">
               <Activity className="mr-2 h-4 w-4" />
-              Dashboard
+              {translations.home}
             </Button>
           </Link>
           <Link to={createPageUrl('Users')}>
@@ -276,9 +297,14 @@ export default function Layout({ children, currentPageName }) {
       {/* Main content */}
       <main className={cn(
         "min-h-[calc(100vh-4rem)] transition-all duration-200 ease-in-out",
-        "md:ml-64 p-4"
+        {
+          'md:pl-64': language === 'en',
+          'md:pr-64': language === 'he'
+        }
       )}>
-        {children}
+        <div className="container mx-auto p-4">
+          {children}
+        </div>
       </main>
 
       {/* Mobile overlay */}

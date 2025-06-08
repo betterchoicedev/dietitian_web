@@ -127,11 +127,77 @@ export const entities = {
   }
 };
 
+// Azure OpenAI Configuration
+const endpoint = "https://ai-hubfooddata915979189829.openai.azure.com";  // Removed trailing slash
+const apiVersion = "2024-02-15-preview";  // Updated API version
+const deployment = "forObi4-mini";
+const apiKey = "7GE7Tuq2qHvKvTHjS6oqkZ3zQuROcPwgFt5VHHbaPhGnGxLIJBZRJQQJ99BBACYeBjFXJ3w3AAAAACOGgNEZ";
+
 // Core integrations
 export const integrations = {
   Core: {
-    InvokeLLM: async (prompt) => {
-      return { response: "This is a mock LLM response" };
+    InvokeLLM: async ({ prompt, response_json_schema }) => {
+      try {
+        const response = await fetch(`${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'api-key': apiKey,
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            messages: [
+              {
+                role: 'system',
+                content: 'You are a helpful nutritionist assistant. If the user provides a JSON schema, format your response as valid JSON matching that schema.'
+              },
+              {
+                role: 'user',
+                content: prompt
+              }
+            ],
+            max_tokens: 800,
+            temperature: 0.7,
+            top_p: 1.0,
+            frequency_penalty: 0.0,
+            presence_penalty: 0.0,
+            stream: false
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          console.error('API Error:', {
+            status: response.status,
+            statusText: response.statusText,
+            error: errorData
+          });
+          throw new Error(errorData.error?.message || `API Error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        
+        if (!data.choices?.[0]?.message?.content) {
+          throw new Error('Invalid response format from API');
+        }
+        
+        const content = data.choices[0].message.content;
+        
+        // If response_json_schema is provided, try to parse the response as JSON
+        if (response_json_schema) {
+          try {
+            return JSON.parse(content);
+          } catch (e) {
+            console.error('Failed to parse LLM response as JSON:', e);
+            return content;
+          }
+        }
+        
+        return content;
+      } catch (error) {
+        console.error('Error calling LLM:', error);
+        throw error;
+      }
     },
     SendEmail: async (emailData) => {
       console.log('Email would be sent:', emailData);
