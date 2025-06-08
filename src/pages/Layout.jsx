@@ -291,6 +291,12 @@ export default function Layout({ children, currentPageName }) {
               Data Generator
             </Button>
           </Link>
+          <Link to={createPageUrl('NutritionPlan')}>
+            <Button variant="ghost" className="w-full justify-start">
+              <ListChecks className="mr-2 h-4 w-4" />
+              Nutrition Plan
+            </Button>
+          </Link>
         </nav>
       </div>
 
