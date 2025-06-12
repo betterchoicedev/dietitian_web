@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, Outlet } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -38,7 +38,7 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from '@/contexts/AuthContext';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
-export default function Layout({ children, currentPageName }) {
+export default function Layout() {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const { language, toggleLanguage, translations } = useLanguage();
@@ -168,10 +168,10 @@ export default function Layout({ children, currentPageName }) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
         <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md w-full text-center">
-          <h2 className="text-xl font-semibold text-red-800 mb-2">Connection Error</h2>
+          <h2 className="text-xl font-semibold text-red-800 mb-2">{translations.connectionError}</h2>
           <p className="text-red-700 mb-4">{error}</p>
           <Button onClick={() => window.location.reload()} variant="outline">
-            Retry
+            {translations.retry}
           </Button>
         </div>
       </div>
@@ -276,25 +276,25 @@ export default function Layout({ children, currentPageName }) {
           <Link to={createPageUrl('Users')}>
             <Button variant="ghost" className="w-full justify-start">
               <Users className="mr-2 h-4 w-4" />
-              Users
+              {translations.users}
             </Button>
           </Link>
           <Link to={createPageUrl('Chat')}>
             <Button variant="ghost" className="w-full justify-start">
               <MessageSquare className="mr-2 h-4 w-4" />
-              Chat
+              {translations.chat}
             </Button>
           </Link>
           <Link to={createPageUrl('DataGenerator')}>
             <Button variant="ghost" className="w-full justify-start">
               <ListChecks className="mr-2 h-4 w-4" />
-              Data Generator
+              {translations.dataGenerator}
             </Button>
           </Link>
           <Link to={createPageUrl('Nutrition-Plan')}>
             <Button variant="ghost" className="w-full justify-start">
               <ListChecks className="mr-2 h-4 w-4" />
-              Nutrition Plan
+              {translations.nutritionPlan}
             </Button>
           </Link>
         </nav>
@@ -309,7 +309,7 @@ export default function Layout({ children, currentPageName }) {
         }
       )}>
         <div className="container mx-auto p-4">
-          {children}
+          <Outlet />
         </div>
       </main>
 

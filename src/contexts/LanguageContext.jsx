@@ -17,6 +17,7 @@ export const translations = {
     users: 'Users',
     chat: 'Chat',
     dataGenerator: 'Data Generator',
+    nutritionPlan: 'Nutrition Plan',
     
     // Common buttons and labels
     submit: 'Submit',
@@ -25,6 +26,7 @@ export const translations = {
     delete: 'Delete',
     signOut: 'Sign Out',
     retry: 'Retry',
+    edit: 'Edit',
     
     // Client selection
     selectClient: 'Select a client',
@@ -35,6 +37,39 @@ export const translations = {
     // Error messages
     connectionError: 'Connection Error',
     failedToLoad: 'Failed to load user data. Please try refreshing the page.',
+    
+    // Nutrition Plan
+    searchIngredient: 'Search ingredient...',
+    editPlan: 'Edit Plan',
+    personalizedNutritionPlan: 'Personalized Nutrition Plan',
+    addMeal: 'Add Meal',
+    addItem: 'Add Item',
+    addIngredient: 'Add Ingredient',
+    mealName: 'Meal Name',
+    itemName: 'Item Name',
+    portion: 'Portion',
+    protein: 'Protein',
+    fat: 'Fat',
+    energy: 'Energy',
+    calories: 'kcal',
+    nutritionValues: 'Nutrition Values',
+    ingredients: 'Ingredients',
+    alternatives: 'Alternatives',
+    overview: 'Overview',
+    meals: 'Meals',
+    nutrition: 'Nutrition',
+    recommendations: 'Recommendations',
+    clientInfo: 'Client Information',
+    name: 'Name',
+    age: 'Age',
+    height: 'Height',
+    weight: 'Weight',
+    dailyNutrition: 'Daily Nutrition',
+    carbs: 'Carbs',
+    supplements: 'Supplements',
+    hydration: 'Hydration',
+    sleep: 'Sleep',
+    general: 'General',
     
     // Profile
     specialization: 'Specialization',
@@ -56,6 +91,7 @@ export const translations = {
     users: 'משתמשים',
     chat: 'צ\'אט',
     dataGenerator: 'יצירת נתונים',
+    nutritionPlan: 'תוכנית תזונה',
     
     // Common buttons and labels
     submit: 'שלח',
@@ -64,6 +100,7 @@ export const translations = {
     delete: 'מחק',
     signOut: 'התנתק',
     retry: 'נסה שוב',
+    edit: 'ערוך',
     
     // Client selection
     selectClient: 'בחר לקוח',
@@ -74,6 +111,39 @@ export const translations = {
     // Error messages
     connectionError: 'שגיאת התחברות',
     failedToLoad: 'טעינת נתוני המשתמש נכשלה. אנא רענן את הדף.',
+    
+    // Nutrition Plan
+    searchIngredient: 'חפש מרכיב...',
+    editPlan: 'ערוך תוכנית',
+    personalizedNutritionPlan: 'תוכנית תזונה אישית',
+    addMeal: 'הוסף ארוחה',
+    addItem: 'הוסף פריט',
+    addIngredient: 'הוסף מרכיב',
+    mealName: 'שם הארוחה',
+    itemName: 'שם הפריט',
+    portion: 'מנה',
+    protein: 'חלבון',
+    fat: 'שומן',
+    energy: 'אנרגיה',
+    calories: 'קק״ל',
+    nutritionValues: 'ערכים תזונתיים',
+    ingredients: 'מרכיבים',
+    alternatives: 'חלופות',
+    overview: 'סקירה כללית',
+    meals: 'ארוחות',
+    nutrition: 'תזונה',
+    recommendations: 'המלצות',
+    clientInfo: 'פרטי מתאמן',
+    name: 'שם',
+    age: 'גיל',
+    height: 'גובה',
+    weight: 'משקל',
+    dailyNutrition: 'תזונה יומית',
+    carbs: 'פחמימות',
+    supplements: 'תוספי תזונה',
+    hydration: 'שתייה',
+    sleep: 'שינה',
+    general: 'כללי',
     
     // Profile
     specialization: 'התמחות',

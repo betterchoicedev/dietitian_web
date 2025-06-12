@@ -22,7 +22,7 @@ import ClientProfile from "./ClientProfile";
 
 import ClientMenu from "./ClientMenu";
 
-import DataGenerator from "./DataGenerator";
+import DataGenerator from "./Data-Generator";
 
 import AllChats from "./AllChats";
 
@@ -34,7 +34,7 @@ import EditClient from "./EditClient";
 
 import MenuView from "./MenuView";
 
-import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Route, Routes, useLocation, Navigate } from 'react-router-dom';
 
 const PAGES = {
     
@@ -95,44 +95,57 @@ function PagesContent() {
     return (
         <Layout currentPageName={currentPage}>
             <Routes>            
-                
-                    <Route path="/" element={<Menus />} />
-                
-                
+                <Route path="/" element={<Menus />} />
                 <Route path="/Menus" element={<Menus />} />
+                <Route path="/menus" element={<Navigate to="/Menus" replace />} />
                 
                 <Route path="/Chat" element={<Chat />} />
+                <Route path="/chat" element={<Navigate to="/Chat" replace />} />
                 
                 <Route path="/MenuCreate" element={<MenuCreate />} />
+                <Route path="/menucreate" element={<Navigate to="/MenuCreate" replace />} />
                 
                 <Route path="/Users" element={<Users />} />
+                <Route path="/users" element={<Navigate to="/Users" replace />} />
                 
                 <Route path="/Dashboard" element={<Dashboard />} />
+                <Route path="/dashboard" element={<Navigate to="/Dashboard" replace />} />
                 
                 <Route path="/Clients" element={<Clients />} />
+                <Route path="/clients" element={<Navigate to="/Clients" replace />} />
                 
                 <Route path="/Settings" element={<Settings />} />
+                <Route path="/settings" element={<Navigate to="/Settings" replace />} />
                 
                 <Route path="/MenuEdit" element={<MenuEdit />} />
+                <Route path="/menuedit" element={<Navigate to="/MenuEdit" replace />} />
                 
                 <Route path="/MenuAnalysis" element={<MenuAnalysis />} />
+                <Route path="/menuanalysis" element={<Navigate to="/MenuAnalysis" replace />} />
                 
                 <Route path="/ClientProfile" element={<ClientProfile />} />
+                <Route path="/clientprofile" element={<Navigate to="/ClientProfile" replace />} />
                 
                 <Route path="/ClientMenu" element={<ClientMenu />} />
+                <Route path="/clientmenu" element={<Navigate to="/ClientMenu" replace />} />
                 
-                <Route path="/DataGenerator" element={<DataGenerator />} />
+                <Route path="/Data-Generator" element={<DataGenerator />} />
+                <Route path="/data-generator" element={<Navigate to="/Data-Generator" replace />} />
                 
                 <Route path="/AllChats" element={<AllChats />} />
+                <Route path="/allchats" element={<Navigate to="/AllChats" replace />} />
                 
                 <Route path="/ApiClientMenu" element={<ApiClientMenu />} />
+                <Route path="/apiclientmenu" element={<Navigate to="/ApiClientMenu" replace />} />
                 
                 <Route path="/ApiMenus" element={<ApiMenus />} />
+                <Route path="/apimenus" element={<Navigate to="/ApiMenus" replace />} />
                 
                 <Route path="/EditClient" element={<EditClient />} />
+                <Route path="/editclient" element={<Navigate to="/EditClient" replace />} />
                 
                 <Route path="/MenuView" element={<MenuView />} />
-                
+                <Route path="/menuview" element={<Navigate to="/MenuView" replace />} />
             </Routes>
         </Layout>
     );

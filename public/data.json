@@ -34,7 +34,7 @@
 "meals": [
   {
     "mealName": "Pre-Morning",
-    "recommendedTime": "1000",
+    "recommendedTime": "06:30",
     "prepTimeMinutes": 1,
     "reminder": "Quick snack for energy boost.",
     "mealCalories": 300,
@@ -282,25 +282,44 @@
             "alternatives": []
           }
         ],
-        "alternatives": [
-          {
-            "itemName": "Protein shake",
-            "itemCalories": 180,
-            "itemProtein": "20g",
-            "itemFat": "5g",
-            "ingredients": [
-              {
-                "ingredientName": "Whey protein",
-                "brand": "ON Gold Standard",
-                "portionSI": "30g",
-                "portionUser": "1 scoop",
-                "protein": "20g",
-                "fat": "5g",
-                "alternatives": []
-              }
-            ]
-          }
-        ]
+       "alternatives": [
+  {
+    "itemName": "Yogurt",
+    "itemCalories": 180,
+    "itemProtein": "20g",
+    "itemFat": "5g",
+    "ingredients": [
+      {
+        "ingredientName": "Protein yogurt",
+        "brand": "Danone HiPro",
+        "portionSI": "200g",
+        "portionUser": "1 cup",
+        "protein": "20g",
+        "fat": "5g",
+        "alternatives": []
+      },
+      {
+        "ingredientName": "Granola",
+        "brand": "Generic",
+        "portionSI": "60g",
+        "portionUser": "6 tbsp",
+        "protein": "6g",
+        "fat": "10g",
+        "alternatives": []
+      },
+      {
+        "ingredientName": "Apple",
+        "brand": "Fresh",
+        "portionSI": "150g",
+        "portionUser": "1 medium apple",
+        "protein": "0.5g",
+        "fat": "0.3g",
+        "alternatives": []
+      }
+    ]
+  }
+]
+
       }
     ],
     "notes": []
@@ -315,7 +334,7 @@
     "mealFat": "15g",
     "items": [
       {
-        "itemName": "Tuna salad with whole grain bread",
+        "itemName": "Tuna with bread/pita/tortilla",
         "itemCalories": 450,
         "itemProtein": "35g",
         "itemFat": "15g",
@@ -333,7 +352,7 @@
             "ingredientName": "Whole grain bread",
             "brand": "Angel",
             "portionSI": "60g",
-            "portionUser": "2 slices",
+            "portionUser": "2 slices or 1 pita or 1 tortilla",
             "protein": "5g",
             "fat": "14g",
             "alternatives": []
@@ -341,18 +360,18 @@
         ],
         "alternatives": [
           {
-            "itemName": "Egg white omelet with vegetables",
-            "itemCalories": 420,
-            "itemProtein": "32g",
+            "itemName": "Stir-fry chicken with vegetables and carbs",
+            "itemCalories": 500,
+            "itemProtein": "40g",
             "itemFat": "12g",
             "ingredients": [
               {
-                "ingredientName": "Egg whites",
-                "brand": "Generic",
-                "portionSI": "240g",
-                "portionUser": "6 egg whites",
-                "protein": "26g",
-                "fat": "0g",
+                "ingredientName": "Chicken fillet or breast",
+                "brand": "Fresh",
+                "portionSI": "200–300g",
+                "portionUser": "2 fillet pieces or 3 breast pieces",
+                "protein": "40g",
+                "fat": "6g",
                 "alternatives": []
               },
               {
@@ -360,8 +379,17 @@
                 "brand": "Generic",
                 "portionSI": "150g",
                 "portionUser": "1.5 cups",
+                "protein": "3g",
+                "fat": "3g",
+                "alternatives": []
+              },
+              {
+                "ingredientName": "Carbohydrates (rice/pasta/couscous)",
+                "brand": "Generic",
+                "portionSI": "120g",
+                "portionUser": "10–12 tbsp",
                 "protein": "6g",
-                "fat": "12g",
+                "fat": "3g",
                 "alternatives": []
               }
             ]
@@ -369,7 +397,11 @@
         ]
       }
     ],
-    "notes": ["Avoid heavy carbs at dinner", "Eat at least 2 hours before bed"]
+    "notes": [
+      "Avoid heavy carbs at dinner",
+      "Eat at least 2 hours before bed"
+    ]
   }
+  
 ]
 } 

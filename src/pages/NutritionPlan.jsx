@@ -1,4 +1,239 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useLanguage } from '../contexts/LanguageContext';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+const IngredientSearch = () => {
+  const [query, setQuery] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchRef = useRef(null);
+
+  useEffect(() => {
+    const fetchSuggestions = async () => {
+      if (query.length < 2) {
+        setSuggestions([]);
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const response = await fetch(`http://localhost:3001/api/suggestions?query=${encodeURIComponent(query)}`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        const data = await response.json();
+        setSuggestions(data);
+      } catch (error) {
+        console.error('Error fetching suggestions:', error);
+        setSuggestions([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    const timeoutId = setTimeout(fetchSuggestions, 300);
+    return () => clearTimeout(timeoutId);
+  }, [query]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (searchRef.current && !searchRef.current.contains(event.target)) {
+        setShowSuggestions(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSelect = (suggestion) => {
+    setQuery(suggestion.hebrew || suggestion.english);
+    setShowSuggestions(false);
+  };
+
+  return (
+    <div ref={searchRef} className="relative w-full max-w-md">
+      <div className="relative">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setShowSuggestions(true);
+          }}
+          onFocus={() => setShowSuggestions(true)}
+          placeholder="חפש מרכיב..."
+          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        {isLoading && (
+          <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
+            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>
+          </div>
+        )}
+      </div>
+      
+      {showSuggestions && suggestions.length > 0 && (
+        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg">
+          <ul className="py-1">
+            {suggestions.map((suggestion, index) => (
+              <li
+                key={index}
+                onClick={() => handleSelect(suggestion)}
+                className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-right"
+              >
+                <div className="flex flex-col">
+                  <span className="font-medium">{suggestion.hebrew}</span>
+                  <span className="text-sm text-gray-500">{suggestion.english}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const EditableIngredient = ({ value, onChange, mealIndex, itemIndex, ingredientIndex }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(value);
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const inputRef = useRef(null);
+  const searchTimeoutRef = useRef(null);
+
+  // Keep editValue in sync with value prop
+  useEffect(() => {
+    setEditValue(value);
+  }, [value]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const fetchSuggestions = async (query) => {
+    if (query.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await fetch(`http://localhost:3001/api/suggestions?query=${encodeURIComponent(query)}`);
+      if (!response.ok) throw new Error('Network response was not ok');
+      const data = await response.json();
+      setSuggestions(data);
+    } catch (error) {
+      console.error('Error fetching suggestions:', error);
+      setSuggestions([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleInputChange = (e) => {
+    const newValue = e.target.value;
+    setEditValue(newValue);
+    setShowSuggestions(true);
+
+    // Clear existing timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    // Set new timeout for search
+    searchTimeoutRef.current = setTimeout(() => {
+      fetchSuggestions(newValue);
+    }, 300); // Reduced debounce time from default 500ms to 300ms
+  };
+
+  const handleSelect = async (suggestion) => {
+    try {
+      const response = await fetch(`http://localhost:3001/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`);
+      if (!response.ok) throw new Error('Failed to fetch nutrition data');
+      const nutritionData = await response.json();
+
+      // Update with all values including the new name
+      const updatedValues = {
+        ingredientName: suggestion.hebrew || suggestion.english,
+        protein: nutritionData.Protein ? `${nutritionData.Protein}g` : '0g',
+        fat: nutritionData.Total_lipid__fat_ ? `${nutritionData.Total_lipid__fat_}g` : '0g',
+        energy: nutritionData.Energy || 0,
+        portionUser: '100g',
+        portionSI: '100g'
+      };
+
+      onChange(updatedValues, mealIndex, itemIndex, ingredientIndex);
+      setEditValue(suggestion.hebrew || suggestion.english);
+      setShowSuggestions(false);
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Error fetching nutrition data:', error);
+    }
+  };
+
+  if (!isEditing) {
+    return (
+      <div
+        onClick={() => {
+          setIsEditing(true);
+          // Don't trigger search on initial edit
+          setSuggestions([]);
+          setShowSuggestions(false);
+        }}
+        className="cursor-pointer hover:bg-gray-50 px-2 py-1 rounded text-right"
+        dir="rtl"
+      >
+        {value}
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <input
+        ref={inputRef}
+        type="text"
+        value={editValue}
+        onChange={handleInputChange}
+        onFocus={() => setShowSuggestions(true)}
+        className="w-full px-2 py-1 border border-gray-300 rounded text-right"
+        dir="rtl"
+        autoFocus
+      />
+      
+      {isLoading && (
+        <div className="absolute left-2 top-1/2 transform -translate-y-1/2">
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+        </div>
+      )}
+      
+      {showSuggestions && suggestions.length > 0 && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg">
+          <ul className="py-1 max-h-60 overflow-auto">
+            {suggestions.map((suggestion, index) => (
+              <li
+                key={index}
+                onClick={() => handleSelect(suggestion)}
+                className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-right"
+              >
+                <div className="flex flex-col">
+                  <span className="font-medium">{suggestion.hebrew}</span>
+                  <span className="text-sm text-gray-500">{suggestion.english}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const EditableField = ({ value, onChange, type = "text" }) => {
   const [isEditing, setIsEditing] = useState(false);
@@ -41,489 +276,135 @@ const EditableField = ({ value, onChange, type = "text" }) => {
 };
 
 const NutritionPlan = () => {
-  const [nutritionData, setNutritionData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [expandedMeals, setExpandedMeals] = useState({});
-  const [editMode, setEditMode] = useState(false);
+  const { language, translations } = useLanguage();
+  const [data, setData] = useState(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [activeTab, setActiveTab] = useState("overview");
 
   useEffect(() => {
-    fetchNutritionData();
+    // Load data from public/data.json
+    fetch('/data.json')
+      .then(response => response.json())
+      .then(setData)
+      .catch(console.error);
   }, []);
 
-  const fetchNutritionData = async () => {
-    try {
-      const response = await fetch('/data.json');
-      if (!response.ok) {
-        throw new Error('Failed to fetch nutrition data');
-      }
-      const data = await response.json();
-      setNutritionData(data);
-      setLoading(false);
-    } catch (err) {
-      setError('שגיאה בטעינת הנתונים');
-      setLoading(false);
-    }
-  };
-
-  const saveNutritionData = async () => {
-    try {
-      const response = await fetch('/api/nutrition-plan', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(nutritionData),
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to save nutrition data');
-      }
-      
-      alert('השינויים נשמרו בהצלחה!');
-    } catch (err) {
-      alert('שגיאה בשמירת השינויים');
-      console.error('Error saving nutrition data:', err);
-    }
-  };
-
-  const toggleMeal = (mealIndex) => {
-    setExpandedMeals(prev => ({
-      ...prev,
-      [mealIndex]: !prev[mealIndex]
-    }));
-  };
-
-  const updateMealDetail = (mealIndex, field, value) => {
-    setNutritionData(prev => {
-      const newData = { ...prev };
-      newData.meals[mealIndex][field] = value;
-      return newData;
-    });
-  };
-
-  const updateIngredient = (mealIndex, itemIndex, ingredientIndex, field, value) => {
-    setNutritionData(prev => {
-      const newData = { ...prev };
-      newData.meals[mealIndex].items[itemIndex].ingredients[ingredientIndex][field] = value;
-      return newData;
-    });
-  };
-
-  const addIngredient = (mealIndex, itemIndex) => {
-    setNutritionData(prev => {
-      const newData = { ...prev };
-      newData.meals[mealIndex].items[itemIndex].ingredients.push({
-        ingredientName: "מרכיב חדש",
-        brand: "Generic",
-        portionSI: "0g",
-        portionUser: "0",
-        protein: "0g",
-        fat: "0g",
-        alternatives: []
-      });
-      return newData;
-    });
-  };
-
-  const removeIngredient = (mealIndex, itemIndex, ingredientIndex) => {
-    setNutritionData(prev => {
-      const newData = { ...prev };
-      newData.meals[mealIndex].items[itemIndex].ingredients.splice(ingredientIndex, 1);
-      return newData;
-    });
-  };
-
-  const formatTime = (time) => {
-    return `${time.slice(0, 2)}:${time.slice(2)}`;
-  };
-
-  if (loading) return <div className="text-center p-8">טוען...</div>;
-  if (error) return <div className="text-center text-red-600 p-8">{error}</div>;
-  if (!nutritionData) return null;
+  if (!data) return <div>Loading...</div>;
 
   return (
-    <div dir="rtl" className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header Section with Edit Toggle */}
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">{nutritionData.programName}</h1>
-          <div className="flex gap-4">
-            <button
-              onClick={() => setEditMode(!editMode)}
-              className={`px-4 py-2 rounded-lg ${
-                editMode 
-                  ? 'bg-gray-200 text-gray-700' 
-                  : 'bg-blue-600 text-white hover:bg-blue-700'
-              }`}
-            >
-              {editMode ? 'סיום עריכה' : 'ערוך תוכנית'}
-            </button>
-            {editMode && (
-              <button
-                onClick={saveNutritionData}
-                className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700"
-              >
-                שמור שינויים
-              </button>
-            )}
-          </div>
+    <div className="relative min-h-screen pb-16">
+      {/* Sticky header */}
+      <div className="sticky top-0 z-50 bg-white/80 backdrop-blur-sm border-b border-gray-200">
+        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
+          <h1 className="text-2xl font-semibold">
+            {data.programName}
+          </h1>
+          <button
+            onClick={() => setIsEditing(!isEditing)}
+            className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors"
+          >
+            {translations.editPlan}
+          </button>
         </div>
-        
-        {/* Client Info & Stats */}
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-blue-50 p-6 rounded-lg">
-              <h2 className="text-lg font-semibold text-blue-900 mb-2">פרטי מתאמן</h2>
-              <div className="space-y-2">
-                {editMode ? (
-                  <>
-                    <div>שם: <EditableField 
-                      value={nutritionData.client.name}
-                      onChange={(value) => setNutritionData(prev => ({
-                        ...prev,
-                        client: { ...prev.client, name: value }
-                      }))}
-                    /></div>
-                    <div>גיל: <EditableField 
-                      value={nutritionData.client.age}
-                      onChange={(value) => setNutritionData(prev => ({
-                        ...prev,
-                        client: { ...prev.client, age: parseInt(value) }
-                      }))}
-                      type="number"
-                    /></div>
-                    <div>גובה: <EditableField 
-                      value={nutritionData.client.height_cm}
-                      onChange={(value) => setNutritionData(prev => ({
-                        ...prev,
-                        client: { ...prev.client, height_cm: parseInt(value) }
-                      }))}
-                      type="number"
-                    /> ס״מ</div>
-                    <div>משקל: <EditableField 
-                      value={nutritionData.client.weight_kg}
-                      onChange={(value) => setNutritionData(prev => ({
-                        ...prev,
-                        client: { ...prev.client, weight_kg: parseInt(value) }
-                      }))}
-                      type="number"
-                    /> ק״ג</div>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-blue-800">שם: {nutritionData.client.name}</p>
-                    <p className="text-blue-800">גיל: {nutritionData.client.age}</p>
-                    <p className="text-blue-800">גובה: {nutritionData.client.height_cm} ס״מ</p>
-                    <p className="text-blue-800">משקל: {nutritionData.client.weight_kg} ק״ג</p>
-                  </>
-                )}
-              </div>
-            </div>
-            
-            <div className="bg-green-50 p-6 rounded-lg">
-              <h2 className="text-lg font-semibold text-green-900 mb-2">יעדים יומיים</h2>
-              {editMode ? (
-                <>
-                  <div className="mb-4">
-                    <EditableField 
-                      value={nutritionData.dailyTotalCalories}
-                      onChange={(value) => setNutritionData(prev => ({
-                        ...prev,
-                        dailyTotalCalories: parseInt(value)
-                      }))}
-                      type="number"
-                    /> קק״ל
-                  </div>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div>
-                      <p className="text-sm text-green-600">חלבון</p>
-                      <EditableField 
-                        value={nutritionData.macros.protein}
-                        onChange={(value) => setNutritionData(prev => ({
-                          ...prev,
-                          macros: { ...prev.macros, protein: value }
-                        }))}
-                      />
-                    </div>
-                    <div>
-                      <p className="text-sm text-green-600">פחמימות</p>
-                      <EditableField 
-                        value={nutritionData.macros.carbs}
-                        onChange={(value) => setNutritionData(prev => ({
-                          ...prev,
-                          macros: { ...prev.macros, carbs: value }
-                        }))}
-                      />
-                    </div>
-                    <div>
-                      <p className="text-sm text-green-600">שומן</p>
-                      <EditableField 
-                        value={nutritionData.macros.fat}
-                        onChange={(value) => setNutritionData(prev => ({
-                          ...prev,
-                          macros: { ...prev.macros, fat: value }
-                        }))}
-                      />
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="text-2xl font-bold text-green-700 mb-4">{nutritionData.dailyTotalCalories} קק״ל</p>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div>
-                      <p className="text-sm text-green-600">חלבון</p>
-                      <p className="font-bold text-green-700">{nutritionData.macros.protein}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-green-600">פחמימות</p>
-                      <p className="font-bold text-green-700">{nutritionData.macros.carbs}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-green-600">שומן</p>
-                      <p className="font-bold text-green-700">{nutritionData.macros.fat}</p>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
+      </div>
 
-            <div className="bg-purple-50 p-6 rounded-lg">
-              <h2 className="text-lg font-semibold text-purple-900 mb-2">המלצות</h2>
-              <div className="space-y-2 text-sm text-purple-700">
-                {editMode ? (
-                  Object.entries(nutritionData.recommendations).map(([key, value]) => (
-                    <div key={key}>
-                      <EditableField 
-                        value={value}
-                        onChange={(newValue) => setNutritionData(prev => ({
-                          ...prev,
-                          recommendations: { ...prev.recommendations, [key]: newValue }
-                        }))}
-                      />
-                    </div>
-                  ))
-                ) : (
-                  <>
-                    <p>{nutritionData.recommendations.supplements}</p>
-                    <p>{nutritionData.recommendations.hydration}</p>
-                    <p>{nutritionData.recommendations.sleep}</p>
-                    <p>{nutritionData.recommendations.general}</p>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
+      {/* Tabs Navigation */}
+      <div className="container mx-auto px-4 mt-6">
+        <Tabs defaultValue="overview" className="w-full" value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="overview">{translations.overview || 'Overview'}</TabsTrigger>
+            <TabsTrigger value="meals">{translations.meals || 'Meals'}</TabsTrigger>
+            <TabsTrigger value="nutrition">{translations.nutritionValues || 'Nutrition'}</TabsTrigger>
+            <TabsTrigger value="recommendations">{translations.recommendations || 'Recommendations'}</TabsTrigger>
+          </TabsList>
 
-          {/* Food Limitations */}
-          {nutritionData.client.food_limitations.length > 0 && (
-            <div className="bg-red-50 p-4 rounded-lg mt-4">
-              <h3 className="text-lg font-semibold text-red-900 mb-2">הגבלות תזונה</h3>
-              <div className="flex gap-2 flex-wrap">
-                {nutritionData.client.food_limitations.map((limitation, index) => (
-                  <div key={index} className="bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm flex items-center">
-                    {editMode ? (
-                      <>
-                        <EditableField 
-                          value={limitation}
-                          onChange={(value) => {
-                            setNutritionData(prev => {
-                              const newLimitations = [...prev.client.food_limitations];
-                              newLimitations[index] = value;
-                              return {
-                                ...prev,
-                                client: {
-                                  ...prev.client,
-                                  food_limitations: newLimitations
-                                }
-                              };
-                            });
-                          }}
-                        />
-                        <button
-                          onClick={() => {
-                            setNutritionData(prev => {
-                              const newLimitations = prev.client.food_limitations.filter((_, i) => i !== index);
-                              return {
-                                ...prev,
-                                client: {
-                                  ...prev.client,
-                                  food_limitations: newLimitations
-                                }
-                              };
-                            });
-                          }}
-                          className="ml-2 text-red-600 hover:text-red-800"
-                        >
-                          ✕
-                        </button>
-                      </>
-                    ) : (
-                      limitation
-                    )}
-                  </div>
-                ))}
-                {editMode && (
-                  <button
-                    onClick={() => {
-                      setNutritionData(prev => ({
-                        ...prev,
-                        client: {
-                          ...prev.client,
-                          food_limitations: [...prev.client.food_limitations, "הגבלה חדשה"]
-                        }
-                      }));
-                    }}
-                    className="bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm hover:bg-red-200"
-                  >
-                    + הוסף הגבלה
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Meals Section */}
-        <div className="space-y-6">
-          {nutritionData.meals.map((meal, mealIndex) => (
-            <div key={mealIndex} className="bg-white rounded-lg shadow-sm overflow-hidden">
-              <div 
-                className="p-6 cursor-pointer hover:bg-gray-50 transition-colors"
-                onClick={() => toggleMeal(mealIndex)}
-              >
-                <div className="flex justify-between items-center">
+          <TabsContent value="overview" className="mt-6">
+            <div className="grid gap-4">
+              <div className="p-6 bg-white rounded-lg shadow">
+                <h2 className="text-xl font-semibold mb-4">{translations.clientInfo || 'Client Information'}</h2>
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <div className="flex items-center gap-3">
-                      {editMode ? (
-                        <EditableField 
-                          value={meal.mealName}
-                          onChange={(value) => updateMealDetail(mealIndex, 'mealName', value)}
-                        />
-                      ) : (
-                        <h3 className="text-xl font-semibold text-gray-900">{meal.mealName}</h3>
-                      )}
-                      <span className="text-sm bg-gray-100 text-gray-600 px-2 py-1 rounded">
-                        {editMode ? (
-                          <EditableField 
-                            value={meal.recommendedTime}
-                            onChange={(value) => updateMealDetail(mealIndex, 'recommendedTime', value)}
-                          />
-                        ) : (
-                          formatTime(meal.recommendedTime)
-                        )}
-                      </span>
-                    </div>
-                    <p className="text-gray-600 mt-1">
-                      {editMode ? (
-                        <>
-                          <EditableField 
-                            value={meal.mealCalories}
-                            onChange={(value) => updateMealDetail(mealIndex, 'mealCalories', parseInt(value))}
-                            type="number"
-                          /> קק״ל •
-                          חלבון: <EditableField 
-                            value={meal.mealProtein}
-                            onChange={(value) => updateMealDetail(mealIndex, 'mealProtein', value)}
-                          /> •
-                          שומן: <EditableField 
-                            value={meal.mealFat}
-                            onChange={(value) => updateMealDetail(mealIndex, 'mealFat', value)}
-                          />
-                        </>
-                      ) : (
-                        `${meal.mealCalories} קק״ל • חלבון: ${meal.mealProtein} • שומן: ${meal.mealFat}`
-                      )}
-                    </p>
+                    <p className="text-gray-600">{translations.name || 'Name'}</p>
+                    <p className="font-medium">{data.client.name}</p>
                   </div>
-                  <button className="text-blue-600 hover:text-blue-800 flex items-center gap-2">
-                    {expandedMeals[mealIndex] ? 'הסתר פרטים' : 'הצג פרטים'}
-                    <span className="transform transition-transform duration-200">
-                      {expandedMeals[mealIndex] ? '▼' : '▶'}
-                    </span>
-                  </button>
+                  <div>
+                    <p className="text-gray-600">{translations.age || 'Age'}</p>
+                    <p className="font-medium">{data.client.age}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">{translations.height || 'Height'}</p>
+                    <p className="font-medium">{data.client.height_cm} cm</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">{translations.weight || 'Weight'}</p>
+                    <p className="font-medium">{data.client.weight_kg} kg</p>
+                  </div>
                 </div>
               </div>
+            </div>
+          </TabsContent>
 
-              {expandedMeals[mealIndex] && (
-                <div className="border-t border-gray-100 p-6">
-                  {/* Meal Details */}
-                  <div className="bg-gray-50 p-4 rounded-lg mb-6">
-                    {editMode ? (
-                      <EditableField 
-                        value={meal.reminder}
-                        onChange={(value) => updateMealDetail(mealIndex, 'reminder', value)}
-                      />
-                    ) : (
-                      <p className="text-gray-600 mb-3">{meal.reminder}</p>
-                    )}
-                    <div className="flex gap-4 text-sm">
-                      <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full">
-                        זמן הכנה: {editMode ? (
-                          <EditableField 
-                            value={meal.prepTimeMinutes}
-                            onChange={(value) => updateMealDetail(mealIndex, 'prepTimeMinutes', parseInt(value))}
-                            type="number"
-                          />
-                        ) : (
-                          meal.prepTimeMinutes
-                        )} דקות
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Items */}
-                  {meal.items.map((item, itemIndex) => (
-                    <div key={itemIndex} className="mb-8 last:mb-0">
-                      <div className="border-b border-gray-200 pb-4 mb-4">
-                        {editMode ? (
-                          <EditableField 
-                            value={item.itemName}
-                            onChange={(value) => {
-                              setNutritionData(prev => {
-                                const newData = { ...prev };
-                                newData.meals[mealIndex].items[itemIndex].itemName = value;
-                                return newData;
-                              });
-                            }}
-                          />
-                        ) : (
-                          <h4 className="text-lg font-medium text-gray-900 mb-2">{item.itemName}</h4>
-                        )}
+          <TabsContent value="meals" className="mt-6">
+            <div className="space-y-6">
+              {data.meals?.map((meal, mealIndex) => (
+                <div key={mealIndex} className="bg-white rounded-lg shadow-sm overflow-hidden">
+                  <div className="p-6 border-b border-gray-100">
+                    <div className="flex justify-between items-start">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-3">
+                          {isEditing ? (
+                            <EditableField 
+                              value={meal.mealName}
+                              onChange={(value) => {
+                                setData(prev => {
+                                  const newData = { ...prev };
+                                  newData.meals[mealIndex].mealName = value;
+                                  return newData;
+                                });
+                              }}
+                            />
+                          ) : (
+                            <h3 className="text-xl font-semibold text-gray-900">{meal.mealName}</h3>
+                          )}
+                          <span className="text-sm bg-gray-100 text-gray-600 px-2 py-1 rounded">
+                            {meal.recommendedTime}
+                          </span>
+                        </div>
                         <div className="flex gap-4 text-sm text-gray-600">
-                          {editMode ? (
+                          {isEditing ? (
                             <>
-                              <EditableField 
-                                value={item.itemCalories}
-                                onChange={(value) => {
-                                  setNutritionData(prev => {
-                                    const newData = { ...prev };
-                                    newData.meals[mealIndex].items[itemIndex].itemCalories = parseInt(value);
-                                    return newData;
-                                  });
-                                }}
-                                type="number"
-                              /> קק״ל
-                              <span>חלבון: 
+                              <span>
                                 <EditableField 
-                                  value={item.itemProtein}
+                                  value={meal.mealCalories}
                                   onChange={(value) => {
-                                    setNutritionData(prev => {
+                                    setData(prev => {
                                       const newData = { ...prev };
-                                      newData.meals[mealIndex].items[itemIndex].itemProtein = value;
+                                      newData.meals[mealIndex].mealCalories = parseInt(value);
+                                      return newData;
+                                    });
+                                  }}
+                                  type="number"
+                                /> {translations.calories}
+                              </span>
+                              <span>
+                                {translations.protein}: <EditableField 
+                                  value={meal.mealProtein}
+                                  onChange={(value) => {
+                                    setData(prev => {
+                                      const newData = { ...prev };
+                                      newData.meals[mealIndex].mealProtein = value;
                                       return newData;
                                     });
                                   }}
                                 />
                               </span>
-                              <span>שומן: 
-                                <EditableField 
-                                  value={item.itemFat}
+                              <span>
+                                {translations.fat}: <EditableField 
+                                  value={meal.mealFat}
                                   onChange={(value) => {
-                                    setNutritionData(prev => {
+                                    setData(prev => {
                                       const newData = { ...prev };
-                                      newData.meals[mealIndex].items[itemIndex].itemFat = value;
+                                      newData.meals[mealIndex].mealFat = value;
                                       return newData;
                                     });
                                   }}
@@ -532,158 +413,210 @@ const NutritionPlan = () => {
                             </>
                           ) : (
                             <>
-                              <span>{item.itemCalories} קק״ל</span>
-                              <span>חלבון: {item.itemProtein}</span>
-                              <span>שומן: {item.itemFat}</span>
+                              <span>{meal.mealCalories} {translations.calories}</span>
+                              <span>{translations.protein}: {meal.mealProtein}</span>
+                              <span>{translations.fat}: {meal.mealFat}</span>
                             </>
                           )}
                         </div>
                       </div>
+                    </div>
+                  </div>
 
-                      {/* Ingredients */}
-                      <div className="mb-6">
-                        <div className="flex justify-between items-center mb-3">
-                          <h5 className="text-md font-medium text-gray-900">מרכיבים:</h5>
-                          {editMode && (
-                            <button
-                              onClick={() => addIngredient(mealIndex, itemIndex)}
-                              className="text-blue-600 hover:text-blue-800 text-sm"
-                            >
-                              + הוסף מרכיב
-                            </button>
-                          )}
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {item.ingredients.map((ingredient, ingredientIndex) => (
-                            <div key={ingredientIndex} className="bg-gray-50 p-4 rounded-lg">
-                              {editMode ? (
-                                <div className="flex justify-between">
-                                  <EditableField 
-                                    value={ingredient.ingredientName}
-                                    onChange={(value) => updateIngredient(mealIndex, itemIndex, ingredientIndex, 'ingredientName', value)}
-                                  />
-                                  <button
-                                    onClick={() => removeIngredient(mealIndex, itemIndex, ingredientIndex)}
-                                    className="text-red-600 hover:text-red-800"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ) : (
-                                <p className="font-medium text-gray-900">{ingredient.ingredientName}</p>
-                              )}
-                              <div className="mt-2 space-y-1 text-sm text-gray-600">
-                                {editMode ? (
-                                  <>
-                                    <div>מותג: 
-                                      <EditableField 
-                                        value={ingredient.brand}
-                                        onChange={(value) => updateIngredient(mealIndex, itemIndex, ingredientIndex, 'brand', value)}
-                                      />
-                                    </div>
-                                    <div>מנה: 
-                                      <EditableField 
-                                        value={ingredient.portionUser}
-                                        onChange={(value) => updateIngredient(mealIndex, itemIndex, ingredientIndex, 'portionUser', value)}
-                                      />
-                                    </div>
-                                    <div className="flex gap-4 mt-2">
-                                      <span>חלבון: 
-                                        <EditableField 
-                                          value={ingredient.protein}
-                                          onChange={(value) => updateIngredient(mealIndex, itemIndex, ingredientIndex, 'protein', value)}
-                                        />
-                                      </span>
-                                      <span>שומן: 
-                                        <EditableField 
-                                          value={ingredient.fat}
-                                          onChange={(value) => updateIngredient(mealIndex, itemIndex, ingredientIndex, 'fat', value)}
-                                        />
-                                      </span>
-                                    </div>
-                                  </>
-                                ) : (
-                                  <>
-                                    <p>מותג: {ingredient.brand}</p>
-                                    <p>מנה: {ingredient.portionUser}</p>
-                                    <div className="flex gap-4 mt-2">
-                                      <span>חלבון: {ingredient.protein}</span>
-                                      <span>שומן: {ingredient.fat}</span>
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Notes */}
-                      {meal.notes && meal.notes.length > 0 && (
-                        <div className="mt-6 bg-yellow-50 p-4 rounded-lg">
-                          <div className="flex justify-between items-center mb-2">
-                            <h5 className="text-md font-medium text-yellow-900">הערות:</h5>
-                            {editMode && (
-                              <button
-                                onClick={() => {
-                                  setNutritionData(prev => {
+                  {/* Meal Items */}
+                  <div className="divide-y divide-gray-100">
+                    {meal.items?.map((item, itemIndex) => (
+                      <div key={itemIndex} className="p-6">
+                        <div className="mb-4">
+                          <h4 className="text-lg font-medium text-gray-900 mb-2">
+                            {isEditing ? (
+                              <EditableField 
+                                value={item.itemName}
+                                onChange={(value) => {
+                                  setData(prev => {
                                     const newData = { ...prev };
-                                    if (!newData.meals[mealIndex].notes) {
-                                      newData.meals[mealIndex].notes = [];
-                                    }
-                                    newData.meals[mealIndex].notes.push("הערה חדשה");
+                                    newData.meals[mealIndex].items[itemIndex].itemName = value;
                                     return newData;
                                   });
                                 }}
-                                className="text-yellow-600 hover:text-yellow-800 text-sm"
-                              >
-                                + הוסף הערה
-                              </button>
-                            )}
+                              />
+                            ) : item.itemName}
+                          </h4>
+                          <div className="flex gap-4 text-sm text-gray-600">
+                            <span>{item.itemCalories} {translations.calories}</span>
+                            <span>{translations.protein}: {item.itemProtein}</span>
+                            <span>{translations.fat}: {item.itemFat}</span>
                           </div>
-                          <ul className="list-disc list-inside text-yellow-800">
-                            {meal.notes.map((note, noteIndex) => (
-                              <li key={noteIndex} className="flex items-center gap-2">
-                                {editMode ? (
-                                  <>
-                                    <EditableField 
-                                      value={note}
-                                      onChange={(value) => {
-                                        setNutritionData(prev => {
-                                          const newData = { ...prev };
-                                          newData.meals[mealIndex].notes[noteIndex] = value;
-                                          return newData;
-                                        });
-                                      }}
-                                    />
-                                    <button
-                                      onClick={() => {
-                                        setNutritionData(prev => {
-                                          const newData = { ...prev };
-                                          newData.meals[mealIndex].notes.splice(noteIndex, 1);
-                                          return newData;
-                                        });
-                                      }}
-                                      className="text-yellow-600 hover:text-yellow-800"
-                                    >
-                                      ✕
-                                    </button>
-                                  </>
-                                ) : (
-                                  note
-                                )}
-                              </li>
-                            ))}
-                          </ul>
                         </div>
-                      )}
-                    </div>
-                  ))}
+
+                        {/* Ingredients */}
+                        <div className="mb-6">
+                          <h5 className="text-md font-medium text-gray-900 mb-3">{translations.ingredients}:</h5>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {item.ingredients?.map((ingredient, ingredientIndex) => (
+                              <div key={ingredientIndex} className="bg-gray-50 p-4 rounded-lg">
+                                {isEditing ? (
+                                  <EditableIngredient 
+                                    value={ingredient.ingredientName}
+                                    onChange={(newValues, mealIndex, itemIndex, ingredientIndex) => {
+                                      setData(prev => {
+                                        const newData = { ...prev };
+                                        const item = newData.meals[mealIndex].items[itemIndex];
+                                        const targetIngredient = item.ingredients[ingredientIndex];
+                                        Object.assign(targetIngredient, newValues);
+                                        
+                                        // Update item totals
+                                        const ingredients = item.ingredients;
+                                        item.itemCalories = ingredients.reduce((sum, ing) => sum + (ing.energy || 0), 0);
+                                        item.itemProtein = ingredients.reduce((sum, ing) => sum + (parseFloat(ing.protein) || 0), 0).toFixed(1) + 'g';
+                                        item.itemFat = ingredients.reduce((sum, ing) => sum + (parseFloat(ing.fat) || 0), 0).toFixed(1) + 'g';
+                                        
+                                        // Update meal totals
+                                        const items = newData.meals[mealIndex].items;
+                                        newData.meals[mealIndex].mealCalories = items.reduce((sum, item) => sum + (item.itemCalories || 0), 0);
+                                        newData.meals[mealIndex].mealProtein = items.reduce((sum, item) => sum + (parseFloat(item.itemProtein) || 0), 0).toFixed(1) + 'g';
+                                        newData.meals[mealIndex].mealFat = items.reduce((sum, item) => sum + (parseFloat(item.itemFat) || 0), 0).toFixed(1) + 'g';
+                                        
+                                        return newData;
+                                      });
+                                    }}
+                                    mealIndex={mealIndex}
+                                    itemIndex={itemIndex}
+                                    ingredientIndex={ingredientIndex}
+                                  />
+                                ) : (
+                                  <p className="font-medium text-gray-900">{ingredient.ingredientName}</p>
+                                )}
+                                <div className="mt-2 space-y-1 text-sm text-gray-600">
+                                  <p>{translations.portion}: {ingredient.portionUser}</p>
+                                  <div className="flex gap-4 mt-2">
+                                    <span>{translations.protein}: {ingredient.protein}</span>
+                                    <span>{translations.fat}: {ingredient.fat}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Alternative Items */}
+                        {item.alternatives && item.alternatives.length > 0 && (
+                          <div className="mt-6 bg-blue-50 p-4 rounded-lg">
+                            <h5 className="text-lg font-medium text-blue-900 mb-4">{translations.alternatives || 'Alternatives'}:</h5>
+                            <div className="space-y-4">
+                              {item.alternatives.map((altItem, altIndex) => (
+                                <div key={altIndex} className="bg-white p-4 rounded-lg border border-blue-100">
+                                  <div className="mb-3">
+                                    <h6 className="text-md font-medium text-blue-900">
+                                      {isEditing ? (
+                                        <EditableField 
+                                          value={altItem.itemName}
+                                          onChange={(value) => {
+                                            setData(prev => {
+                                              const newData = { ...prev };
+                                              newData.meals[mealIndex].items[itemIndex].alternatives[altIndex].itemName = value;
+                                              return newData;
+                                            });
+                                          }}
+                                        />
+                                      ) : altItem.itemName}
+                                    </h6>
+                                    <div className="flex gap-4 text-sm text-blue-700 mt-1">
+                                      <span>{altItem.itemCalories} {translations.calories}</span>
+                                      <span>{translations.protein}: {altItem.itemProtein}</span>
+                                      <span>{translations.fat}: {altItem.itemFat}</span>
+                                    </div>
+                                  </div>
+
+                                  {/* Alternative Ingredients */}
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {altItem.ingredients?.map((altIngredient, altIngredientIndex) => (
+                                      <div key={altIngredientIndex} className="bg-blue-50 p-3 rounded-lg">
+                                        {isEditing ? (
+                                          <EditableIngredient 
+                                            value={altIngredient.ingredientName}
+                                            onChange={(newValues) => {
+                                              setData(prev => {
+                                                const newData = { ...prev };
+                                                const targetIngredient = newData.meals[mealIndex].items[itemIndex].alternatives[altIndex].ingredients[altIngredientIndex];
+                                                Object.assign(targetIngredient, newValues);
+                                                return newData;
+                                              });
+                                            }}
+                                            mealIndex={mealIndex}
+                                            itemIndex={itemIndex}
+                                            ingredientIndex={altIngredientIndex}
+                                          />
+                                        ) : (
+                                          <p className="font-medium text-blue-900">{altIngredient.ingredientName}</p>
+                                        )}
+                                        <div className="mt-1 space-y-1 text-sm text-blue-700">
+                                          <p>{translations.portion}: {altIngredient.portionUser}</p>
+                                          <div className="flex gap-4">
+                                            <span>{translations.protein}: {altIngredient.protein}</span>
+                                            <span>{translations.fat}: {altIngredient.fat}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              )}
+              ))}
             </div>
-          ))}
-        </div>
+          </TabsContent>
+
+          <TabsContent value="nutrition" className="mt-6">
+            <div className="p-6 bg-white rounded-lg shadow">
+              <h2 className="text-xl font-semibold mb-4">{translations.dailyNutrition || 'Daily Nutrition'}</h2>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <p className="text-gray-600">{translations.protein || 'Protein'}</p>
+                  <p className="text-2xl font-semibold">{data.macros.protein}</p>
+                </div>
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <p className="text-gray-600">{translations.fat || 'Fat'}</p>
+                  <p className="text-2xl font-semibold">{data.macros.fat}</p>
+                </div>
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <p className="text-gray-600">{translations.carbs || 'Carbs'}</p>
+                  <p className="text-2xl font-semibold">{data.macros.carbs}</p>
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="recommendations" className="mt-6">
+            <div className="p-6 bg-white rounded-lg shadow">
+              <h2 className="text-xl font-semibold mb-4">{translations.recommendations || 'Recommendations'}</h2>
+              <div className="space-y-4">
+                <div>
+                  <h3 className="font-medium text-gray-700">{translations.supplements || 'Supplements'}</h3>
+                  <p className="mt-1 text-gray-600">{data.recommendations.supplements}</p>
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-700">{translations.hydration || 'Hydration'}</h3>
+                  <p className="mt-1 text-gray-600">{data.recommendations.hydration}</p>
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-700">{translations.sleep || 'Sleep'}</h3>
+                  <p className="mt-1 text-gray-600">{data.recommendations.sleep}</p>
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-700">{translations.general || 'General'}</h3>
+                  <p className="mt-1 text-gray-600">{data.recommendations.general}</p>
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );

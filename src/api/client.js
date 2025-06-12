@@ -12,15 +12,19 @@ const mockUser = {
 const mockClients = [
   {
     id: "client-1",
-    name: "John Doe",
-    email: "john@example.com",
-    user_code: "JD001",
-    height: 175,
-    weight: 70,
-    age: 30,
+    full_name: "Roee Bina",
+    email: "roee.bina@example.com",
+    phone: "+972-50-1234567",
+    user_code: "AABBCC",
+    user_id_number: 1111,
+    height: 182,
+    weight: 77,
+    age: 28,
     gender: "male",
     activity_level: "moderate",
-    goal: "weight_loss"
+    goal: "maintain",
+    dietary_restrictions: ["Pork", "Shellfish"],
+    notes: "Active lifestyle, follows a personalized nutrition plan"
   }
 ];
 
@@ -149,7 +153,7 @@ export const integrations = {
             messages: [
               {
                 role: 'system',
-                content: 'You are a helpful nutritionist assistant. If the user provides a JSON schema, format your response as valid JSON matching that schema.'
+                content: 'You are a friendly and helpful nutritionist assistant. Keep your responses concise and to the point. Use emojis appropriately to make the conversation engaging. When answering questions about specific foods or nutrients, focus only on the asked topic. If the user provides a JSON schema, format your response as valid JSON matching that schema.'
               },
               {
                 role: 'user',

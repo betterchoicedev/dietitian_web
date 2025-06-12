@@ -10,13 +10,14 @@ import Chat from '@/pages/Chat';
 import DataGenerator from '@/pages/DataGenerator';
 import NutritionPlan from '@/pages/NutritionPlan';
 import '@/styles/rtl.css';
+import MenuCreate from './pages/MenuCreate';
 
 // Protected Route component
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
   
   if (!user) {
-    return <Navigate to="/login" />;
+    return <Navigate to="/login" replace />;
   }
   
   return children;
@@ -27,7 +28,7 @@ function PublicRoute({ children }) {
   const { user } = useAuth();
   
   if (user) {
-    return <Navigate to="/" />;
+    return <Navigate to="/" replace />;
   }
   
   return children;
@@ -51,42 +52,40 @@ function App() {
               </PublicRoute>
             } />
             
-            {/* Protected Routes */}
-            <Route path="/" element={
-              <ProtectedRoute>
-                <Layout>
+            {/* Protected Routes - All wrapped in Layout */}
+            <Route element={<Layout />}>
+              <Route path="/" element={
+                <ProtectedRoute>
                   <Dashboard />
-                </Layout>
-              </ProtectedRoute>
-            } />
-            <Route path="/users" element={
-              <ProtectedRoute>
-                <Layout>
+                </ProtectedRoute>
+              } />
+              <Route path="/users" element={
+                <ProtectedRoute>
                   <Users />
-                </Layout>
-              </ProtectedRoute>
-            } />
-            <Route path="/chat" element={
-              <ProtectedRoute>
-                <Layout>
+                </ProtectedRoute>
+              } />
+              <Route path="/chat" element={
+                <ProtectedRoute>
                   <Chat />
-                </Layout>
-              </ProtectedRoute>
-            } />
-            <Route path="/data-generator" element={
-              <ProtectedRoute>
-                <Layout>
+                </ProtectedRoute>
+              } />
+              <Route path="/data-generator" element={
+                <ProtectedRoute>
                   <DataGenerator />
-                </Layout>
-              </ProtectedRoute>
-            } />
-            <Route path="/nutrition-plan" element={
-              <ProtectedRoute>
-                <Layout>
+                </ProtectedRoute>
+              } />
+              <Route path="/nutrition-plan" element={
+                <ProtectedRoute>
                   <NutritionPlan />
-                </Layout>
-              </ProtectedRoute>
-            } />
+                </ProtectedRoute>
+              } />
+              <Route path="/MenuCreate" element={
+                <ProtectedRoute>
+                  <MenuCreate />
+                </ProtectedRoute>
+              } />
+            </Route>
+            
             {/* Redirect /dashboard to / */}
             <Route path="/dashboard" element={<Navigate to="/" replace />} />
           </Routes>
