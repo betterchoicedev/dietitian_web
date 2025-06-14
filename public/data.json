@@ -21,7 +21,7 @@
   "age": 28,
   "height_cm": 182,
   "weight_kg": 77,
-  "food_allergies": [],
+  "food_allergies": [""],
   "food_limitations": [
     "Pork",
     "Shellfish"

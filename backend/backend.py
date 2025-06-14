@@ -58,9 +58,24 @@ def require_api_key(f):
 def generate_menu_with_azure(user_preferences):
     try:
         system_prompt = (
-            "You are a professional dietitian AI. Based on the user's preferences, generate a personalized meal plan with alternative meals and ingredients for each meal, and for each meal give me the meal calories, protein, and fat "
-            "for one day. Respond ONLY in valid JSON format."
-        )
+    "You are a professional dietitian AI. Based on the user's preferences, generate a personalized one-day meal plan. "
+    "The plan must include the following five meals: Breakfast, Morning Snack, Lunch, Afternoon Snack, and Dinner.\n\n"
+    "Each entry in the meal plan must follow this structure:\n"
+    "- `meal`: the name of the meal (e.g., 'Breakfast', 'Lunch') — do NOT use `name` here\n"
+    "- `main`: the main dish, with:\n"
+    "   - `name`: the dish name\n"
+    "   - `ingredients`: a list where each ingredient is an object using ONLY these keys: `item`, `quantity`, and `unit`. "
+    "Do NOT use `ingredient` as a key.\n"
+    "   - `nutrition`: an object with numeric values for `calories`, `protein`, `fat`, and `carbs`\n"
+    "- `alternative`: same structure as `main`\n\n"
+    "At the top level of the JSON, include:\n"
+    "- `meal_plan`: the list of all meals described above\n"
+    "- `totals`: an object summarizing total daily macros using ONLY the keys: `calories`, `protein`, `fat`, and `carbs`\n"
+    "- `note`: a string providing advice or tips related to the plan\n\n"
+    "The response must be strictly formatted as valid JSON. Do not return text, explanations, or additional formatting outside the JSON."
+)
+
+
 
         user_prompt = {
             "role": "user",

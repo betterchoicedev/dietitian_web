@@ -34,7 +34,7 @@ const MenuCreate = () => {
         }
       } else if (data.generated_menu) {
         try {
-          processedMenu = typeof data.generated_menu === 'string' 
+          processedMenu = typeof data.generated_menu === 'string'
             ? JSON.parse(data.generated_menu)
             : data.generated_menu;
         } catch (e) {
@@ -48,17 +48,17 @@ const MenuCreate = () => {
       if (!processedMenu) {
         throw new Error('Invalid menu structure');
       }
-      
+
       const meals = processedMenu.meal_plan || processedMenu.meals;
       if (!meals || !Array.isArray(meals)) {
         throw new Error('Invalid menu structure - missing meals array');
       }
-      
+
       setMenu({
         meals,
         dailyTotals: processedMenu.daily_totals || null,
         note: processedMenu.note || ''
-      });      
+      });
     } catch (err) {
       console.error('Error fetching menu:', err);
       setError(err.message || 'Something went wrong');
@@ -96,6 +96,7 @@ const MenuCreate = () => {
   };
 
   const renderMealOption = (option, isAlternative = false) => {
+    console.log("DEBUG - Ingredients for", option.name, option.ingredients);
     if (!option) return null;
 
     return (
@@ -104,19 +105,25 @@ const MenuCreate = () => {
           <h4 className="font-medium text-gray-900">{option.name}</h4>
           <div className="flex gap-2">
             <Badge variant="outline" className={`${isAlternative ? 'bg-blue-100 border-blue-200' : 'bg-green-100 border-green-200'}`}>
-              {option.calories} kcal
+              {option.nutrition?.calories} kcal
             </Badge>
           </div>
         </div>
-        
-        <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+
+        <div className="grid grid-cols-3 gap-4 mb-4 text-sm">
           <div>
             <p className="text-gray-500">Protein</p>
-            <p className="font-medium">{option.protein}g</p>
+            <p className="font-medium">{option.nutrition?.protein}g</p>
           </div>
           <div>
             <p className="text-gray-500">Fat</p>
-            <p className="font-medium">{option.fat}g</p>
+            <p className="font-medium">{option.nutrition?.fat}g</p>
+          </div>
+          <div>
+            <p className="text-gray-500">Carbs</p>
+            <p className="font-medium">
+              {option.nutrition?.carbs !== undefined ? `${option.nutrition.carbs}g` : 'N/A'}
+            </p>
           </div>
         </div>
 
@@ -127,7 +134,9 @@ const MenuCreate = () => {
               {option.ingredients.map((ingredient, idx) => (
                 <li key={idx} className="flex items-start gap-2 text-sm">
                   <span className="w-1.5 h-1.5 rounded-full bg-gray-400 mt-2" />
-                  <span className="text-gray-600">{ingredient}</span>
+                  <span className="text-gray-600">
+                    {ingredient.item}: {ingredient.quantity} {ingredient.unit}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -136,6 +145,7 @@ const MenuCreate = () => {
       </div>
     );
   };
+
 
   return (
     <div className="space-y-6">
@@ -161,8 +171,8 @@ const MenuCreate = () => {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center py-6">
-          <Button 
-            onClick={fetchMenu} 
+          <Button
+            onClick={fetchMenu}
             disabled={loading}
             className="bg-blue-600 hover:bg-blue-700"
           >
@@ -194,14 +204,14 @@ const MenuCreate = () => {
                   <div className="p-4 bg-blue-50 rounded-lg">
                     <p className="text-sm text-blue-600 font-medium">Protein</p>
                     <p className="text-2xl font-bold text-blue-700">
-                      {menu.dailyTotals.protein}
+                      {menu.dailyTotals?.protein}
                       <span className="text-sm font-normal text-blue-600 ml-1">g</span>
                     </p>
                   </div>
                   <div className="p-4 bg-yellow-50 rounded-lg">
                     <p className="text-sm text-yellow-600 font-medium">Fat</p>
                     <p className="text-2xl font-bold text-yellow-700">
-                      {menu.dailyTotals.fat}
+                      {menu.dailyTotals?.fat}
                       <span className="text-sm font-normal text-yellow-600 ml-1">g</span>
                     </p>
                   </div>
@@ -278,3 +288,4 @@ const MenuCreate = () => {
 };
 
 export default MenuCreate;
+
