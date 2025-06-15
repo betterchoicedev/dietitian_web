@@ -90,15 +90,43 @@ export const entities = {
       return { id: `client-${Date.now()}`, ...data };
     },
     get: async (id) => {
-      const res = await fetch('/client.json');
-      const data = await res.json();
-      return data;
+      try {
+        const res = await fetch('/client.json');
+        if (!res.ok) {
+          throw new Error('Failed to fetch client data');
+        }
+        const data = await res.json();
+        return data;
+      } catch (error) {
+        console.error('Error fetching client:', error);
+        return null;
+      }
     },
     list: async () => {
-      return mockClients;
+      try {
+        const res = await fetch('/client.json');
+        if (!res.ok) {
+          throw new Error('Failed to fetch client data');
+        }
+        const data = await res.json();
+        return [data];
+      } catch (error) {
+        console.error('Error fetching clients:', error);
+        return [];
+      }
     },
     filter: async (query) => {
-      return mockClients;
+      try {
+        const res = await fetch('/client.json');
+        if (!res.ok) {
+          throw new Error('Failed to fetch client data');
+        }
+        const data = await res.json();
+        return [data];
+      } catch (error) {
+        console.error('Error fetching clients:', error);
+        return [];
+      }
     },
     update: async (id, data) => {
       return { id, ...data };
