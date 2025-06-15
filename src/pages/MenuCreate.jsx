@@ -49,16 +49,23 @@ const MenuCreate = () => {
         throw new Error('Invalid menu structure');
       }
 
+      console.log("Raw processed menu:", processedMenu);
+      console.log("Totals from server:", processedMenu.totals);
+      console.log("Daily totals from server:", processedMenu.daily_totals);
+
       const meals = processedMenu.meal_plan || processedMenu.meals;
       if (!meals || !Array.isArray(meals)) {
         throw new Error('Invalid menu structure - missing meals array');
       }
 
-      setMenu({
+      const menuData = {
         meals,
-        dailyTotals: processedMenu.daily_totals || null,
+        totals: processedMenu.totals,
         note: processedMenu.note || ''
-      });
+      };
+      
+      console.log("Setting menu with data:", menuData);
+      setMenu(menuData);
     } catch (err) {
       console.error('Error fetching menu:', err);
       setError(err.message || 'Something went wrong');
@@ -78,11 +85,11 @@ const MenuCreate = () => {
         programName: "Generated Menu Plan",
         status: "draft",
         meals: menu.meals || [],
-        dailyTotalCalories: menu.dailyTotals?.calories || 2000,
+        dailyTotalCalories: menu.totals?.calories || 2000,
         macros: {
-          protein: menu.dailyTotals?.protein || 30,
-          carbs: menu.dailyTotals?.carbs || 40,
-          fat: menu.dailyTotals?.fat || 30
+          protein: menu.totals?.protein || 30,
+          carbs: menu.totals?.carbs || 40,
+          fat: menu.totals?.fat || 30
         }
       });
 
@@ -97,6 +104,7 @@ const MenuCreate = () => {
 
   const renderMealOption = (option, isAlternative = false) => {
     console.log("DEBUG - Ingredients for", option.name, option.ingredients);
+    
     if (!option) return null;
 
     return (
@@ -184,7 +192,7 @@ const MenuCreate = () => {
 
       {menu && menu.meals && menu.meals.length > 0 && (
         <>
-          {menu.dailyTotals && (
+          {menu.totals && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -197,21 +205,21 @@ const MenuCreate = () => {
                   <div className="p-4 bg-green-50 rounded-lg">
                     <p className="text-sm text-green-600 font-medium">Calories</p>
                     <p className="text-2xl font-bold text-green-700">
-                      {menu.dailyTotals.calories}
+                      {menu.totals.calories}
                       <span className="text-sm font-normal text-green-600 ml-1">kcal</span>
                     </p>
                   </div>
                   <div className="p-4 bg-blue-50 rounded-lg">
                     <p className="text-sm text-blue-600 font-medium">Protein</p>
                     <p className="text-2xl font-bold text-blue-700">
-                      {menu.dailyTotals?.protein}
+                      {menu.totals.protein}
                       <span className="text-sm font-normal text-blue-600 ml-1">g</span>
                     </p>
                   </div>
                   <div className="p-4 bg-yellow-50 rounded-lg">
                     <p className="text-sm text-yellow-600 font-medium">Fat</p>
                     <p className="text-2xl font-bold text-yellow-700">
-                      {menu.dailyTotals?.fat}
+                      {menu.totals.fat}
                       <span className="text-sm font-normal text-yellow-600 ml-1">g</span>
                     </p>
                   </div>
@@ -219,7 +227,6 @@ const MenuCreate = () => {
               </CardContent>
             </Card>
           )}
-
           <div className="space-y-6">
             {menu.meals.map((meal, index) => (
               <Card key={index} className="overflow-hidden">

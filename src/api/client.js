@@ -114,7 +114,9 @@ export const entities = {
       return { id: `client-${Date.now()}`, ...data };
     },
     get: async (id) => {
-      return mockClients.find(client => client.id === id) || null;
+      const res = await fetch('../public/client.json');
+      const data = await res.json();
+      return data;
     },
     list: async () => {
       return mockClients;

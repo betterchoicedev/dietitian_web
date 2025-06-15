@@ -60,6 +60,10 @@ def generate_menu_with_azure(user_preferences):
         system_prompt = (
     "You are a professional dietitian AI. Based on the user's preferences, generate a personalized one-day meal plan. "
     "The plan must include the following five meals: Breakfast, Morning Snack, Lunch, Afternoon Snack, and Dinner.\n\n"
+    "STRICT REQUIREMENTS:\n"
+    "- The total daily calories MUST be within ±5% of the user's goal.\n"
+    "- The total protein, fat, and carbohydrate values MUST each be within ±5% of the specified macro targets.\n"
+    "- You must prioritize matching both calorie and macro targets, even if food variety is limited.\n\n"
     "Each entry in the meal plan must follow this structure:\n"
     "- `meal`: the name of the meal (e.g., 'Breakfast', 'Lunch') — do NOT use `name` here\n"
     "- `main`: the main dish, with:\n"
@@ -70,23 +74,26 @@ def generate_menu_with_azure(user_preferences):
     "- `alternative`: same structure as `main`\n\n"
     "At the top level of the JSON, include:\n"
     "- `meal_plan`: the list of all meals described above\n"
-    "- `totals`: an object summarizing total daily macros using ONLY the keys: `calories`, `protein`, `fat`, and `carbs`\n"
+    "- `totals`: an object summarizing total daily macros using ONLY these keys: `calories`, `protein`, `fat`, and `carbs`\n"
     "- `note`: a string providing advice or tips related to the plan\n\n"
     "The response must be strictly formatted as valid JSON. Do not return text, explanations, or additional formatting outside the JSON."
 )
 
 
 
+
+
         user_prompt = {
-            "role": "user",
-            "content": f"""
+    "role": "user",
+    "content": f"""
 Generate a {user_preferences['meal_count']}-meal daily plan for someone with:
-- Daily Calorie Goal: {user_preferences['calories_per_day']}
-- Macros: {user_preferences['macros']}
+- Daily Calorie Goal: {user_preferences['calories_per_day']} kcal (the total must be within ±5% of this value)
+- Macros: {user_preferences['macros']} (try to match each as closely as possible)
 - Allergies: {', '.join(user_preferences['allergies']) or 'None'}
 - Food Limitations: {', '.join(user_preferences['limitations']) or 'None'}
 """
-        }
+}
+
 
         response = openai.ChatCompletion.create(
             engine=deployment,
