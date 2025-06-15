@@ -41,7 +41,15 @@ export default function Chat() {
     setError(null);
     
     try {
-      const userData = await User.me();
+      let userData;
+try {
+  userData = await User.me();
+} catch (err) {
+  // fallback for Netlify
+  const res = await fetch('/data.json');
+  userData = await res.json();
+}
+
       
       if (!userData.selectedClientId) {
         setError("No client selected. Please select a client first.");
