@@ -43,12 +43,15 @@ export default function Chat() {
     try {
       let userData;
 try {
-  userData = await User.me();
-} catch (err) {
-  // fallback for Netlify
-  const res = await fetch('/data.json');
-  userData = await res.json();
-}
+  try {
+    userData = await User.me();
+  } catch (err) {
+    // fallback for Netlify
+    const res = await fetch('/client.json');
+    userData = await res.json();
+    userData.selectedClientId = userData.id;  // 👈 simulate selected client
+  }
+  
 
       
       if (!userData.selectedClientId) {
