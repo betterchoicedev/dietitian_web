@@ -1,32 +1,8 @@
 // Local API client implementation
 
 // Mock data for local development
-const mockUser = {
-  id: "local-user-1",
-  email: "demo@example.com",
-  name: "Demo User",
-  role: "dietitian",
-  selectedClientId: null
-};
 
-const mockClients = [
-  {
-    id: "client-1",
-    full_name: "Roee Bina",
-    email: "roee.bina@example.com",
-    phone: "+972-50-1234567",
-    user_code: "AABBCC",
-    user_id_number: 1111,
-    height: 182,
-    weight: 77,
-    age: 28,
-    gender: "male",
-    activity_level: "moderate",
-    goal: "maintain",
-    dietary_restrictions: ["Pork", "Shellfish"],
-    notes: "Active lifestyle, follows a personalized nutrition plan"
-  }
-];
+
 
 // Auth functions
 export const auth = {
@@ -114,7 +90,7 @@ export const entities = {
       return { id: `client-${Date.now()}`, ...data };
     },
     get: async (id) => {
-      const res = await fetch('../public/client.json');
+      const res = await fetch('/client.json');
       const data = await res.json();
       return data;
     },
