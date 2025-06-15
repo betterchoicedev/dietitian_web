@@ -48,11 +48,30 @@ export default function Layout() {
   const [selectedClient, setSelectedClient] = useState(null);
   const [error, setError] = useState(null);
   const [userData, setUserData] = useState(null);
+  const dataLoadedRef = React.useRef(false);
+
+  // Add visibility change listener
+  React.useEffect(() => {
+    const handleVisibilityChange = () => {
+      console.log('Visibility changed:', document.visibilityState);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   React.useEffect(() => {
     const loadUserData = async () => {
       if (!user) return;
       
+      // Don't reload if we already have the data
+      if (dataLoadedRef.current) {
+        return;
+      }
+      
+      console.log('Loading user data...');
       setIsLoading(true);
       setError(null);
       
@@ -94,6 +113,7 @@ export default function Layout() {
           }
         }
 
+        console.log('Profile loaded:', profile?.id);
         setUserData(profile);
 
         // Get clients
@@ -104,6 +124,7 @@ export default function Layout() {
 
         if (clientsError) throw clientsError;
 
+        console.log('Clients loaded:', clientList?.length);
         setClients(clientList || []);
 
         // Handle selected client
@@ -121,6 +142,7 @@ export default function Layout() {
           setSelectedClient(clientList[0].id);
         }
 
+        dataLoadedRef.current = true;
       } catch (error) {
         console.error('Error loading user data:', error);
         setError("Failed to load user data. Please try refreshing the page.");
@@ -130,7 +152,7 @@ export default function Layout() {
     };
 
     loadUserData();
-  }, [user]);
+  }, [user]); // Only depend on user
 
   const handleClientChange = async (clientId) => {
     try {

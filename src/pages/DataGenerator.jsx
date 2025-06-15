@@ -536,7 +536,6 @@ export default function DataGenerator() {
         <div className="flex justify-center">
           <Button
             variant="outline"
-            onClick={() => window.location.reload()}
             className="mt-4"
           >
             <RefreshCw className="mr-2 h-4 w-4" />

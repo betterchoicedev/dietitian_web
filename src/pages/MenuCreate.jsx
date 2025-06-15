@@ -234,7 +234,7 @@ const MenuCreate = () => {
                   <div className="flex justify-between items-center">
                     <CardTitle className="flex items-center gap-2">
                       <Utensils className="h-5 w-5 text-green-600" />
-                      {meal.meal}
+                      {meal.name}
                     </CardTitle>
                   </div>
                 </CardHeader>

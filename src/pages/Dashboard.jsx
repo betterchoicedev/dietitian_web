@@ -31,7 +31,21 @@ export default function Dashboard() {
   const [chats, setChats] = useState([]);
   const [userData, setUserData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-
+  useEffect(() => {
+    const fetchClient = async () => {
+      try {
+        const res = await fetch('/client.json');
+        if (!res.ok) throw new Error("Fetch failed");
+        const data = await res.json();
+        console.log("Fetched client data:", data);
+        setClient(data);
+      } catch (err) {
+        console.error("Error loading client.json:", err);
+      }
+    };
+    fetchClient();
+  }, []);
+  
   useEffect(() => {
     loadData();
   }, []);

@@ -58,26 +58,20 @@ def require_api_key(f):
 def generate_menu_with_azure(user_preferences):
     try:
         system_prompt = (
-    "You are a professional dietitian AI. Based on the user's preferences, generate a personalized one-day meal plan. "
-    "The plan must include the following five meals: Breakfast, Morning Snack, Lunch, Afternoon Snack, and Dinner.\n\n"
-    "STRICT REQUIREMENTS:\n"
-    "- The total daily calories MUST be within ±5% of the user's goal.\n"
-    "- The total protein, fat, and carbohydrate values MUST each be within ±5% of the specified macro targets.\n"
-    "- You must prioritize matching both calorie and macro targets, even if food variety is limited.\n\n"
-    "Each entry in the meal plan must follow this structure:\n"
-    "- `meal`: the name of the meal (e.g., 'Breakfast', 'Lunch') — do NOT use `name` here\n"
-    "- `main`: the main dish, with:\n"
-    "   - `name`: the dish name\n"
-    "   - `ingredients`: a list where each ingredient is an object using ONLY these keys: `item`, `quantity`, and `unit`. "
-    "Do NOT use `ingredient` as a key.\n"
-    "   - `nutrition`: an object with numeric values for `calories`, `protein`, `fat`, and `carbs`\n"
-    "- `alternative`: same structure as `main`\n\n"
-    "At the top level of the JSON, include:\n"
-    "- `meal_plan`: the list of all meals described above\n"
-    "- `totals`: an object summarizing total daily macros using ONLY these keys: `calories`, `protein`, `fat`, and `carbs`\n"
-    "- `note`: a string providing advice or tips related to the plan\n\n"
-    "The response must be strictly formatted as valid JSON. Do not return text, explanations, or additional formatting outside the JSON."
+    "You are a professional dietitian AI. Generate a 1-day meal plan with 5 meals: Breakfast, Morning Snack, Lunch, Afternoon Snack, Dinner.\n\n"
+    "Requirements:\n"
+    "- Total daily calories must be within ±5% of the user's target.\n"
+    "- Total protein, fat, and carbs must each be within ±5% of target.\n"
+    "- Each meal must have `main` and `alternative` options, each with:\n"
+    "  - `name`, `ingredients` (list of {item, quantity, unit}), and `nutrition` ({calories, protein, fat, carbs}).\n\n"
+    "After generating all meals, you MUST calculate and VERIFY that total calories and macros are within range. If not, regenerate until they are.\n\n"
+    "Respond ONLY with valid JSON:\n"
+    "- `meal_plan`: list of 5 meals\n"
+    "- `totals`: {calories, protein, fat, carbs}\n"
+    "- `note`: advice or tips\n"
 )
+
+
 
 
 
@@ -86,13 +80,20 @@ def generate_menu_with_azure(user_preferences):
         user_prompt = {
     "role": "user",
     "content": f"""
-Generate a {user_preferences['meal_count']}-meal daily plan for someone with:
-- Daily Calorie Goal: {user_preferences['calories_per_day']} kcal (the total must be within ±5% of this value)
-- Macros: {user_preferences['macros']} (try to match each as closely as possible)
-- Allergies: {', '.join(user_preferences['allergies']) or 'None'}
-- Food Limitations: {', '.join(user_preferences['limitations']) or 'None'}
+Generate a daily meal plan with exactly {user_preferences['meal_count']} meals.
+
+Strictly follow these nutritional goals:
+- ✅ Total Calories: {user_preferences['calories_per_day']} kcal (must be within ±5%)
+- ✅ Protein: {user_preferences['macros']['protein']}g (±5%)
+- ✅ Fat: {user_preferences['macros']['fat']}g (±5%)
+- ✅ Carbs: {user_preferences['macros']['carbs']}g (±5%)
+
+Dietary restrictions:
+- Allergies: {', '.join(user_preferences['allergies']) if user_preferences['allergies'] else 'None'}
+- Food Limitations: {', '.join(user_preferences['limitations']) if user_preferences['limitations'] else 'None'}
 """
 }
+
 
 
         response = openai.ChatCompletion.create(
@@ -114,6 +115,7 @@ Generate a {user_preferences['meal_count']}-meal daily plan for someone with:
 def get_generated_menu():
     try:
         user_preferences = load_user_preferences()
+        print("user_preferences:\n", user_preferences)
         result = generate_menu_with_azure(user_preferences)
         print("Azure response:\n", result)  # 👈 for debugging
         return jsonify({"generated_menu": result})
