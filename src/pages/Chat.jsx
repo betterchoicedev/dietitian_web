@@ -136,15 +136,19 @@ catch (err) {
       let userMessage = { role: 'user', content: message };
 
       // Handle image upload if selected
-      if (imageFile) {
+      if (imageFile instanceof File) {
         try {
-          const { file_url } = await UploadFile({ file: imageFile });
-          userMessage.image_url = file_url;
+          const { url, file_url } = await UploadFile(imageFile);
+          userMessage.image_url = url || file_url;
         } catch (uploadError) {
           console.error("Error uploading image:", uploadError);
-          // Continue without the image if upload fails
+          setError("Failed to upload image. Please try again.");
+          setIsLoading(false);
+          return;
         }
       }
+      
+      
 
       // Update chat with user message
       const updatedMessages = [...(selectedChat.messages || []), userMessage];
@@ -253,11 +257,15 @@ Would you like more specific advice on meal timing, portion sizes, or nutrient d
   };
 
   const handleFileChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      setImageFile(e.target.files[0]);
-    }
-  };
-
+    if (e.target.files && e.target.files.length > 0) {
+  const file = e.target.files[0];
+  if (file instanceof File) {
+    setImageFile(file);
+  } else {
+    console.error("Selected file is not a valid File object.");
+  }
+}
+};
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };

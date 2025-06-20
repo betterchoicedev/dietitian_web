@@ -214,6 +214,9 @@ export const integrations = {
       return true;
     },
     UploadFile: async (file) => {
+      if (!(file instanceof File || file instanceof Blob)) {
+        throw new TypeError('UploadFile expects a File or Blob, but got: ' + typeof file);
+      }
       return { url: URL.createObjectURL(file) };
     },
     GenerateImage: async (prompt) => {

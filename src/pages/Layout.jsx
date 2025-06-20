@@ -37,6 +37,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from '@/contexts/AuthContext';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { EventBus } from '@/utils/EventBus';
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -178,6 +179,13 @@ export default function Layout() {
     }
   };
 
+  const handleLanguageSwitch = (lang) => {
+    toggleLanguage();
+    if (lang === 'he') {
+      EventBus.emit('translateMenu', 'he');
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -201,10 +209,14 @@ export default function Layout() {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-gradient-to-br from-green-100 via-green-200 to-green-300">
       {/* Header */}
-      <header className="border-b">
+      <header className="border-b glass shadow-md backdrop-blur-md bg-white/40">
         <div className="flex h-16 items-center px-4 gap-4">
+          {/* Logo placeholder replaced with image */}
+          <div className="hidden md:flex items-center mr-4">
+            <img src="/nutrition-logo.png" alt="BetterChoice Logo" className="w-10 h-10" />
+          </div>
           <Button
             variant="ghost"
             className="md:hidden"
@@ -232,12 +244,9 @@ export default function Layout() {
           </div>
 
           <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleLanguage}
-            className="mr-2"
+            onClick={() => handleLanguageSwitch(language === 'en' ? 'he' : 'en')}
+            className="border border-green-400 text-green-700 bg-white/80 shadow-sm hover:bg-green-50 hover:text-green-800 font-semibold px-4 py-2 rounded-lg transition"
           >
-            <Globe className="h-5 w-5" />
             <span className="ml-2">{translations.switchLanguage}</span>
           </Button>
 
@@ -265,7 +274,7 @@ export default function Layout() {
 
       {/* Sidebar */}
       <div className={cn(
-        "fixed inset-y-0 w-64 bg-white border-r transform transition-transform duration-200 ease-in-out z-20",
+        "fixed inset-y-0 w-64 glass bg-white/60 border-r shadow-lg backdrop-blur-md z-20 transition-transform duration-200 ease-in-out",
         {
           'translate-x-0': sidebarOpen,
           '-translate-x-full': !sidebarOpen,
@@ -277,7 +286,11 @@ export default function Layout() {
         }
       )}>
         <div className="flex h-16 items-center justify-between px-4 border-b">
-          <h1 className="text-xl font-semibold">BetterChoice</h1>
+          {/* Logo in sidebar replaced with image */}
+          <div className="flex items-center gap-2">
+            <img src="/nutrition-logo.png" alt="BetterChoice Logo" className="w-8 h-8" />
+            <h1 className="text-xl font-semibold text-green-800">BetterChoice</h1>
+          </div>
           <Button
             variant="ghost"
             size="icon"

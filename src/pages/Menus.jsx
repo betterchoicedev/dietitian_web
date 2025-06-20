@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Menu } from '@/api/entities';
 import { User } from '@/api/entities';
@@ -215,6 +214,18 @@ export default function Menus() {
 
   return (
     <div className="space-y-6">
+      {/* Hero Section */}
+      <section className="w-full rounded-2xl mb-8 p-8 md:p-16 bg-gradient-to-br from-green-200 via-green-100 to-green-50 shadow-xl flex flex-col items-center text-center animate-fade-in">
+        <h1 className="text-5xl md:text-7xl font-extrabold text-green-700 mb-4 tracking-tight">BetterChoice</h1>
+        <h2 className="text-2xl md:text-3xl font-medium text-gray-700 mb-2">הדרך החכמה לחיים בריאים</h2>
+        <p className="text-lg md:text-xl text-gray-600 mb-4">פלטפורמה מקצועית מבוססת AI לניהול תזונה וכושר</p>
+        <div className="flex flex-wrap justify-center gap-4 mt-2">
+          <span className="text-green-700 font-bold">כלים מתקדמים</span>
+          <span className="text-green-700 font-bold">תוכן איכותי</span>
+          <span className="text-green-700 font-bold">תמיכה מקצועית</span>
+        </div>
+      </section>
+
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Menu Plans</h1>

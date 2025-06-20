@@ -1,4 +1,4 @@
-const sql = require('mssql');
+import sql from 'mssql';
 
 // הגדרות התחברות ל-Azure SQL
 const config = {
@@ -23,7 +23,7 @@ const getPool = async () => {
 };
 
 // פונקציה שמחזירה הצעות השלמה על בסיס קלט המשתמש
-async function getIngredientSuggestions(query) {
+export async function getIngredientSuggestions(query) {
   if (!query || query.length < 2) return [];
 
   try {
@@ -54,7 +54,7 @@ async function getIngredientSuggestions(query) {
   }
 }
 
-async function getIngredientNutrition(englishName) {
+export async function getIngredientNutrition(englishName) {
   if (!englishName) return null;
 
   try {
@@ -96,9 +96,3 @@ process.on('SIGTERM', async () => {
     await pool.close();
   }
 });
-
-module.exports = { 
-  getIngredientSuggestions,
-  getIngredientNutrition
-};
-

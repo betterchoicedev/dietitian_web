@@ -1,0 +1,44 @@
+{
+    "template": [
+        {
+            "name": "Breakfast: Greek Yogurt & Berries",
+            "calories": 420,
+            "protein": 32,
+            "fat": 12,
+            "carbs": 48,
+            "main_protein_source": "Greek yogurt"
+        },
+        {
+            "name": "Morning Snack: Turkey & Veggie Wrap",
+            "calories": 315,
+            "protein": 22,
+            "fat": 9,
+            "carbs": 34,
+            "main_protein_source": "Turkey breast"
+        },
+        {
+            "name": "Lunch: Grilled Chicken Quinoa Bowl",
+            "calories": 525,
+            "protein": 40,
+            "fat": 15,
+            "carbs": 54,
+            "main_protein_source": "Chicken breast"
+        },
+        {
+            "name": "Afternoon Snack: Cottage Cheese & Almonds",
+            "calories": 210,
+            "protein": 18,
+            "fat": 10,
+            "carbs": 8,
+            "main_protein_source": "Cottage cheese"
+        },
+        {
+            "name": "Dinner: Baked Salmon with Brown Rice",
+            "calories": 630,
+            "protein": 48,
+            "fat": 19,
+            "carbs": 36,
+            "main_protein_source": "Salmon"
+        }
+    ]
+}
