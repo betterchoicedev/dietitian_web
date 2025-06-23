@@ -41,7 +41,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
     setIsLoading(true);
     try {
-      const response = await fetch(`http://localhost:3001/api/suggestions?query=${encodeURIComponent(query)}`);
+      const response = await fetch(`https://dietitian-web.onrender.com/api/suggestions?query=${encodeURIComponent(query)}`);
       if (!response.ok) throw new Error('Network response was not ok');
       const data = await response.json();
       setSuggestions(data);
@@ -69,7 +69,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
   const handleSelect = async (suggestion) => {
     try {
-      const response = await fetch(`http://localhost:3001/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`);
+      const response = await fetch(`https://dietitian-web.onrender.com/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`);
       if (!response.ok) throw new Error('Failed to fetch nutrition data');
       const nutritionData = await response.json();
 
