@@ -18,6 +18,7 @@ export const translations = {
     chat: 'Chat',
     dataGenerator: 'Data Generator',
     nutritionPlan: 'Nutrition Plan',
+    menuCreate: 'Menu Create',
     
     // Common buttons and labels
     submit: 'Submit',
@@ -92,6 +93,7 @@ export const translations = {
     chat: 'צ\'אט',
     dataGenerator: 'יצירת נתונים',
     nutritionPlan: 'תוכנית תזונה',
+    menuCreate: 'יצירת תפריט',
     
     // Common buttons and labels
     submit: 'שלח',

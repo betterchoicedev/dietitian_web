@@ -6,7 +6,7 @@ import json
 from dotenv import load_dotenv
 from functools import wraps
 import logging
-from googletrans import Translator
+import traceback
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -16,11 +16,50 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})  # Allow all origins for development
-# Configure CORS with specific origin
-CORS(app, resources={r"/api/*": {"origins": ["http://localhost:3000"]}})
+# Configure CORS to allow all origins for development.
+# This tells the browser that it's safe for your frontend (running on any port)
+# to make requests to this backend.
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-translator = Translator()
+# Initialize the translator with a specific service URL for better reliability
+# translator = Translator(service_urls=['translate.google.com'])
+
+# Dictionary for common ingredient translations (EN -> HE)
+# This provides faster, more accurate translations for common items.
+# FOOD_TRANSLATIONS_HE = {
+#     "chicken breast": "חזה עוף",
+#     "salmon fillet": "פילה סלמון",
+#     "brown rice": "אורז מלא",
+#     "quinoa": "קינואה",
+#     "sweet potato": "בטטה",
+#     "broccoli": "ברוקולי",
+#     "spinach": "תרד",
+#     "olive oil": "שמן זית",
+#     "almonds": "שקדים",
+#     "walnuts": "אגוזי מלך",
+#     "greek yogurt": "יוגורט יווני",
+#     "oats": "שיבולת שועל",
+#     "rolled oats": "שיבולת שועל",
+#     "mixed berries": "פירות יער",
+#     "egg": "ביצה",
+#     "eggs": "ביצים",
+#     "whole wheat bread": "לחם חיטה מלאה",
+#     "avocado": "אבוקדו",
+#     "cottage cheese": "גבינת קוטג'",
+#     "tuna": "טונה",
+#     "apple": "תפוח",
+#     "banana": "בננה",
+#     "protein powder": "אבקת חלבון",
+#     "milk": "חלב",
+#     "honey": "דבש",
+#     "chia seeds": "זרעי צ'יה",
+#     "low-fat granola": "גרנולה דלת שומן",
+#     "non-fat greek yogurt": "יוגורט יווני 0% שומן",
+# }
+
+# Set of units and patterns to prevent from being translated
+# UNTRANSLATABLE_PATTERNS = re.compile(r'^\d+(\.\d+)?$') # Matches numbers like "100" or "1.5"
+# UNTRANSLATABLE_UNITS = {"g", "kg", "ml", "l", "oz", "cup", "cups", "tbsp", "tsp"}
 
 def load_user_preferences():
     try:
@@ -61,7 +100,7 @@ def require_api_key(f):
 def generate_menu_with_azure(user_preferences):
     try:
         system_prompt = (
-    "You are a professional dietitian AI. Generate a 1-day meal plan with 5 meals: Breakfast, Morning Snack, Lunch, Afternoon Snack, Dinner.\n\n"
+    "You are a professional dietitian AI. Generate a 1-day meal plan with  meals: Breakfast, Morning Snack, Lunch, Afternoon Snack, Dinner.\n\n"
     "Requirements:\n"
     "- Total daily calories must be within ±5% of the user's target.\n"
     "- Total protein, fat, and carbs must each be within ±5% of target.\n"
@@ -147,27 +186,6 @@ def get_generated_menu():
         print("❌ Error generating menu:", str(e))  # 👈 this will print the real cause
         return jsonify({"error": "Failed to generate menu"}), 500
 
-def translate_menu(menu, target_lang):
-    def translate_field(field):
-        if isinstance(field, str):
-            return translator.translate(field, dest=target_lang).text
-        if isinstance(field, list):
-            return [translate_field(item) for item in field]
-        if isinstance(field, dict):
-            return {k: translate_field(v) for k, v in field.items()}
-        return field
-    return translate_field(menu)
-
-@app.post('/api/translate-menu')
-async def translate_menu_endpoint(request: request):
-    data = await request.json()
-    menu = data['menu']
-    target_lang = data.get('targetLang', 'he')
-    translated_menu = translate_menu(menu, target_lang)
-    return translated_menu
-
-import traceback  # ← ADD this at the top if not already imported
-
 @app.route("/api/template", methods=["POST"])
 def api_template():
     try:
@@ -175,13 +193,27 @@ def api_template():
         logger.info("🔹 Received user preferences for template:\n%s", json.dumps(preferences, indent=2))
 
         system_prompt = (
-            "You are a professional dietitian AI. "
-            "Given user preferences (daily calories, macros, number of meals), "
-            "generate a meal template: an array of meals, each with: "
-            "`name`, `calories`, `protein`, `fat`, `carbs`, and `main_protein_source`. "
-            "Distribute macros and calories sensibly across meals. "
-            "Respond ONLY with valid JSON: {template: [ ... ]}"
-        )
+    "You are a professional dietitian AI. "
+    "Given user preferences (daily calories, macros, number of meals), "
+    "generate a meal template: an array of meals. "
+    "For each meal, provide BOTH a main and an alternative option. "
+    "Each option must include: `name`, `calories`, `protein`, `fat`, `carbs`, and `main_protein_source`. "
+    "The nutrition values (calories, protein, fat, carbs) for the alternative should match the main meal as closely as possible (within ±5%). "
+    "Distribute macros and calories sensibly across meals. "
+    "Respond ONLY with valid JSON in this format:\n"
+    "{ \"template\": [ "
+    "{\"meal\": \"Breakfast\","
+    "\"main\": {\"name\": \"Omelet & Toast\", \"calories\": 400, ... },"
+    "\"alternative\": {\"name\": \"Greek Yogurt Bowl\", \"calories\": 400, ... }"
+    "}, ... ]} "
+    "\n\n"
+    "IMPORTANT: Set the macro targets for each meal according to the typical macro profile of the main protein source."
+    " Do NOT set a low fat target for salmon or beef meals – allow higher fat where realistic."
+    " For Dinner, if using salmon, set protein target to 40-50g and fat to 25-35g; for lean beef, allow fat 20-30g. "
+    "Distribute total daily protein and fat according to the main protein in each meal so no meal requires an unrealistic macro split."
+)
+
+
 
         user_prompt = {
             "role": "user",
@@ -228,63 +260,74 @@ def api_build_menu():
         if not template:
             return jsonify({"error": "Missing template"}), 400
 
-        logger.info("🔹 Building menu meal by meal...")
+        # ✅ Validate the template before building meals
+        val_res = app.test_client().post("/api/validate-template", json={"template": template})
+        val_data = val_res.get_json()
+
+        if not val_data.get("is_valid"):
+            logger.warning("❌ Template validation failed before menu build: %s", {
+                "main": val_data.get("issues_main"),
+                "alternative": val_data.get("issues_alt"),
+            })
+            return jsonify({"error": "Template validation failed", "validation": val_data}), 400
+
+        logger.info("🔹 Building menu meal by meal, option by option...")
         full_menu = []
 
         for template_meal in template:
-            meal_name = template_meal.get("name")
-            meal_built = None
-            feedback = None
-            logger.info("TEMPLATE FOR MENU GENERATION:\n%s", json.dumps(template, indent=2))
-            for attempt in range(4):
-                # 1. Build this meal using GPT
-                system_prompt = (
-                    "You are a professional dietitian AI. "
-                    "Given a meal template for one meal and user preferences, build a meal plan for ONLY THIS MEAL. "
-                    "Provide: `meal`, `main`, and `alternative` options. "
-                    "Each option must have: `name`, `ingredients` (list of {item, quantity, unit, calories, protein, fat, carbs}), and `nutrition` (sum of ingredients). "
-                    "Ensure the meal approximately matches the template macros (within ±30%) and avoids allergens/limitations. "
-                    "If feedback is provided, use it to improve the meal. "
-                    "Respond ONLY with valid JSON: {meal: { ... }}"
-                )
-                user_content = {
-                    "meal_name": template_meal.get("name"),
-                    "macro_targets": {
-                    "calories": template_meal.get("calories"),
-                    "protein": template_meal.get("protein"),
-                    "fat": template_meal.get("fat"),
-                    "carbs": template_meal.get("carbs"),
-                    },
-                     "main_protein_source": template_meal.get("main_protein_source"),
-                     "preferences": preferences,
-                }
-                if feedback:
-                    user_content["feedback"] = feedback
+            meal_name = template_meal.get("meal")
 
-                logger.info(f"🧠 Building meal '{meal_name}', attempt {attempt + 1}")
+            # Build MAIN option
+            main_built = None
+            main_feedback = None
+            main_macros = template_meal.get("main", {})
+            main_protein_source = main_macros.get("main_protein_source")
+            for attempt in range(6):
+                logger.info(f"🧠 Building MAIN for meal '{meal_name}', attempt {attempt + 1}")
+                main_prompt = (
+                    "You are a professional dietitian AI. "
+                    "Given a meal template for one meal and user preferences, build the **main option only** for this meal. "
+                    "The meal you generate MUST have the EXACT name as provided in 'meal_name'. "
+                    "Provide: `meal_name`,`meal_title`, `ingredients` (list of {item, quantity, unit, calories, protein, fat, carbs}), and `nutrition` (sum of ingredients). "
+                    "Macros must match the template within ±30%. Respond only with valid JSON."
+                )
+                main_content = {
+                    "meal_name": meal_name,
+                    "macro_targets": {
+                        "calories": main_macros.get("calories"),
+                        "protein": main_macros.get("protein"),
+                        "fat": main_macros.get("fat"),
+                        "carbs": main_macros.get("carbs"),
+                    },
+                    "main_protein_source": main_protein_source,
+                    "preferences": preferences,
+                    "INSTRUCTIONS": "Build only the main option as specified above."
+                }
+                if main_feedback:
+                    main_content["feedback"] = main_feedback
 
                 response = openai.ChatCompletion.create(
                     engine=deployment,
                     messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": json.dumps(user_content)}
+                        {"role": "system", "content": main_prompt},
+                        {"role": "user", "content": json.dumps(main_content)}
                     ],
-                    temperature=0.7
+                    temperature=0.3
                 )
-
-                raw_meal = response["choices"][0]["message"]["content"]
+                raw_main = response["choices"][0]["message"]["content"]
                 try:
-                    parsed = json.loads(raw_meal)
-                    built_meal = parsed.get("meal") or parsed  # GPT might just return the meal object
+                    parsed = json.loads(raw_main)
+                    main_candidate = parsed.get("main") or parsed  # GPT might just return the main object
+                    logger.error(main_candidate)
                 except Exception:
-                    logger.error(f"❌ JSON parse error for meal '{meal_name}':\n{raw_meal}")
-                    feedback = ["Invalid JSON from GPT"]
+                    logger.error(f"❌ JSON parse error for MAIN '{meal_name}':\n{raw_main}")
+                    main_feedback = ["Invalid JSON from GPT"]
                     continue
 
-                # 2. Validate this meal (call your validator, but with just this meal in the menu list)
+                # Validate main
                 validate_payload = {
-                    "template": [template_meal],
-                    "menu": [built_meal]
+                    "template": [{"main": main_macros}],
+                    "menu": [{"main": main_candidate}]
                 }
                 val_res = app.test_client().post(
                     "/api/validate-menu",
@@ -295,25 +338,96 @@ def api_build_menu():
                 issues = val_data.get("issues", [])
 
                 if is_valid:
-                    logger.info(f"✅ Meal '{meal_name}' passed validation.")
-                    meal_built = built_meal
+                    logger.info(f"✅ MAIN for meal '{meal_name}' passed validation.")
+                    main_built = main_candidate
                     break
                 else:
-                    logger.warning(f"❌ Meal '{meal_name}' failed validation: {issues}")
-                    feedback = issues
+                    logger.warning(f"❌ MAIN for meal '{meal_name}' failed validation: {issues}")
+                    main_feedback = issues
 
-            # If after 4 tries still not valid, add note or placeholder
-            if meal_built:
-                full_menu.append(meal_built)
-            else:
-                logger.error(f"❌ Could not build valid meal for '{meal_name}' after 4 attempts. Adding fallback.")
-                full_menu.append({
-                    "meal": meal_name,
-                    "main": {"name": "Error: Could not build meal", "ingredients": [], "nutrition": {}},
-                    "alternative": {"name": "Error: Could not build meal", "ingredients": [], "nutrition": {}},
-                    "note": f"Failed to build valid meal after 4 attempts. See issues: {feedback}"
-                })
-                
+            if not main_built:
+                logger.error(f"❌ Could not build valid MAIN for '{meal_name}' after 6 attempts.")
+                main_built = {"name": "Error: Could not build main", "ingredients": [], "nutrition": {}}
+
+            # Build ALTERNATIVE option
+            alt_built = None
+            alt_feedback = None
+            alt_macros = template_meal.get("alternative", {})
+            alt_protein_source = alt_macros.get("main_protein_source")
+            for attempt in range(6):
+                logger.info(f"🧠 Building ALTERNATIVE for meal '{meal_name}', attempt {attempt + 1}")
+                alt_prompt = (
+                    "You are a professional dietitian AI. "
+                    "Given a meal template for one meal and user preferences, build the **alternative option only** for this meal. "
+                    "The meal you generate MUST have the EXACT name as provided in 'meal_name'. "
+                    "Provide: `meal_name`, `meal_title`, `ingredients` (list of {item, quantity, unit, calories, protein, fat, carbs}), and `nutrition` (sum of ingredients). "
+                    "Macros must match the template within ±30%. Respond only with valid JSON."
+                )
+                alt_content = {
+                    "meal_name": meal_name,
+                    "macro_targets": {
+                        "calories": alt_macros.get("calories"),
+                        "protein": alt_macros.get("protein"),
+                        "fat": alt_macros.get("fat"),
+                        "carbs": alt_macros.get("carbs"),
+                    },
+                    "main_protein_source": alt_protein_source,
+                    "preferences": preferences,
+                    "INSTRUCTIONS": "Build only the alternative option as specified above."
+                }
+                if alt_feedback:
+                    alt_content["feedback"] = alt_feedback
+
+                response = openai.ChatCompletion.create(
+                    engine=deployment,
+                    messages=[
+                        {"role": "system", "content": alt_prompt},
+                        {"role": "user", "content": json.dumps(alt_content)}
+                    ],
+                    temperature=0.3
+                )
+                raw_alt = response["choices"][0]["message"]["content"]
+                try:
+                    parsed = json.loads(raw_alt)
+                    alt_candidate = parsed.get("alternative") or parsed  # GPT might just return the alt object
+                    logger.error(alt_candidate)
+                except Exception:
+                    logger.error(f"❌ JSON parse error for ALTERNATIVE '{meal_name}':\n{raw_alt}")
+                    alt_feedback = ["Invalid JSON from GPT"]
+                    continue
+
+                # Validate alternative
+                validate_payload = {
+                    "template": [{"alternative": alt_macros}],
+                    "menu": [{"alternative": alt_candidate}]
+                }
+                val_res = app.test_client().post(
+                    "/api/validate-menu",
+                    json=validate_payload
+                )
+                val_data = val_res.get_json()
+                is_valid = val_data.get("is_valid")
+                issues = val_data.get("issues", [])
+
+                if is_valid:
+                    logger.info(f"✅ ALTERNATIVE for meal '{meal_name}' passed validation.")
+                    alt_built = alt_candidate
+                    break
+                else:
+                    logger.warning(f"❌ ALTERNATIVE for meal '{meal_name}' failed validation: {issues}")
+                    alt_feedback = issues
+
+            if not alt_built:
+                logger.error(f"❌ Could not build valid ALTERNATIVE for '{meal_name}' after 6 attempts.")
+                alt_built = {"name": "Error: Could not build alternative", "ingredients": [], "nutrition": {}}
+
+            # Combine into meal entry
+            meal_obj = {
+                "meal": meal_name,
+                "main": main_built,
+                "alternative": alt_built
+            }
+            full_menu.append(meal_obj)
 
         logger.info("✅ Finished building full menu.")
         totals = calculate_totals(full_menu)
@@ -330,65 +444,163 @@ def api_validate_menu():
         data = request.json
         template = data.get("template")
         menu = data.get("menu")
-        preferences = load_user_preferences()
 
-        logger.info("🔹 Received request for /api/validate-menu")
-        logger.info("Template:\n%s", json.dumps(template, indent=2))
-        logger.info("Menu:\n%s", json.dumps(menu, indent=2))
+        if not template or not menu or not isinstance(template, list) or not isinstance(menu, list):
+            return jsonify({"is_valid": False, "issues": ["Missing or invalid template/menu"]}), 400
 
-        if not template or not menu:
-            return jsonify({"error": "Missing template or menu"}), 400
+        macros = ["calories", "protein", "fat", "carbs"]
 
-        def is_out_of_range(actual, target, margin=0.3):
-            if target == 0: return False  # avoid div-by-zero
-            return abs(actual - target) / target > margin
-
+        def get_allowed_margin(val):
+            val = float(val)
+            if val <= 10:
+                return 0.6
+            elif val <= 20:
+                return 0.5
+            elif val <= 30:
+                return 0.4
+            else:
+                return 0.3  # 30% margin for anything above 30
         issues = []
 
-        for template_meal in template:
-            meal_name = template_meal.get("name")
-            target = {
-                "calories": template_meal.get("calories", 0),
-                "protein": template_meal.get("protein", 0),
-                "fat": template_meal.get("fat", 0),
-                "carbs": template_meal.get("carbs", 0)
-            }
-
-            # Find the corresponding meal in the menu
-            menu_meal = next((m for m in menu if m.get("name") == meal_name or m.get("meal") == meal_name or m.get("meal_name") == meal_name), None)
-
-            if not menu_meal:
-                issues.append(f"{meal_name}: meal not found in menu.")
-                continue
-
-            for option_key in ["main", "alternative"]:
-                option = menu_meal.get(option_key)
-                if not option or not option.get("nutrition"):
-                    issues.append(f"{meal_name} ({option_key}): missing nutrition data.")
+        # --- Main option feedback ---
+        template_main = template[0].get("main")
+        menu_main = menu[0].get("main")
+        if template_main and menu_main:
+            for macro in macros:
+                tmpl_val = float(template_main.get(macro, 0))
+                menu_val = float(menu_main.get("nutrition", {}).get(macro, 0))
+                if tmpl_val == 0:
                     continue
+                margin = get_allowed_margin(tmpl_val)
+                if abs(menu_val - tmpl_val) / tmpl_val > margin:
+                    direction = "Reduce" if menu_val > tmpl_val else "Increase"
+                    issues.append(
+                        f"{macro.capitalize()} is out of range for main: got {menu_val}g, target is {tmpl_val}g (allowed ±{int(margin*100)}%). {direction} {macro.lower()} ingredients."
+                    )
 
-                nutrition = option["nutrition"]
-                for macro in ["calories", "protein", "fat", "carbs"]:
-                    actual = round(nutrition.get(macro, 0), 1)
-                    expected = target.get(macro, 0)
-                    if is_out_of_range(actual, expected):
-                        percent_off = round((actual - expected) / expected * 100, 1) if expected != 0 else 0
-                        issues.append(
-                            f"{meal_name}: {macro} in {option_key} is {actual} vs target {expected} ({percent_off:+}%)"
-                        )
+        # --- Alternative option feedback ---
+        template_alt = template[0].get("alternative")
+        menu_alt = menu[0].get("alternative")
+        if template_alt and menu_alt:
+            for macro in macros:
+                tmpl_val = float(template_alt.get(macro, 0))
+                menu_val = float(menu_alt.get("nutrition", {}).get(macro, 0))
+                if tmpl_val == 0:
+                    continue
+                margin = get_allowed_margin(tmpl_val)
+                if abs(menu_val - tmpl_val) / tmpl_val > margin:
+                    direction = "Reduce" if menu_val > tmpl_val else "Increase"
+                    issues.append(
+                        f"{macro.capitalize()} is out of range for alternative: got {menu_val}g, target is {tmpl_val}g (allowed ±{int(margin*100)}%). {direction} {macro.lower()} ingredients."
+                    )
 
         is_valid = len(issues) == 0
 
-        logger.info("✅ Validation complete. is_valid = %s", is_valid)
         return jsonify({
             "is_valid": is_valid,
             "issues": issues,
-            "original_menu": menu
         })
 
     except Exception as e:
         logger.error("❌ Exception in /api/validate-menu:\n%s", traceback.format_exc())
+        return jsonify({"is_valid": False, "issues": [str(e)]}), 500
+
+
+
+
+
+@app.route("/api/validate-template", methods=["POST"])
+def api_validate_template():
+    try:
+        data = request.json
+        template = data.get("template")
+        preferences = load_user_preferences()
+
+        if not template or not isinstance(template, list):
+            return jsonify({"error": "Invalid or missing template"}), 400
+
+        logger.info("🔍 Validating template totals (main & alternative)...")
+
+        # Calculate total macros for main and alternative
+        total_main = {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
+        total_alt = {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
+        for meal in template:
+            main = meal.get("main", {})
+            alt = meal.get("alternative", {})
+            for macro in total_main:
+                total_main[macro] += float(main.get(macro, 0))
+                total_alt[macro] += float(alt.get(macro, 0))
+
+        # Get target macros from preferences
+        def parse_macro(value):
+            return float(str(value).replace("g", "").strip())
+
+        target_macros = {
+            "calories": float(preferences["calories_per_day"]),
+            "protein": parse_macro(preferences["macros"]["protein"]),
+            "fat": parse_macro(preferences["macros"]["fat"]),
+            "carbs": parse_macro(preferences["macros"]["carbs"]),
+        }
+
+        def is_out_of_range(actual, target, margin=0.3):
+            if target == 0:
+                return False
+            return abs(actual - target) / target > margin
+
+        # Collect issues for main and alternative
+        issues_main = []
+        issues_alt = []
+
+        for macro in total_main:
+            # MAIN
+            actual_main = round(total_main[macro], 1)
+            expected = target_macros.get(macro, 0)
+            if is_out_of_range(actual_main, expected):
+                percent_off = round((actual_main - expected) / expected * 100, 1)
+                issues_main.append(
+                    f"Main: Total {macro}: {actual_main} vs target {expected} ({percent_off:+}%)"
+                )
+            # ALT
+            actual_alt = round(total_alt[macro], 1)
+            if is_out_of_range(actual_alt, expected):
+                percent_off = round((actual_alt - expected) / expected * 100, 1)
+                issues_alt.append(
+                    f"Alternative: Total {macro}: {actual_alt} vs target {expected} ({percent_off:+}%)"
+                )
+
+        is_valid_main = len(issues_main) == 0
+        is_valid_alt = len(issues_alt) == 0
+        is_valid = is_valid_main and is_valid_alt
+
+        # Logging for debugging
+        logger.info(f"Validation summary (main): totals={total_main}, targets={target_macros}, issues={issues_main}")
+        logger.info(f"Validation summary (alternative): totals={total_alt}, targets={target_macros}, issues={issues_alt}")
+
+        if not is_valid:
+            logger.warning("❌ Template validation failed. Main valid: %s, Alt valid: %s", is_valid_main, is_valid_alt)
+            if issues_main:
+                logger.warning("Main issues: %s", issues_main)
+            if issues_alt:
+                logger.warning("Alternative issues: %s", issues_alt)
+        else:
+            logger.info("✅ Template validation PASSED for both main and alternative.")
+
+        return jsonify({
+            "is_valid": is_valid,
+            "is_valid_main": is_valid_main,
+            "is_valid_alt": is_valid_alt,
+            "issues_main": issues_main,
+            "issues_alt": issues_alt,
+            "totals_main": {k: round(v, 1) for k, v in total_main.items()},
+            "totals_alt": {k: round(v, 1) for k, v in total_alt.items()},
+            "targets": target_macros
+        })
+
+    except Exception as e:
+        logger.error("❌ Exception in /api/validate-template:\n%s", traceback.format_exc())
         return jsonify({"error": str(e)}), 500
+
+
 
 
 if __name__ == "__main__":

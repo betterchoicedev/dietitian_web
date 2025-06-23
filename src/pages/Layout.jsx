@@ -320,16 +320,10 @@ export default function Layout() {
               {translations.chat}
             </Button>
           </Link>
-          <Link to={createPageUrl('DataGenerator')}>
+          <Link to={createPageUrl('MenuCreate')}>
             <Button variant="ghost" className="w-full justify-start">
               <ListChecks className="mr-2 h-4 w-4" />
-              {translations.dataGenerator}
-            </Button>
-          </Link>
-          <Link to={createPageUrl('Nutrition-Plan')}>
-            <Button variant="ghost" className="w-full justify-start">
-              <ListChecks className="mr-2 h-4 w-4" />
-              {translations.nutritionPlan}
+              {translations.menuCreate}
             </Button>
           </Link>
         </nav>

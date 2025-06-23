@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ArrowLeft, Loader, Save, Clock, Utensils, CalendarRange, ArrowRight } from 'lucide-react';
@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from "@/components/ui/separator";
 import { useLanguage } from '@/contexts/LanguageContext';
 import { EventBus } from '@/utils/EventBus';
+import ReactToPdf from 'react-to-pdf';
+
 
 const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex }) => {
   const [isEditing, setIsEditing] = useState(false);
@@ -120,13 +122,13 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
         dir="rtl"
         autoFocus
       />
-      
+
       {isLoading && (
         <div className="absolute left-2 top-1/2 transform -translate-y-1/2">
           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
         </div>
       )}
-      
+
       {showSuggestions && suggestions.length > 0 && (
         <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg">
           <ul className="py-1 max-h-60 overflow-auto">
@@ -150,40 +152,64 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 };
 
 const MenuCreate = () => {
+  const pdfRef = React.useRef();
+  const [showShoppingList, setShowShoppingList] = useState(false);
+  const [shoppingList, setShoppingList] = useState([]);
   const [menu, setMenu] = useState(null);
+  const [originalMenu, setOriginalMenu] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
   const { language, translations } = useLanguage();
 
-  const updateMenuTotals = (updatedMenu) => {
-    let totalCalories = 0;
-    let totalProtein = 0;
-    let totalFat = 0;
-    let totalCarbs = 0;
+  function calculateMainTotals(menu) {
+  let totalCalories = 0;
+  let totalProtein = 0;
+  let totalFat = 0;
+  let totalCarbs = 0;
 
-    updatedMenu.meals.forEach(meal => {
-      const selectedOption = meal.selectedOption || 'main';
-      const option = meal[selectedOption];
-      if (option && option.nutrition) {
-        totalCalories += option.nutrition.calories || 0;
-        totalProtein += option.nutrition.protein || 0;
-        totalFat += option.nutrition.fat || 0;
-        totalCarbs += option.nutrition.carbs || 0;
-      }
-    });
+  if (!menu.meals) return { calories: 0, protein: 0, fat: 0, carbs: 0 };
 
-    updatedMenu.totals = {
-      calories: Math.round(totalCalories),
-      protein: Math.round(totalProtein),
-      fat: Math.round(totalFat),
-      carbs: Math.round(totalCarbs)
-    };
+  menu.meals.forEach(meal => {
+    const nutrition = meal?.main?.nutrition || {};
+    totalCalories += Number(nutrition.calories) || 0;
+    totalProtein  += Number(nutrition.protein) || 0;
+    totalFat      += Number(nutrition.fat) || 0;
+    totalCarbs    += Number(nutrition.carbs) || 0;
+  });
 
-    return updatedMenu;
+  return {
+    calories: Math.round(totalCalories),
+    protein: Math.round(totalProtein),
+    fat: Math.round(totalFat),
+    carbs: Math.round(totalCarbs),
   };
+}
 
+  
+  
+  function generateShoppingList(menu) {
+    const list = {};
+    menu.meals.forEach(meal => {
+      ['main', 'alternative'].forEach(opt => {
+        if (meal[opt] && meal[opt].ingredients) {
+          meal[opt].ingredients.forEach(ing => {
+            const itemName = ing.item_en || ing.item || ''; // Use item_en if exists, else fallback
+            const unit = ing.unit || '';
+            const quantity = Number(ing.quantity) || 0;
+            const key = itemName + '_' + unit;
+            if (!list[key]) {
+              list[key] = { name: itemName, unit, quantity: 0 };
+            }
+            list[key].quantity += quantity;
+          });
+        }
+      });
+    });
+    return Object.values(list);
+  }
+  
   const handleIngredientChange = (newValues, mealIndex, optionIndex, ingredientIndex) => {
     setMenu(prevMenu => {
       const updatedMenu = { ...prevMenu };
@@ -216,21 +242,21 @@ const MenuCreate = () => {
       option.nutrition = nutrition;
 
       // Update menu totals as well
-      return updateMenuTotals(updatedMenu);
+      return calculateMainTotals(updatedMenu);
     });
-  };  
+  };
 
   const fetchMenu = async () => {
     try {
       setLoading(true);
       setError(null);
-  
+
       // Step 1: Get meal template
       const templateRes = await fetch("http://localhost:5000/api/template", { method: "POST" });
       const templateData = await templateRes.json();
       if (templateData.error || !templateData.template) throw new Error("Template generation failed");
       const template = templateData.template;
-  
+
       // Step 2: Build menu (backend now does all meal-by-meal logic + validation)
       const buildRes = await fetch("http://localhost:5000/api/build-menu", {
         method: "POST",
@@ -239,25 +265,24 @@ const MenuCreate = () => {
       });
       const buildData = await buildRes.json();
       if (buildData.error || !buildData.menu) throw new Error("Menu build failed");
-  
-      const menuData = {
-        meals: buildData.menu,
-        totals: updateMenuTotals({ meals: buildData.menu }),
-        note: buildData.note || ''
-      };
-  
-      if (language === 'he') {
-        try {
-          const translatedMenu = await translateMenu(menuData, 'he');
-          setMenu(translatedMenu);
-        } catch (err) {
-          setError('Translation failed: ' + err.message);
-          setMenu(menuData); // fallback
-        }
-      } else {
-        setMenu(menuData);
-      }
-  
+
+       const menuData = {
+    meals: buildData.menu,
+    totals: calculateMainTotals({ meals: buildData.menu }),
+    note: buildData.note || ''
+  };
+
+  // Set the original English menu data ONCE. This is our source of truth.
+  setOriginalMenu(menuData);
+
+  // Display the correct version based on the initial language
+  if (language === 'he') {
+    const translatedMenu = await translateMenu(menuData, 'he');
+    setMenu(translatedMenu);
+  } else {
+    setMenu(menuData); // Already in English
+  }
+
     } catch (err) {
       console.error("Error generating menu:", err);
       setError(err.message || "Something went wrong");
@@ -265,28 +290,26 @@ const MenuCreate = () => {
       setLoading(false);
     }
   };
-  
-
 
   const handleSaveMenu = async () => {
-    if (!menu) return;
+    // Always save the original, untranslated menu to ensure data integrity.
+    if (!originalMenu) return;
 
     try {
       setSaving(true);
       setError(null);
-
-      const newMenu = await Menu.create({
-        programName: "Generated Menu Plan",
-        status: "draft",
-        meals: menu.meals || [],
-        dailyTotalCalories: menu.totals?.calories || 2000,
+      await Menu.create({
+        programName: 'Generated Menu Plan',
+        status: 'draft',
+        meals: originalMenu.meals || [],
+        dailyTotalCalories: originalMenu.totals?.calories || 2000,
         macros: {
-          protein: menu.totals?.protein || 30,
-          carbs: menu.totals?.carbs || 40,
-          fat: menu.totals?.fat || 30
-        }
+          protein: originalMenu.totals?.protein || 30,
+          carbs: originalMenu.totals?.carbs || 40,
+          fat: originalMenu.totals?.fat || 30,
+        },
       });
-
+      // Navigate after successful save
       navigate(`/MenuEdit?id=${newMenu.id}`);
     } catch (err) {
       console.error('Error saving menu:', err);
@@ -302,7 +325,7 @@ const MenuCreate = () => {
     return (
       <div className={`p-4 rounded-lg ${isAlternative ? 'bg-blue-50' : 'bg-green-50'}`}>
         <div className="flex justify-between items-start mb-3">
-          <h4 className="font-medium text-gray-900">{option.name}</h4>
+          <h4 className="font-medium text-gray-900">{option.meal_title}</h4>
           <div className="flex gap-2">
             <Badge variant="outline" className={`${isAlternative ? 'bg-blue-100 border-blue-200' : 'bg-green-100 border-green-200'}`}>
               {typeof option.nutrition?.calories === 'number' ? option.nutrition.calories + 'kcal' : option.nutrition?.calories}
@@ -351,14 +374,41 @@ const MenuCreate = () => {
     );
   };
 
+  // Create a stable function to handle language changes
+  const handleLanguageChange = useCallback(async (lang) => {
+    if (!originalMenu) return; // Nothing to translate
+
+    // If switching to English, instantly use the original menu
+    if (lang === 'en') {
+      setMenu(originalMenu);
+      return;
+    }
+
+    // For other languages, translate from the pristine original menu
+    setLoading(true);
+    setError(null);
+    try {
+      const translated = await translateMenu(originalMenu, lang);
+      setMenu(translated);
+    } catch (err) {
+      setError('Failed to translate menu.');
+      setMenu(originalMenu); // Fallback to original on error
+    } finally {
+      setLoading(false);
+    }
+  }, [originalMenu]); // This function is stable and only recreated if originalMenu changes
+
   useEffect(() => {
-    const handler = (lang) => {
-      if (lang === 'he') translateMenu('he');
-      // Optionally: if (lang === 'en') reload original menu
+    // Subscribe the stable handler to the language change event
+    EventBus.on('translateMenu', handleLanguageChange);
+    return () => {
+      // Unsubscribe on cleanup to prevent memory leaks
+      if (EventBus.off) {
+        EventBus.off('translateMenu', handleLanguageChange);
+      }
     };
-    EventBus.on('translateMenu', handler);
-    return () => {}; // cleanup if needed
-  }, [menu]);
+  }, [handleLanguageChange]);
+  
 
   return (
     <div className="space-y-6">
@@ -395,124 +445,51 @@ const MenuCreate = () => {
         </CardContent>
       </Card>
 
+     
+
+      {/* Save Button (not in PDF) */}
       {menu && menu.meals && menu.meals.length > 0 && (
-        <>
-          {menu.totals && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CalendarRange className="h-5 w-5 text-green-600" />
-                  {translations.dailyTotals || 'Daily Totals'}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="p-4 bg-green-50 rounded-lg">
-                    <p className="text-sm text-green-600 font-medium">{translations.calories || 'Calories'}</p>
-                    <p className="text-2xl font-bold text-green-700">
-                      {menu.totals.calories}
-                      <span className="text-sm font-normal text-green-600 ml-1">kcal</span>
-                    </p>
-                  </div>
-                  <div className="p-4 bg-blue-50 rounded-lg">
-                    <p className="text-sm text-blue-600 font-medium">{translations.protein || 'Protein'}</p>
-                    <p className="text-2xl font-bold text-blue-700">
-                      {menu.totals.protein}
-                      <span className="text-sm font-normal text-blue-600 ml-1">g</span>
-                    </p>
-                  </div>
-                  <div className="p-4 bg-yellow-50 rounded-lg">
-                    <p className="text-sm text-yellow-600 font-medium">{translations.fat || 'Fat'}</p>
-                    <p className="text-2xl font-bold text-yellow-700">
-                      {menu.totals.fat}
-                      <span className="text-sm font-normal text-yellow-600 ml-1">g</span>
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-          <div className="space-y-6">
-            {menu.meals.map((meal, index) => (
-              <Card key={index} className="overflow-hidden">
-                <CardHeader className="border-b bg-gray-50">
-                  <div className="flex justify-between items-center">
-                    <CardTitle className="flex items-center gap-2">
-                      <Utensils className="h-5 w-5 text-green-600" />
-                      {meal.meal}
-                    </CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent className="pt-6">
-                  <div className="space-y-6">
-                    {meal.main && (
-                      <div>
-                        <div className="flex items-center gap-2 mb-4">
-                          <Badge variant="outline" className="bg-green-100 border-green-200">
-                            {translations.mainOption || 'Main Option'}
-                          </Badge>
-                        </div>
-                        {renderMealOption({ ...meal.main, mealIndex: index }, false)}
-                      </div>
-                    )}
-
-                    {meal.alternative && (
-                      <div>
-                        <div className="flex items-center gap-2 mb-4">
-                          <Badge variant="outline" className="bg-blue-100 border-blue-200">
-                            {translations.alternative || 'Alternative'}
-                          </Badge>
-                        </div>
-                        {renderMealOption({ ...meal.alternative, mealIndex: index }, true)}
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          {menu.note && (
-            <Card>
-              <CardHeader>
-                <CardTitle>{translations.additionalNotes || 'Additional Notes'}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-gray-600 whitespace-pre-line">{menu.note}</p>
-              </CardContent>
-            </Card>
-          )}
-
-          <div className="flex justify-end">
-            <Button
-              onClick={handleSaveMenu}
-              disabled={saving}
-              className="bg-green-600 hover:bg-green-700"
-            >
-              {saving ? (
-                <Loader className="animate-spin h-4 w-4 mr-2" />
-              ) : (
-                <Save className="h-4 w-4 mr-2" />
-              )}
-              {saving ? (translations.saving || 'Saving...') : (translations.saveMenu || 'Save Menu')}
-            </Button>
-          </div>
-        </>
+        <div className="flex justify-end">
+          <Button
+            onClick={handleSaveMenu}
+            disabled={saving}
+            className="bg-green-600 hover:bg-green-700"
+          >
+            {saving ? (
+              <Loader className="animate-spin h-4 w-4 mr-2" />
+            ) : (
+              <Save className="h-4 w-4 mr-2" />
+            )}
+            {saving ? (translations.saving || 'Saving...') : (translations.saveMenu || 'Save Menu')}
+          </Button>
+        </div>
       )}
     </div>
   );
 };
 
+
+
+
 async function translateMenu(menu, targetLang = 'he') {
-  // Example: send the menu to your backend for translation
   const response = await fetch('http://localhost:5000/api/translate-menu', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ menu, targetLang }),
   });
-  if (!response.ok) throw new Error('Translation failed');
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Failed to parse error from server.' }));
+    console.error("Translation API error:", errorData);
+    throw new Error(errorData.error || 'Translation request failed');
+  }
+  
   const translatedMenu = await response.json();
   return translatedMenu;
+
+
+  
+  
 }
 
 export default MenuCreate;
