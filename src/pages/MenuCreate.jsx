@@ -163,86 +163,83 @@ const MenuCreate = () => {
   const navigate = useNavigate();
   const { language, translations } = useLanguage();
 
-  function calculateMainTotals(menu) {
-  let totalCalories = 0;
-  let totalProtein = 0;
-  let totalFat = 0;
-  let totalCarbs = 0;
 
-  if (!menu.meals) return { calories: 0, protein: 0, fat: 0, carbs: 0 };
-
-  menu.meals.forEach(meal => {
-    const nutrition = meal?.main?.nutrition || {};
-    totalCalories += Number(nutrition.calories) || 0;
-    totalProtein  += Number(nutrition.protein) || 0;
-    totalFat      += Number(nutrition.fat) || 0;
-    totalCarbs    += Number(nutrition.carbs) || 0;
-  });
-
-  return {
-    calories: Math.round(totalCalories),
-    protein: Math.round(totalProtein),
-    fat: Math.round(totalFat),
-    carbs: Math.round(totalCarbs),
-  };
-}
-
-  
-  
-  function generateShoppingList(menu) {
-    const list = {};
-    menu.meals.forEach(meal => {
-      ['main', 'alternative'].forEach(opt => {
-        if (meal[opt] && meal[opt].ingredients) {
-          meal[opt].ingredients.forEach(ing => {
-            const itemName = ing.item_en || ing.item || ''; // Use item_en if exists, else fallback
-            const unit = ing.unit || '';
-            const quantity = Number(ing.quantity) || 0;
-            const key = itemName + '_' + unit;
-            if (!list[key]) {
-              list[key] = { name: itemName, unit, quantity: 0 };
-            }
-            list[key].quantity += quantity;
-          });
-        }
-      });
+  async function downloadPdf(menu) {
+    const response = await fetch('http://localhost:5000/api/menu-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ menu })
     });
-    return Object.values(list);
+    const blob = await response.blob();
+    // Create a link to download
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'meal_plan.pdf';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
+
+  function calculateMainTotals(menu) {
+    let totalCalories = 0;
+    let totalProtein = 0;
+    let totalFat = 0;
+    let totalCarbs = 0;
+  
+    if (!menu.meals) return { calories: 0, protein: 0, fat: 0, carbs: 0 };
+  
+    menu.meals.forEach(meal => {
+      const nutrition = meal?.main?.nutrition || {};
+      totalCalories += Number(nutrition.calories) || 0;
+      totalProtein  += parseFloat(nutrition.protein) || 0;
+      totalFat      += parseFloat(nutrition.fat) || 0;
+      totalCarbs    += parseFloat(nutrition.carbs) || 0;
+    });
+  
+    return {
+      calories: Math.round(totalCalories),
+      protein: Math.round(totalProtein),
+      fat: Math.round(totalFat),
+      carbs: Math.round(totalCarbs),
+    };
   }
   
   const handleIngredientChange = (newValues, mealIndex, optionIndex, ingredientIndex) => {
     setMenu(prevMenu => {
-      const updatedMenu = { ...prevMenu };
+      const updatedMenu = JSON.parse(JSON.stringify(prevMenu));
       const meal = updatedMenu.meals[mealIndex];
       const option = optionIndex === 'main' ? meal.main : meal.alternative;
 
-      // Update the ingredient
       option.ingredients[ingredientIndex] = newValues;
 
-      // Update meal name: keep the part before "with", then add the first 2-3 ingredient names
-      const originalName = option.name;
-      const baseName = originalName.includes(' with ')
-        ? originalName.split(' with ')[0]
-        : originalName;
       const ingredientNames = option.ingredients.map(ing => ing.item).filter(Boolean);
       if (ingredientNames.length > 0) {
         option.name = `${option.name.split(' with ')[0]} with ${ingredientNames.join(', ')}`;
       }
 
-      // Recalculate meal nutrition by summing all ingredient values
-      const nutrition = option.ingredients.reduce(
-        (acc, ing) => ({
-          calories: acc.calories + (Number(ing.calories) || 0),
-          protein: acc.protein + (Number(ing.protein) || 0),
-          fat: acc.fat + (Number(ing.fat) || 0),
-          carbs: acc.carbs + (Number(ing.carbs) || 0),
-        }),
+      const newNutrition = option.ingredients.reduce(
+        (acc, ing) => {
+          acc.calories += Number(ing.nutrition?.calories) || 0;
+          acc.protein += parseFloat(ing.nutrition?.protein) || 0;
+          acc.fat += parseFloat(ing.nutrition?.fat) || 0;
+          acc.carbs += parseFloat(ing.nutrition?.carbs) || 0;
+          return acc;
+        },
         { calories: 0, protein: 0, fat: 0, carbs: 0 }
       );
-      option.nutrition = nutrition;
+      
+      option.nutrition = {
+        calories: Math.round(newNutrition.calories),
+        protein: `${Math.round(newNutrition.protein)}g`,
+        fat: `${Math.round(newNutrition.fat)}g`,
+        carbs: `${Math.round(newNutrition.carbs)}g`,
+      };
 
-      // Update menu totals as well
-      return calculateMainTotals(updatedMenu);
+      updatedMenu.totals = calculateMainTotals(updatedMenu);
+      
+      return updatedMenu;
     });
   };
 
@@ -445,7 +442,92 @@ const MenuCreate = () => {
         </CardContent>
       </Card>
 
-     
+      {menu && menu.meals && menu.meals.length > 0 && (
+        <>
+          {menu.totals && (
+            <Card className="bg-green-50/30">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-green-800">
+                  <CalendarRange className="h-5 w-5" />
+                  {translations.dailyTotals || 'Daily Totals'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="p-4 bg-white rounded-lg shadow-sm">
+                    <p className="text-sm text-green-600 font-medium">{translations.calories || 'Calories'}</p>
+                    <p className="text-2xl font-bold text-green-700">
+                      {menu.totals.calories}
+                      <span className="text-sm font-normal text-green-600 ml-1">kcal</span>
+                    </p>
+                  </div>
+                  <div className="p-4 bg-white rounded-lg shadow-sm">
+                    <p className="text-sm text-blue-600 font-medium">{translations.protein || 'Protein'}</p>
+                    <p className="text-2xl font-bold text-blue-700">
+                      {menu.totals.protein}
+                      <span className="text-sm font-normal text-blue-600 ml-1">g</span>
+                    </p>
+                  </div>
+                  <div className="p-4 bg-white rounded-lg shadow-sm">
+                    <p className="text-sm text-amber-600 font-medium">{translations.fat || 'Fat'}</p>
+                    <p className="text-2xl font-bold text-amber-700">
+                      {menu.totals.fat}
+                      <span className="text-sm font-normal text-amber-600 ml-1">g</span>
+                    </p>
+                  </div>
+                  <div className="p-4 bg-white rounded-lg shadow-sm">
+                    <p className="text-sm text-orange-600 font-medium">{translations.carbs || 'Carbs'}</p>
+                    <p className="text-2xl font-bold text-orange-700">
+                      {menu.totals.carbs}
+                      <span className="text-sm font-normal text-orange-600 ml-1">g</span>
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          <div className="space-y-6">
+            {menu.meals.map((meal, index) => (
+              <Card key={index} className="overflow-hidden">
+                <CardHeader className="border-b bg-gray-50">
+                  <div className="flex justify-between items-center">
+                    <CardTitle className="flex items-center gap-2">
+                      <Utensils className="h-5 w-5 text-green-600" />
+                      {meal.meal}
+                    </CardTitle>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <div className="space-y-6">
+                    {meal.main && (
+                      <div>
+                        <div className="flex items-center gap-2 mb-4">
+                          <Badge variant="outline" className="bg-green-100 border-green-200">
+                            {translations.mainOption || 'Main Option'}
+                          </Badge>
+                        </div>
+                        {renderMealOption({ ...meal.main, mealIndex: index }, false)}
+                      </div>
+                    )}
+
+                    {meal.alternative && (
+                      <div>
+                        <div className="flex items-center gap-2 mb-4">
+                          <Badge variant="outline" className="bg-blue-100 border-blue-200">
+                            {translations.alternative || 'Alternative'}
+                          </Badge>
+                        </div>
+                        {renderMealOption({ ...meal.alternative, mealIndex: index }, true)}
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
+  <Button onClick={() => downloadPdf(menu)}>Download as PDF</Button>
 
       {/* Save Button (not in PDF) */}
       {menu && menu.meals && menu.meals.length > 0 && (

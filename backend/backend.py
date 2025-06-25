@@ -7,8 +7,13 @@ from dotenv import load_dotenv
 from functools import wraps
 import logging
 import traceback
+from io import BytesIO
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from io import BytesIO
+from flask import send_file
 
-# Configure logging
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -16,50 +21,77 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 app = Flask(__name__)
-# Configure CORS to allow all origins for development.
-# This tells the browser that it's safe for your frontend (running on any port)
-# to make requests to this backend.
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# Initialize the translator with a specific service URL for better reliability
-# translator = Translator(service_urls=['translate.google.com'])
 
-# Dictionary for common ingredient translations (EN -> HE)
-# This provides faster, more accurate translations for common items.
-# FOOD_TRANSLATIONS_HE = {
-#     "chicken breast": "חזה עוף",
-#     "salmon fillet": "פילה סלמון",
-#     "brown rice": "אורז מלא",
-#     "quinoa": "קינואה",
-#     "sweet potato": "בטטה",
-#     "broccoli": "ברוקולי",
-#     "spinach": "תרד",
-#     "olive oil": "שמן זית",
-#     "almonds": "שקדים",
-#     "walnuts": "אגוזי מלך",
-#     "greek yogurt": "יוגורט יווני",
-#     "oats": "שיבולת שועל",
-#     "rolled oats": "שיבולת שועל",
-#     "mixed berries": "פירות יער",
-#     "egg": "ביצה",
-#     "eggs": "ביצים",
-#     "whole wheat bread": "לחם חיטה מלאה",
-#     "avocado": "אבוקדו",
-#     "cottage cheese": "גבינת קוטג'",
-#     "tuna": "טונה",
-#     "apple": "תפוח",
-#     "banana": "בננה",
-#     "protein powder": "אבקת חלבון",
-#     "milk": "חלב",
-#     "honey": "דבש",
-#     "chia seeds": "זרעי צ'יה",
-#     "low-fat granola": "גרנולה דלת שומן",
-#     "non-fat greek yogurt": "יוגורט יווני 0% שומן",
-# }
+@app.route('/api/menu-pdf', methods=['POST'])
+def generate_menu_pdf():
+    data = request.json
+    menu = data.get("menu", {})
 
-# Set of units and patterns to prevent from being translated
-# UNTRANSLATABLE_PATTERNS = re.compile(r'^\d+(\.\d+)?$') # Matches numbers like "100" or "1.5"
-# UNTRANSLATABLE_UNITS = {"g", "kg", "ml", "l", "oz", "cup", "cups", "tbsp", "tsp"}
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+    y = height - 40
+    margin = 40  # bottom margin
+
+    def ensure_space(amount=20):
+        nonlocal y
+        if y < margin + amount:
+            c.showPage()
+            y = height - margin
+
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(40, y, "Meal Plan")
+    y -= 30
+
+    if "meals" in menu:
+        for meal in menu["meals"]:
+            ensure_space(40)
+            c.setFont("Helvetica-Bold", 14)
+            c.drawString(40, y, meal.get('meal', ''))
+            y -= 20
+            for opt in ['main', 'alternative']:
+                if opt in meal and meal[opt]:
+                    ensure_space(30)
+                    c.setFont("Helvetica", 12)
+                    c.drawString(60, y, f"{opt.title().capitalize()} option: {meal[opt].get('name', '')}")
+                    y -= 16
+                    for ing in meal[opt].get('ingredients', []):
+                        ensure_space(18)
+                        line = f"- {ing.get('item', '')} - {ing.get('quantity', '')} {ing.get('unit', '')}"
+                        c.drawString(80, y, line)
+                        y -= 14
+                    y -= 10
+            y -= 10
+
+    # ---- Show daily totals at the end ----
+    if "totals" in menu:
+        ensure_space(60)
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(40, y, "Daily Macros Totals:")
+        y -= 24
+        c.setFont("Helvetica", 12)
+        totals = menu["totals"]
+        c.drawString(60, y, f"Calories: {totals.get('calories', 0)} kcal")
+        y -= 18
+        c.drawString(60, y, f"Protein: {totals.get('protein', 0)} g")
+        y -= 18
+        c.drawString(60, y, f"Fat: {totals.get('fat', 0)} g")
+        y -= 18
+        c.drawString(60, y, f"Carbs: {totals.get('carbs', 0)} g")
+        y -= 24
+
+    c.save()
+    buffer.seek(0)
+
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name="meal_plan.pdf",
+        mimetype="application/pdf"
+    )
+
 
 def load_user_preferences():
     try:
