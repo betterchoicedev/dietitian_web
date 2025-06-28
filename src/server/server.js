@@ -54,7 +54,9 @@ app.get('/api/ingredient-nutrition', async (req, res) => {
 app.get('/api/ingredient-upc', async (req, res) => {
   const { brand, name } = req.query;
   if (!brand || !name) {
-    return res.status(400).json({ error: 'Both "brand" and "name" are required.' });
+    return res
+      .status(400)
+      .json({ error: 'Both "brand" and "name" query parameters are required.' });
   }
 
   try {
@@ -66,7 +68,7 @@ app.get('/api/ingredient-upc', async (req, res) => {
         SELECT TOP 1 gtinUpc AS upc
         FROM foods_storage WITH (NOLOCK)
         WHERE brand LIKE N'%' + @brand + '%'
-          AND name  LIKE N'%' + @name  + '%'
+          AND english_name LIKE N'%' + @name  + '%'
       `);
 
     const upc = result.recordset[0]?.upc ?? null;
