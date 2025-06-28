@@ -4,8 +4,6 @@ import { getIngredientSuggestions, getIngredientNutrition } from '../api/autocom
 
 const app = express();
 const port = process.env.PORT || 3001;
-import express from 'express';
-import cors from 'cors';
 import sql from 'mssql';
 
 app.use(cors());
@@ -23,7 +21,6 @@ const dbConfig = {
     trustServerCertificate: false
   }
 };
-app.use(cors());
 
 // Suggestions endpoint
 app.get('/api/suggestions', async (req, res) => {
