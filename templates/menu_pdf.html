@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: sans-serif; margin: 40pt; }
+    h2.meal { color: #22c55e; border-bottom: 1px solid #d1fae5; padding-bottom: 4pt; }
+    .card { border-radius: 12px; padding: 12pt; margin-bottom: 16pt; }
+    .card.main { background: #e6f9f0; }
+    .card.alt  { background: #e0f2fe; }
+    .macros { display: flex; gap: 2in; font-weight: bold; }
+    .macros .carbs { color: #fb923c }
+    .macros .fat   { color: #facc15 }
+    .macros .prot  { color: #2563eb }
+    ul { margin-top: 8pt; padding-left: 20pt; }
+  </style>
+</head>
+<body>
+  <h1 style="text-align:center; color:#22c55e;">BetterChoice – Meal Plan</h1>
+  <p style="text-align:center; color:grey;">Client: OBI · Date: {{ today }}</p>
+  <h3>Daily Totals</h3>
+  <div class="card main">
+    <div class="macros">
+      <div>{{ totals.calories }} kcal</div>
+      <div class="carbs">Carbs: {{ totals.carbs }}g</div>
+      <div class="fat">Fat: {{ totals.fat }}g</div>
+      <div class="prot">Protein: {{ totals.protein }}g</div>
+    </div>
+  </div>
+
+  {% for meal in menu.meals %}
+    <h2 class="meal">{{ meal.meal }}</h2>
+
+    <div class="card main">
+      <strong>Main Option: </strong>{{ meal.main.meal_title }}<br/>
+      <div class="macros">
+        <div>{{ meal.main.nutrition.calories }} kcal</div>
+        <div class="carbs">Carbs: {{ meal.main.nutrition.carbs }}g</div>
+        <div class="fat">Fat: {{ meal.main.nutrition.fat }}g</div>
+        <div class="prot">Protein: {{ meal.main.nutrition.protein }}g</div>
+      </div>
+      <ul>
+        {% for ing in meal.main.ingredients %}
+          <li>{{ ing.item }} {{ ing.quantity }}{{ ing.unit }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="card alt">
+      <strong>Alternative: </strong>{{ meal.alternative.meal_title }}<br/>
+      <div class="macros">
+        <div>{{ meal.alternative.nutrition.calories }} kcal</div>
+        <div class="carbs">Carbs: {{ meal.alternative.nutrition.carbs }}g</div>
+        <div class="fat">Fat: {{ meal.alternative.nutrition.fat }}g</div>
+        <div class="prot">Protein: {{ meal.alternative.nutrition.protein }}g</div>
+      </div>
+      <ul>
+        {% for ing in meal.alternative.ingredients %}
+          <li>{{ ing.item }} {{ ing.quantity }}{{ ing.unit }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endfor %}
+
+  <hr style="margin-top:40pt;"/>
+  <p style="text-align:center; color:grey; font-size:10pt;">
+    © BetterChoice {{ year }}
+  </p>
+</body>
+</html>

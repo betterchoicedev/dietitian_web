@@ -12,6 +12,7 @@ import { EventBus } from '@/utils/EventBus';
 import ReactToPdf from 'react-to-pdf';
 
 
+
 const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
@@ -162,6 +163,7 @@ const MenuCreate = () => {
   const [error, setError] = useState(null);
   const navigate = useNavigate();
   const { language, translations } = useLanguage();
+  const [generatingAlt, setGeneratingAlt] = useState({});
 
 
   async function downloadPdf(menu) {
@@ -407,6 +409,42 @@ const MenuCreate = () => {
   }, [handleLanguageChange]);
   
 
+  async function generateAlternativeMeal(main, alternative) {
+    const response = await fetch('http://localhost:5000/api/generate-alternative-meal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ main, alternative })
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to generate alternative meal');
+    }
+    return await response.json();
+  }
+
+  const handleAddAlternative = async (mealIdx) => {
+    setGeneratingAlt((prev) => ({ ...prev, [mealIdx]: true }));
+    try {
+      setMenu((prevMenu) => {
+        const meal = prevMenu.meals[mealIdx];
+        if (!meal || !meal.main || !meal.alternative) return prevMenu;
+        return prevMenu;
+      });
+      const meal = menu.meals[mealIdx];
+      const newAlt = await generateAlternativeMeal(meal.main, meal.alternative);
+      setMenu((prevMenu) => {
+        const updated = { ...prevMenu };
+        if (!updated.meals[mealIdx].alternatives) updated.meals[mealIdx].alternatives = [];
+        updated.meals[mealIdx].alternatives.push(newAlt);
+        return { ...updated };
+      });
+    } catch (err) {
+      alert(err.message || 'Failed to generate alternative meal');
+    } finally {
+      setGeneratingAlt((prev) => ({ ...prev, [mealIdx]: false }));
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
@@ -487,8 +525,8 @@ const MenuCreate = () => {
             </Card>
           )}
           <div className="space-y-6">
-            {menu.meals.map((meal, index) => (
-              <Card key={index} className="overflow-hidden">
+            {menu.meals.map((meal, mealIdx) => (
+              <Card key={mealIdx} className="overflow-hidden">
                 <CardHeader className="border-b bg-gray-50">
                   <div className="flex justify-between items-center">
                     <CardTitle className="flex items-center gap-2">
@@ -506,7 +544,7 @@ const MenuCreate = () => {
                             {translations.mainOption || 'Main Option'}
                           </Badge>
                         </div>
-                        {renderMealOption({ ...meal.main, mealIndex: index }, false)}
+                        {renderMealOption({ ...meal.main, mealIndex: mealIdx }, false)}
                       </div>
                     )}
 
@@ -517,9 +555,37 @@ const MenuCreate = () => {
                             {translations.alternative || 'Alternative'}
                           </Badge>
                         </div>
-                        {renderMealOption({ ...meal.alternative, mealIndex: index }, true)}
+                        {renderMealOption({ ...meal.alternative, mealIndex: mealIdx }, true)}
                       </div>
                     )}
+
+                    {/* Render additional alternatives if present */}
+                    {meal.alternatives && meal.alternatives.length > 0 && (
+                      <div className="mt-4">
+                        <div className="font-semibold mb-2 text-blue-700">Other Alternatives:</div>
+                        <div className="space-y-4">
+                          {meal.alternatives.map((alt, altIdx) => (
+                            <div key={altIdx} className="bg-blue-50 rounded-lg p-3">
+                              {renderMealOption({ ...alt, mealIndex: mealIdx }, true)}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Add Alternative Button */}
+                    <div className="mt-4 flex justify-end">
+                      <Button
+                        onClick={() => handleAddAlternative(mealIdx)}
+                        disabled={generatingAlt[mealIdx]}
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
+                      >
+                        {generatingAlt[mealIdx] ? (
+                          <Loader className="animate-spin h-4 w-4 mr-2" />
+                        ) : null}
+                        {generatingAlt[mealIdx] ? 'Generating...' : 'Add Alternative'}
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -554,25 +620,19 @@ const MenuCreate = () => {
 
 
 async function translateMenu(menu, targetLang = 'he') {
-  const response = await fetch('http://localhost:5000/api/translate-menu', {
+  const response = await fetch('http://localhost:5000/api/translate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ menu, targetLang }),
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ error: 'Failed to parse error from server.' }));
-    console.error("Translation API error:", errorData);
-    throw new Error(errorData.error || 'Translation request failed');
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Translation failed');
   }
-  
-  const translatedMenu = await response.json();
-  return translatedMenu;
-
-
-  
-  
+  return await response.json();
 }
+
 
 export default MenuCreate;
 

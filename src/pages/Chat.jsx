@@ -24,6 +24,15 @@ export default function Chat() {
   const [imageFile, setImageFile] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  const toBase64 = file =>
+    new Promise(resolve => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+    });
+  
+
+
   const handleRefresh = () => {
     setRefreshKey(prev => prev + 1);
   };
@@ -135,11 +144,12 @@ catch (err) {
       // Create the user message object
       let userMessage = { role: 'user', content: message };
 
+      let base64Image = null;
       // Handle image upload if selected
       if (imageFile instanceof File) {
         try {
-          const { url, file_url } = await UploadFile(imageFile);
-          userMessage.image_url = url || file_url;
+          base64Image = await toBase64(imageFile);
+          userMessage.image_url = `data:image/jpeg;base64,${base64Image}`;
         } catch (uploadError) {
           console.error("Error uploading image:", uploadError);
           setError("Failed to upload image. Please try again.");
@@ -147,16 +157,14 @@ catch (err) {
           return;
         }
       }
-      
-      
 
       // Update chat with user message
       const updatedMessages = [...(selectedChat.messages || []), userMessage];
 
-const chatHistoryForPrompt = updatedMessages
-  .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
-  .join('\n');
-      
+      const chatHistoryForPrompt = updatedMessages
+        .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
+        .join('\n');
+
       await ChatEntity.update(selectedChat.id, { messages: updatedMessages });
 
       // Prepare client profile for AI context
@@ -172,60 +180,24 @@ const chatHistoryForPrompt = updatedMessages
       };
 
       // Prepare AI prompt
-      const aiPrompt = `You are a professional nutrition coach assistant for BetterChoice Nutrition service.
-        
-        CLIENT PROFILE:
-        ${JSON.stringify(clientProfile)}
-
-        CHAT HISTORY:
-        ${chatHistoryForPrompt}
-
-        
-        ${currentMenu ? `CURRENT MENU PLAN:
-        ${JSON.stringify(currentMenu)}` : 'No current menu plan.'}
-        
-        USER MESSAGE:
-        ${message}
-
-        ${userMessage.image_url ? `The user has shared an image...` : ''}
-
-        
-        ${userMessage.image_url ? `
-        The user has shared an image of food. Please:
-        1. Analyze if this food fits their dietary plan and goals
-        2. Provide nutritional insights
-        3. Suggest any modifications if needed
-        ` : ''}
-        
-        Please provide a friendly, concise response that directly addresses the user's question. Use emojis appropriately to make the conversation engaging. Focus only on what was asked without adding unnecessary information. Keep your response natural and conversational.`;
+      let aiPrompt;
+      if (base64Image) {
+        aiPrompt = "Analyze this image for food content:";
+      } else {
+        aiPrompt = `You are a professional nutrition coach assistant for BetterChoice Nutrition service.\n\nCLIENT PROFILE:\n${JSON.stringify(clientProfile)}\n\nCHAT HISTORY:\n${chatHistoryForPrompt}\n\n${currentMenu ? `CURRENT MENU PLAN:\n${JSON.stringify(currentMenu)}` : 'No current menu plan.'}\n\nUSER MESSAGE:\n${message}`;
+      }
 
       // Default fallback response in case AI fails
-      let aiResponse = `Thank you for your message${userMessage.image_url ? ' and the food image' : ''}. 
-
-Based on your profile (${clientProfile.gender}, ${clientProfile.age} years old, goal: ${clientProfile.goal}), here are some nutrition insights:
-
-1. Your current calorie target should be approximately ${clientProfile.gender === 'male' ? 
-  (clientProfile.goal === 'lose' ? '1800-2000' : clientProfile.goal === 'gain' ? '2500-2800' : '2200-2400') : 
-  (clientProfile.goal === 'lose' ? '1500-1700' : clientProfile.goal === 'gain' ? '2000-2200' : '1800-2000')} calories per day
-
-2. Focus on getting adequate protein (${clientProfile.goal === 'lose' ? '1.6-2.0' : '1.2-1.6'} g/kg of body weight) to maintain muscle mass
-
-3. Stay well-hydrated with at least 8 glasses of water daily
-
-${userMessage.image_url ? `
-Regarding the food in your image:
-- This appears to be a balanced meal with protein, vegetables, and some carbohydrates
-- Ensure portion sizes align with your calorie goals
-- Consider adding more vegetables for additional volume and nutrients with minimal calories
-` : ''}
-
-Would you like more specific advice on meal timing, portion sizes, or nutrient distribution?`;
+      let aiResponse = `Thank you for your message${userMessage.image_url ? ' and the food image' : ''}. \n\nBased on your profile (${clientProfile.gender}, ${clientProfile.age} years old, goal: ${clientProfile.goal}), here are some nutrition insights:\n\n1. Your current calorie target should be approximately ${clientProfile.gender === 'male' ? 
+        (clientProfile.goal === 'lose' ? '1800-2000' : clientProfile.goal === 'gain' ? '2500-2800' : '2200-2400') : 
+        (clientProfile.goal === 'lose' ? '1500-1700' : clientProfile.goal === 'gain' ? '2000-2200' : '1800-2000')} calories per day\n\n2. Focus on getting adequate protein (${clientProfile.goal === 'lose' ? '1.6-2.0' : '1.2-1.6'} g/kg of body weight) to maintain muscle mass\n\n3. Stay well-hydrated with at least 8 glasses of water daily\n\n${userMessage.image_url ? `\nRegarding the food in your image:\n- This appears to be a balanced meal with protein, vegetables, and some carbohydrates\n- Ensure portion sizes align with your calorie goals\n- Consider adding more vegetables for additional volume and nutrients with minimal calories\n` : ''}\n\nWould you like more specific advice on meal timing, portion sizes, or nutrient distribution?`;
 
       // Try to get AI response, use fallback if it fails
       try {
         const response = await InvokeLLM({
           prompt: aiPrompt,
-          add_context_from_internet: false
+          add_context_from_internet: false,
+          base64Image: base64Image || undefined
         });
         if (response) {
           aiResponse = response;
@@ -237,7 +209,7 @@ Would you like more specific advice on meal timing, portion sizes, or nutrient d
       // Update chat with AI response
       const finalMessages = [...updatedMessages, { role: 'assistant', content: aiResponse }];
       await ChatEntity.update(selectedChat.id, { messages: finalMessages });
-      
+
       // Update local state
       setSelectedChat(prev => ({
         ...prev,

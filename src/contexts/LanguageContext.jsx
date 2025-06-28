@@ -1,4 +1,5 @@
 import React, { createContext, useState, useContext } from 'react';
+import { EventBus } from '@/utils/EventBus';
 
 export const LanguageContext = createContext();
 
@@ -163,12 +164,15 @@ export const translations = {
 export function LanguageProvider({ children }) {
   const [language, setLanguage] = useState(languages.en);
 
-  const toggleLanguage = () => {
+  const toggleLanguage = async () => {
     const newLanguage = language === languages.en ? languages.he : languages.en;
     setLanguage(newLanguage);
     // Update document direction based on new language
     document.documentElement.dir = newLanguage === languages.he ? 'rtl' : 'ltr';
     document.documentElement.lang = newLanguage;
+
+    // Notify listeners (e.g., MenuCreate.jsx) to translate menu if needed
+    EventBus.emit('translateMenu', newLanguage);
   };
 
   // Set initial direction and language

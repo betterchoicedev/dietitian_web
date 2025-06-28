@@ -10,8 +10,13 @@ import traceback
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-from io import BytesIO
+from reportlab.lib import colors
+from reportlab.lib.utils import ImageReader
 from flask import send_file
+import datetime
+import requests
+from copy import deepcopy
+import re
 
 
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +28,125 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
+@app.route("/api/translate", methods=["POST"])
+def api_translate_menu():
+    data = request.get_json()
+    menu = data.get("menu", {})
+    target = data.get("targetLang", "he")
+
+    # Custom translation mapping for specific food terms (phrases first, then single words)
+    custom_terms = [
+      {"en": "Whole Wheat Toast", "he": "טוסט חיטה מלאה"},
+      {"en": "Egg Wrap", "he": "טורטייה ממולאת ביצה"},
+      {"en": "Veggie Wrap", "he": "טורטייה ממולאת ירקות"},
+      {"en": "Egg and Veggie Wrap", "he": "טורטייה ממולאת ביצה וירקות"},
+      # ... add more phrases as needed ...
+      {"en": "Wrap", "he": "טורטייה ממולאת"},
+      {"en": "Roll", "he": "לחמנייה"},
+      {"en": "Pocket", "he": "כיס פיתה"},
+      {"en": "Bar", "he": "חטיף"},
+      {"en": "Chips", "he": "צ'יפס / קריספס"},
+      {"en": "Biscuit", "he": "ביסקוויט / עוגייה"},
+      {"en": "Cookie", "he": "עוגייה"},
+      {"en": "Pudding", "he": "פודינג"},
+      {"en": "Mousse", "he": "מוס"},
+      {"en": "Dressing", "he": "רוטב לסלט"},
+      {"en": "Entrée", "he": "מנה עיקרית / מנת פתיחה"},
+      {"en": "Starter", "he": "מנה ראשונה"},
+      {"en": "Batter", "he": "בלילה"},
+      {"en": "Toast", "he": "טוסט"},
+      {"en": "Jam", "he": "ריבה"},
+      {"en": "Roll-up", "he": "חטיף גליל"},
+      {"en": "Popsicle", "he": "ארטיק"},
+      {"en": "Cider", "he": "סיידר / מיץ תפוחים"},
+      {"en": "Cereal", "he": "דגני בוקר"},
+      {"en": "Stew", "he": "תבשיל"},
+    ]
+    # Sort terms by length of English phrase, descending (longest first)
+    custom_terms.sort(key=lambda t: -len(t["en"]))
+    custom_map = {t["en"].lower(): t["he"] for t in custom_terms}
+    custom_words = [t["en"] for t in custom_terms]
+
+    # 1. Gather every string you want to translate, and remember its "path" in the object
+    texts = []
+    paths = []
+    if menu.get("note"):
+        texts.append(menu["note"])
+        paths.append(("note",))
+    for mi, meal in enumerate(menu.get("meals", [])):
+        texts.append(meal.get("meal", ""))
+        paths.append(("meals", mi, "meal"))
+        for optKey in ("main", "alternative"):
+            opt = meal.get(optKey)
+            if not opt:
+                continue
+            texts.append(opt.get("meal_title", ""))
+            paths.append(("meals", mi, optKey, "meal_title"))
+            for ii, ing in enumerate(opt.get("ingredients", [])):
+                texts.append(ing.get("item", ""))
+                paths.append(("meals", mi, optKey, "ingredients", ii, "item"))
+        alternatives = meal.get("alternatives", [])
+        for ai, alt in enumerate(alternatives):
+            texts.append(alt.get("meal_title", ""))
+            paths.append(("meals", mi, "alternatives", ai, "meal_title"))
+            for ii, ing in enumerate(alt.get("ingredients", [])):
+                texts.append(ing.get("item", ""))
+                paths.append(("meals", mi, "alternatives", ai, "ingredients", ii, "item"))
+
+    # 2. For Hebrew: replace mapped phrases/words with placeholders, send to Azure, then restore
+    placeholder_map = []  # List of dicts: {ph: hebrew}
+    texts_for_azure = []
+    if target == "he":
+        for i, t in enumerate(texts):
+            orig = t
+            ph_map = {}
+            ph_idx = 0
+            # Replace each mapped phrase/word with a unique placeholder (longest first)
+            def repl_func(match):
+                nonlocal ph_idx
+                en_word = match.group(0)
+                ph = f"__CUSTOMWORD{ph_idx}__"
+                ph_map[ph] = custom_map[en_word.lower()]
+                ph_idx += 1
+                return ph
+            for en_word in custom_words:
+                pattern = r'(?<!\w)'+re.escape(en_word)+r'(?!\w)'
+                t = re.sub(pattern, repl_func, t, flags=re.IGNORECASE)
+            placeholder_map.append(ph_map)
+            texts_for_azure.append(t)
+    else:
+        texts_for_azure = texts
+        placeholder_map = [{} for _ in texts]
+
+    # 3. Call Azure Translator in bulk
+    endpoint = os.getenv("AZURE_TRANSLATOR_ENDPOINT")
+    key      = os.getenv("AZURE_TRANSLATOR_KEY")
+    region   = os.getenv("AZURE_TRANSLATOR_REGION")
+    url = f"{endpoint}/translate?api-version=3.0&to={target}"
+    headers = {
+      "Ocp-Apim-Subscription-Key": key,
+      "Ocp-Apim-Subscription-Region": region,
+      "Content-Type": "application/json"
+    }
+    body = [{"Text": t} for t in texts_for_azure]
+    translations = []
+    if body:
+        resp = requests.post(url, headers=headers, json=body)
+        resp.raise_for_status()
+        translations = resp.json()   # a list, same length as body
+    # 4. Restore placeholders with Hebrew terms
+    new_menu = deepcopy(menu)
+    for idx, trans_item in enumerate(translations):
+        translated = trans_item["translations"][0]["text"]
+        # Replace placeholders with Hebrew
+        for ph, heb in placeholder_map[idx].items():
+            translated = translated.replace(ph, heb)
+        path = paths[idx]
+        obj = new_menu
+        for key in path[:-1]:
+            obj = obj[key]
+        obj[path[-1]] = translated
+    return jsonify(new_menu)
 
 @app.route('/api/menu-pdf', methods=['POST'])
 def generate_menu_pdf():
@@ -33,54 +157,235 @@ def generate_menu_pdf():
     c = canvas.Canvas(buffer, pagesize=letter)
     width, height = letter
     y = height - 40
-    margin = 40  # bottom margin
+    margin = 40
+    card_width = min(520, width - 2*margin)
+    card_padding = 18
+    card_height = 90
+    line_height = 13
+    first_page = True
+    client_name = "OBI"
+    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
 
-    def ensure_space(amount=20):
-        nonlocal y
-        if y < margin + amount:
-            c.showPage()
-            y = height - margin
+    # --- Colors ---
+    green_bg = colors.HexColor("#e6f9f0")
+    green_accent = colors.HexColor("#22c55e")
+    blue_bg = colors.HexColor("#e0f2fe")
+    blue_accent = colors.HexColor("#2563eb")
+    yellow_accent = colors.HexColor("#facc15")
+    orange_accent = colors.HexColor("#fb923c")
+    border_color = colors.HexColor("#d1fae5")
 
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(40, y, "Meal Plan")
-    y -= 30
+    def draw_logo(y):
+        logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../public/logo-placeholder.png'))
+        if os.path.exists(logo_path):
+            try:
+                logo = ImageReader(logo_path)
+                c.drawImage(logo, width/2-40, y-60, width=80, height=80, mask='auto')
+            except Exception:
+                pass
+        return y - 80
 
+    def draw_copyright():
+        c.setStrokeColor(border_color)
+        c.setLineWidth(1)
+        c.line(margin, margin+20, width-margin, margin+20)
+        c.setFont("Helvetica", 10)
+        c.setFillColor(colors.grey)
+        c.drawCentredString(width/2, margin+8, "© BetterChoice 2025")
+
+    def draw_title(y):
+        c.setFont("Helvetica-Bold", 24)
+        c.setFillColor(green_accent)
+        c.drawCentredString(width/2, y, "BetterChoice - Meal Plan")
+        y -= 30
+        c.setFont("Helvetica", 14)
+        c.setFillColor(colors.black)
+        c.drawCentredString(width/2, y, "Personalized Nutrition Menu")
+        y -= 18
+        c.setFont("Helvetica-Bold", 12)
+        c.setFillColor(green_accent)
+        c.drawCentredString(width/2, y, f"Client: {client_name}")
+        y -= 14
+        c.setFont("Helvetica", 11)
+        c.setFillColor(colors.grey)
+        c.drawCentredString(width/2, y, f"Date: {today_str}")
+        y -= 12
+        c.setStrokeColor(border_color)
+        c.setLineWidth(2)
+        c.line(margin, y, width-margin, y)
+        y -= 20
+        return y
+
+    # Draw logo and title only on the first page
+    if first_page:
+        y = draw_logo(y)
+        y = draw_title(y)
+        first_page = False
+
+    # --- Daily Totals Card ---
+    if "totals" in menu:
+        totals = menu["totals"]
+        c.setFillColor(green_bg)
+        c.roundRect((width-card_width)/2, y-60, card_width, 60, 12, fill=1, stroke=0)
+        c.setFont("Helvetica-Bold", 15)
+        c.setFillColor(green_accent)
+        c.drawString((width-card_width)/2+card_padding, y-18, "Daily Totals")
+        c.setFont("Helvetica-Bold", 13)
+        x0 = (width-card_width)/2+card_padding
+        c.setFillColor(green_accent)
+        c.drawString(x0, y-38, f"{totals.get('calories', 0)} kcal")
+        c.setFillColor(orange_accent)
+        c.drawString(x0+120, y-38, f"Carbs: {totals.get('carbs', 0)}g")
+        c.setFillColor(yellow_accent)
+        c.drawString(x0+240, y-38, f"Fat: {totals.get('fat', 0)}g")
+        c.setFillColor(blue_accent)
+        c.drawString(x0+340, y-38, f"Protein: {totals.get('protein', 0)}g")
+        y -= 60 + 20
+
+    # --- Meals as Cards ---
     if "meals" in menu:
         for meal in menu["meals"]:
-            ensure_space(40)
-            c.setFont("Helvetica-Bold", 14)
-            c.drawString(40, y, meal.get('meal', ''))
-            y -= 20
-            for opt in ['main', 'alternative']:
-                if opt in meal and meal[opt]:
-                    ensure_space(30)
-                    c.setFont("Helvetica", 12)
-                    c.drawString(60, y, f"{opt.title().capitalize()} option: {meal[opt].get('name', '')}")
-                    y -= 16
-                    for ing in meal[opt].get('ingredients', []):
-                        ensure_space(18)
-                        line = f"- {ing.get('item', '')} - {ing.get('quantity', '')} {ing.get('unit', '')}"
-                        c.drawString(80, y, line)
-                        y -= 14
-                    y -= 10
+            # --- Calculate total height needed for this meal box ---
+            main_ings = meal.get('main', {}).get('ingredients', [])
+            alt_ings = meal.get('alternative', {}).get('ingredients', [])
+            main_card_height = max(card_height, card_padding*2 + line_height*len(main_ings))
+            alt_card_height = max(card_height, card_padding*2 + line_height*len(alt_ings))
+            other_alts = meal.get('alternatives', [])
+            other_alt_heights = []
+            for alt in other_alts:
+                alt_ings = alt.get('ingredients', [])
+                other_alt_heights.append(max(card_height, card_padding*2 + line_height*len(alt_ings)))
+            # Height for meal header, main, alt, label, all alternatives, and paddings
+            meal_header_height = 38
+            label_height = 18 if other_alts else 0
+            total_meal_height = (
+                meal_header_height + main_card_height + 18 + alt_card_height + 24 +
+                label_height + sum(h + 18 for h in other_alt_heights) + 10
+            )
+            # --- Page break if not enough space ---
+            if y - total_meal_height < margin + 40:
+                draw_copyright()
+                c.showPage()
+                y = height - 40
+            # --- Start of meal box (invisible, but reserve space) ---
+            box_top = y
+            # Meal Header
+            meal_name = meal.get('meal', '')
+            c.setFont("Helvetica-Bold", 18)
+            c.setFillColor(green_accent)
+            c.drawString(margin, y, meal_name)
             y -= 10
+            c.setStrokeColor(border_color)
+            c.setLineWidth(1)
+            c.line(margin, y, width-margin, y)
+            y -= 10
+            # Main Option Card
+            main = meal.get('main', {})
+            c.setFillColor(green_bg)
+            c.roundRect((width-card_width)/2, y-main_card_height, card_width, main_card_height, 12, fill=1, stroke=0)
+            c.setFont("Helvetica-Bold", 13)
+            c.setFillColor(green_accent)
+            c.drawString((width-card_width)/2+card_padding, y-20, "Main Option")
+            y_main_title = y-36
+            main_title = main.get('meal_title')
+            if main_title:
+                c.setFont("Helvetica", 11)
+                c.setFillColor(colors.HexColor("#4ade80"))
+                c.drawString((width-card_width)/2+card_padding, y_main_title, main_title)
+                y_macros = y_main_title - 14
+            else:
+                y_macros = y-36
+            main_nut = main.get('nutrition', {})
+            nut_x = (width+card_width)/2-card_padding
+            c.setFont("Helvetica-Bold", 11)
+            c.setFillColor(green_accent)
+            c.drawRightString(nut_x-270, y_macros, f"{main_nut.get('calories', 0)} kcal")
+            c.setFillColor(orange_accent)
+            c.drawRightString(nut_x-180, y_macros, f"Carbs: {main_nut.get('carbs', 0)}g")
+            c.setFillColor(yellow_accent)
+            c.drawRightString(nut_x-90, y_macros, f"Fat: {main_nut.get('fat', 0)}g")
+            c.setFillColor(blue_accent)
+            c.drawRightString(nut_x, y_macros, f"Protein: {main_nut.get('protein', 0)}g")
+            c.setFont("Helvetica-Bold", 11)
+            c.setFillColor(colors.black)
+            ing_y = y_macros - 18
+            for ing in main_ings:
+                c.drawString((width-card_width)/2+card_padding+10, ing_y, f"• {ing.get('item','')}   {ing.get('quantity','')} {ing.get('unit','')}")
+                ing_y -= line_height + 2
+            y -= main_card_height + 18
+            # Alternative Option Card (first alternative)
+            alt_opt = meal.get('alternative', {})
+            c.setFillColor(blue_bg)
+            c.roundRect((width-card_width)/2, y-alt_card_height, card_width, alt_card_height, 12, fill=1, stroke=0)
+            c.setFont("Helvetica-Bold", 13)
+            c.setFillColor(blue_accent)
+            c.drawString((width-card_width)/2+card_padding, y-20, "Alternative 1")
+            y_alt_title = y-36
+            alt_title = alt_opt.get('meal_title')
+            if alt_title:
+                c.setFont("Helvetica", 11)
+                c.setFillColor(colors.HexColor("#38bdf8"))
+                c.drawString((width-card_width)/2+card_padding, y_alt_title, alt_title)
+                y_alt_macros = y_alt_title - 14
+            else:
+                y_alt_macros = y-36
+            alt_nut = alt_opt.get('nutrition', {})
+            c.setFont("Helvetica-Bold", 11)
+            c.setFillColor(green_accent)
+            c.drawRightString(nut_x-270, y_alt_macros, f"{alt_nut.get('calories', 0)} kcal")
+            c.setFillColor(orange_accent)
+            c.drawRightString(nut_x-180, y_alt_macros, f"Carbs: {alt_nut.get('carbs', 0)}g")
+            c.setFillColor(yellow_accent)
+            c.drawRightString(nut_x-90, y_alt_macros, f"Fat: {alt_nut.get('fat', 0)}g")
+            c.setFillColor(blue_accent)
+            c.drawRightString(nut_x, y_alt_macros, f"Protein: {alt_nut.get('protein', 0)}g")
+            c.setFont("Helvetica-Bold", 11)
+            c.setFillColor(colors.black)
+            ing_y = y_alt_macros - 18
+            for ing in alt_ings:
+                c.drawString((width-card_width)/2+card_padding+10, ing_y, f"• {ing.get('item','')}   {ing.get('quantity','')} {ing.get('unit','')}")
+                ing_y -= line_height + 2
+            y -= alt_card_height + 24
+            # Render all other alternatives
+            if other_alts:
+                c.setFont("Helvetica-Bold", 13)
+                c.setFillColor(blue_accent)
+                c.drawString(margin, y, "Other Alternatives:")
+                y -= 16
+                for alt_idx, alt in enumerate(other_alts):
+                    alt_ings = alt.get('ingredients', [])
+                    alt_card_height = max(card_height, card_padding*2 + line_height*len(alt_ings))
+                    c.setFillColor(blue_bg)
+                    c.roundRect((width-card_width)/2, y-alt_card_height, card_width, alt_card_height, 12, fill=1, stroke=0)
+                    c.setFont("Helvetica-Bold", 13)
+                    c.setFillColor(blue_accent)
+                    c.drawString((width-card_width)/2+card_padding, y-20, f"Alternative {alt_idx+2}")
+                    alt_title = alt.get('meal_title')
+                    if alt_title:
+                        c.setFont("Helvetica", 11)
+                        c.setFillColor(colors.HexColor("#38bdf8"))
+                        c.drawString((width-card_width)/2+card_padding, y-36, alt_title)
+                    alt_nut = alt.get('nutrition', {})
+                    c.setFont("Helvetica-Bold", 11)
+                    c.setFillColor(green_accent)
+                    c.drawRightString(nut_x-270, y-36, f"{alt_nut.get('calories', 0)} kcal")
+                    c.setFillColor(orange_accent)
+                    c.drawRightString(nut_x-180, y-36, f"Carbs: {alt_nut.get('carbs', 0)}g")
+                    c.setFillColor(yellow_accent)
+                    c.drawRightString(nut_x-90, y-36, f"Fat: {alt_nut.get('fat', 0)}g")
+                    c.setFillColor(blue_accent)
+                    c.drawRightString(nut_x, y-36, f"Protein: {alt_nut.get('protein', 0)}g")
+                    c.setFont("Helvetica-Bold", 11)
+                    c.setFillColor(colors.black)
+                    ing_y = y-54
+                    for ing in alt_ings:
+                        c.drawString((width-card_width)/2+card_padding+10, ing_y, f"• {ing.get('item','')}   {ing.get('quantity','')} {ing.get('unit','')}")
+                        ing_y -= line_height + 2
+                    y -= alt_card_height + 18
+            # --- End of meal box ---
+            y = box_top - total_meal_height  # move y down by reserved height for next meal
 
-    # ---- Show daily totals at the end ----
-    if "totals" in menu:
-        ensure_space(60)
-        c.setFont("Helvetica-Bold", 16)
-        c.drawString(40, y, "Daily Macros Totals:")
-        y -= 24
-        c.setFont("Helvetica", 12)
-        totals = menu["totals"]
-        c.drawString(60, y, f"Calories: {totals.get('calories', 0)} kcal")
-        y -= 18
-        c.drawString(60, y, f"Protein: {totals.get('protein', 0)} g")
-        y -= 18
-        c.drawString(60, y, f"Fat: {totals.get('fat', 0)} g")
-        y -= 18
-        c.drawString(60, y, f"Carbs: {totals.get('carbs', 0)} g")
-        y -= 24
+    draw_copyright()
 
     c.save()
     buffer.seek(0)
@@ -320,7 +625,9 @@ def api_build_menu():
                     "You are a professional dietitian AI. "
                     "Given a meal template for one meal and user preferences, build the **main option only** for this meal. "
                     "The meal you generate MUST have the EXACT name as provided in 'meal_name'. "
-                    "Provide: `meal_name`,`meal_title`, `ingredients` (list of {item, quantity, unit, calories, protein, fat, carbs}), and `nutrition` (sum of ingredients). "
+    "Provide: `meal_name`, `meal_title`, `ingredients` (list of objects with keys "
+      "`item`, `quantity`, `unit`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
+    "and `nutrition` (sum of ingredients). "
                     "Macros must match the template within ±30%. Respond only with valid JSON."
                 )
                 main_content = {
@@ -392,7 +699,9 @@ def api_build_menu():
                     "You are a professional dietitian AI. "
                     "Given a meal template for one meal and user preferences, build the **alternative option only** for this meal. "
                     "The meal you generate MUST have the EXACT name as provided in 'meal_name'. "
-                    "Provide: `meal_name`, `meal_title`, `ingredients` (list of {item, quantity, unit, calories, protein, fat, carbs}), and `nutrition` (sum of ingredients). "
+    "Provide: `meal_name`, `meal_title`, `ingredients` (list of objects with keys "
+      "`item`, `quantity`, `unit`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
+    "and `nutrition` (sum of ingredients). "
                     "Macros must match the template within ±30%. Respond only with valid JSON."
                 )
                 alt_content = {
@@ -463,6 +772,8 @@ def api_build_menu():
 
         logger.info("✅ Finished building full menu.")
         totals = calculate_totals(full_menu)
+        # Log the entire menu and totals for debugging
+        logger.info("Full menu built: %s", json.dumps({"menu": full_menu, "totals": totals}, ensure_ascii=False, indent=2))
         return jsonify({"menu": full_menu, "totals": totals})
 
     except Exception as e:
@@ -632,8 +943,53 @@ def api_validate_template():
         logger.error("❌ Exception in /api/validate-template:\n%s", traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/generate-alternative-meal', methods=['POST'])
+def generate_alternative_meal():
+    data = request.get_json()
+    main = data.get('main')
+    alternative = data.get('alternative')
+    if not main or not alternative:
+        return jsonify({'error': 'Missing main or alternative meal'}), 400
 
+    # Load user preferences as in /api/build-menu
+    try:
+        preferences = load_user_preferences()
+    except Exception as e:
+        return jsonify({'error': f'Failed to load user preferences: {str(e)}'}), 500
 
+    # Compose prompt for OpenAI
+    system_prompt = (
+        "You are a professional dietitian AI. Given a main meal, an existing alternative, and user preferences, generate a new, distinct alternative meal option. "
+        "The new alternative should have similar calories and macros, but use different main ingredients than both the main and the current alternative. "
+        "Return ONLY the new alternative meal as valid JSON with: meal_title, ingredients (list of {item, quantity, unit, calories, protein, fat, carbs}), and nutrition (sum of ingredients)."
+    )
+    user_prompt = {
+        "role": "user",
+        "content": json.dumps({
+            "main": main,
+            "current_alternative": alternative,
+            "user_preferences": preferences
+        })
+    }
+    try:
+        response = openai.ChatCompletion.create(
+            engine=deployment,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                user_prompt
+            ],
+            temperature=0.4
+        )
+        raw = response["choices"][0]["message"]["content"]
+        try:
+            parsed = json.loads(raw)
+            return jsonify(parsed)
+        except Exception:
+            logger.error(f"❌ JSON parse error for new alternative meal:\n{raw}")
+            return jsonify({"error": "Invalid JSON from OpenAI", "raw": raw}), 500
+    except Exception as e:
+        logger.error(f"Error generating alternative meal: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(debug=os.getenv("FLASK_DEBUG", "False").lower() == "true")

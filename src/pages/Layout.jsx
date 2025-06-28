@@ -66,94 +66,34 @@ export default function Layout() {
   React.useEffect(() => {
     const loadUserData = async () => {
       if (!user) return;
-      
-      // Don't reload if we already have the data
-      if (dataLoadedRef.current) {
-        return;
-      }
-      
-      console.log('Loading user data...');
+      // don’t run twice
+      if (dataLoadedRef.current) return;
+  
+      console.log('Loading auth user data (id & email)…');
       setIsLoading(true);
       setError(null);
-      
+  
       try {
-        // Get or create user profile
-        let { data: profile, error: profileError } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single();
-
-        if (profileError) {
-          if (profileError.code === 'PGRST116') {
-            // Profile doesn't exist, create it
-            const defaultProfile = {
-              id: user.id,
-              email: user.email,
-              specialization: "Weight Management and Sports Nutrition",
-              certification: "Registered Dietitian, MS in Clinical Nutrition",
-              years_of_experience: 8,
-              clinic_name: "BetterChoice Nutrition Center",
-              clinic_address: "123 Health Street, Suite 450, San Francisco, CA 94110",
-              profile_bio: "I'm a certified nutritionist with over 8 years of experience helping clients achieve their health goals through personalized nutrition plans.",
-              languages: ["English"],
-              consultation_fee: 120,
-              available_times: ["Monday 9-5", "Wednesday 9-5", "Friday 9-5"]
-            };
-
-            const { data: newProfile, error: createError } = await supabase
-              .from('profiles')
-              .insert([defaultProfile])
-              .select()
-              .single();
-
-            if (createError) throw createError;
-            profile = newProfile;
-          } else {
-            throw profileError;
-          }
-        }
-
-        console.log('Profile loaded:', profile?.id);
-        setUserData(profile);
-
-        // Get clients
-        const { data: clientList, error: clientsError } = await supabase
-          .from('clients')
-          .select('*')
-          .eq('dietitian_id', user.id);
-
-        if (clientsError) throw clientsError;
-
-        console.log('Clients loaded:', clientList?.length);
-        setClients(clientList || []);
-
-        // Handle selected client
-        if (profile.selected_client_id) {
-          setSelectedClient(profile.selected_client_id);
-        } else if (clientList && clientList.length > 0) {
-          const { data: updateData, error: updateError } = await supabase
-            .from('profiles')
-            .update({ selected_client_id: clientList[0].id })
-            .eq('id', user.id)
-            .select()
-            .single();
-
-          if (updateError) throw updateError;
-          setSelectedClient(clientList[0].id);
-        }
-
+        // Only id & email are available on the auth user
+        const authData = {
+          id:    user.id,
+          email: user.email,
+        };
+  
+        console.log('Auth user loaded:', authData);
+        setUserData(authData);
         dataLoadedRef.current = true;
-      } catch (error) {
-        console.error('Error loading user data:', error);
-        setError("Failed to load user data. Please try refreshing the page.");
+      } catch (err) {
+        console.error('Error loading auth user data:', err);
+        setError('Failed to load user data. Please refresh.');
       } finally {
         setIsLoading(false);
       }
     };
-
+  
     loadUserData();
-  }, [user]); // Only depend on user
+  }, [user]);
+  
 
   const handleClientChange = async (clientId) => {
     try {

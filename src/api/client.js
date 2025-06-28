@@ -146,8 +146,17 @@ const apiKey = "7GE7Tuq2qHvKvTHjS6oqkZ3zQuROcPwgFt5VHHbaPhGnGxLIJBZRJQQJ99BBACYe
 // Core integrations
 export const integrations = {
   Core: {
-    InvokeLLM: async ({ prompt, response_json_schema }) => {
+    InvokeLLM: async ({ prompt, response_json_schema, base64Image }) => {
       try {
+        let userContent;
+        if (base64Image) {
+          userContent = [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
+          ];
+        } else {
+          userContent = prompt;
+        }
         const response = await fetch(`${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`, {
           method: 'POST',
           headers: {
@@ -163,7 +172,7 @@ export const integrations = {
               },
               {
                 role: 'user',
-                content: prompt
+                content: userContent
               }
             ],
             max_tokens: 800,
