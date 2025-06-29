@@ -280,6 +280,8 @@ const MenuCreate = () => {
     setMenu(translatedMenu);
   } else {
     setMenu(menuData); // Already in English
+    console.log(menuData);
+    
   }
 
     } catch (err) {
