@@ -59,25 +59,93 @@ app.get('/api/ingredient-upc', async (req, res) => {
       .json({ error: 'Both "brand" and "name" query parameters are required.' });
   }
 
-  try {
-    const pool = await sql.connect(dbConfig);
-    const result = await pool.request()
-      .input('brand', sql.NVarChar, brand)
-      .input('name',  sql.NVarChar, name)
-      .query(`
-        SELECT TOP 1 gtinUpc AS upc
-        FROM foods_storage WITH (NOLOCK)
-        WHERE brand LIKE N'%' + @brand + '%'
-          AND english_name LIKE N'%' + @name  + '%'
-      `);
+  // split the name into non-empty terms
+  const terms = name
+    .trim()
+    .split(/\s+/)
+    .filter(t => t.length > 0);
 
-    const upc = result.recordset[0]?.upc ?? null;
+  try {
+    const pool   = await sql.connect(dbConfig);
+    const request = pool.request();
+
+    // bind brand
+    request.input('brand', sql.NVarChar, brand);
+
+    // bind each name-term
+    terms.forEach((term, i) => {
+      request.input(`term${i}`, sql.NVarChar, term);
+    });
+
+    // build WHERE: brand LIKE ... AND english_name LIKE %term0% AND %term1% ...
+    const nameClauses = terms
+      .map((_, i) => `english_name LIKE N'%' + @term${i} + '%'`)
+      .join('\n    AND ');
+    const whereClause = `
+      brand        LIKE N'%' + @brand + '%'
+      AND ${nameClauses}
+    `;
+
+    const sqlText = `
+      SELECT TOP 1 gtinUpc AS upc
+      FROM foods_storage WITH (NOLOCK)
+      WHERE ${whereClause}
+      ORDER BY LEN(english_name)
+    `;
+
+    const result = await request.query(sqlText);
+    const upc    = result.recordset[0]?.upc ?? null;
     res.json({ upc });
+
   } catch (err) {
     console.error('[/api/ingredient-upc] DB error:', err);
     res.status(500).json({ error: 'Database lookup failed.' });
   }
 });
+
+
+app.get('/api/ingredient-upc-hebrew', async (req, res) => {
+  const { query } = req.query;
+  if (!query) {
+    return res
+      .status(400)
+      .json({ error: 'Missing “query” parameter. E.g. ?query=Buttermilk Tnuva' });
+  }
+
+  // split on spaces, drop any empties
+  const terms = query
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  try {
+    const pool = await sql.connect(dbConfig);
+    // build a dynamic WHERE clause: english_name LIKE %term0% AND %term1% AND ...
+    const request = pool.request();
+    const clauses = terms.map((term, i) => {
+      const key = `term${i}`;
+      request.input(key, sql.NVarChar, term);
+      return `english_name LIKE N'%' + @${key} + '%'`;
+    });
+
+    const sqlText = `
+      SELECT TOP 1 gtinUpc AS upc
+      FROM foods_storage WITH (NOLOCK)
+      WHERE ${clauses.join(' AND ')}
+      ORDER BY LEN(english_name)
+    `;
+
+    const result = await request.query(sqlText);
+    const upc = result.recordset[0]?.upc ?? null;
+    res.json({ upc });
+  } catch (err) {
+    console.error('[/api/ingredient-upc-hebrew] DB error:', err);
+    res.status(500).json({ error: 'Database lookup failed.' });
+  }
+});
+
+
+
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);

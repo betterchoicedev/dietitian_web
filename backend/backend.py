@@ -773,6 +773,32 @@ def api_build_menu():
         logger.info("✅ Finished building full menu.")
         totals = calculate_totals(full_menu)
         # Log the entire menu and totals for debugging
+        for meal in full_menu:
+            for section in ("main", "alternative"):
+                block = meal.get(section, {})
+                for ing in block.get("ingredients", []):
+                    brand = ing.get("brand of pruduct", "")
+                    name  = ing.get("item", "")
+                    # Log what we’re about to look up
+                    app.logger.info(f"Looking up UPC for brand={brand!r}, name={name!r}")
+
+                    try:
+                        resp = requests.get(
+                            "https://dietitian-web.onrender.com/api/ingredient-upc",  # removed extra slash
+                            params={"brand": brand, "name": name},
+                            timeout=5
+                        )
+                        app.logger.info(f"UPC lookup HTTP {resp.status_code} — URL: {resp.url}")
+                        app.logger.info(f"UPC lookup response body: {resp.text}")
+
+                        resp.raise_for_status()
+                        data = resp.json()
+                        ing["UPC"] = data.get("upc")
+                        app.logger.info(f"Parsed UPC: {ing['UPC']!r}")
+
+                    except Exception as e:
+                        ing["UPC"] = None
+                        app.logger.warning(f"UPC lookup failed for {brand!r} {name!r}: {e}")
         logger.info("Full menu built: %s", json.dumps({"menu": full_menu, "totals": totals}, ensure_ascii=False, indent=2))
         return jsonify({"menu": full_menu, "totals": totals})
 
