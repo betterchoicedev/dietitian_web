@@ -167,7 +167,7 @@ const MenuCreate = () => {
 
 
   async function downloadPdf(menu) {
-    const response = await fetch('http://localhost:5000/api/menu-pdf', {
+    const response = await fetch('https://dietitian-web-backend.onrender.com/api/menu-pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ menu })
@@ -251,13 +251,13 @@ const MenuCreate = () => {
       setError(null);
 
       // Step 1: Get meal template
-      const templateRes = await fetch("http://localhost:5000/api/template", { method: "POST" });
+      const templateRes = await fetch("https://dietitian-web-backend.onrender.com/api/template", { method: "POST" });
       const templateData = await templateRes.json();
       if (templateData.error || !templateData.template) throw new Error("Template generation failed");
       const template = templateData.template;
 
       // Step 2: Build menu (backend now does all meal-by-meal logic + validation)
-      const buildRes = await fetch("http://localhost:5000/api/build-menu", {
+      const buildRes = await fetch("https://dietitian-web-backend.onrender.com/api/build-menu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template }),
@@ -412,7 +412,7 @@ const MenuCreate = () => {
   
 
   async function generateAlternativeMeal(main, alternative) {
-    const response = await fetch('http://localhost:5000/api/generate-alternative-meal', {
+    const response = await fetch('https://dietitian-web-backend.onrender.com/api/generate-alternative-meal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ main, alternative })
@@ -622,7 +622,7 @@ const MenuCreate = () => {
 
 
 async function translateMenu(menu, targetLang = 'he') {
-  const response = await fetch('http://localhost:5000/api/translate', {
+  const response = await fetch('https://dietitian-web-backend.onrender.com/api/translate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ menu, targetLang }),
