@@ -34,6 +34,8 @@ import EditClient from "./EditClient";
 
 import MenuView from "./MenuView";
 
+import MenuLoad from "./MenuLoad";
+
 import { BrowserRouter as Router, Route, Routes, useLocation, Navigate } from 'react-router-dom';
 
 const PAGES = {
@@ -71,6 +73,8 @@ const PAGES = {
     EditClient: EditClient,
     
     MenuView: MenuView,
+    
+    MenuLoad: MenuLoad,
     
 }
 
@@ -146,6 +150,9 @@ function PagesContent() {
                 
                 <Route path="/MenuView" element={<MenuView />} />
                 <Route path="/menuview" element={<Navigate to="/MenuView" replace />} />
+                
+                <Route path="/MenuLoad" element={<MenuLoad />} />
+                <Route path="/menuload" element={<Navigate to="/MenuLoad" replace />} />
             </Routes>
         </Layout>
     );

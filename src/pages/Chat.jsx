@@ -1,21 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Chat as ChatEntity } from '@/api/entities';
+import { ChatUser } from '@/api/entities';
 import { Menu } from '@/api/entities';
 import { Client } from '@/api/entities';
 import { User } from '@/api/entities';
 import { InvokeLLM, UploadFile } from '@/api/integrations';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Image as ImageIcon, Send, Loader2, MessageSquare, InfoIcon, RefreshCw } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Image as ImageIcon, Send, Loader2, MessageSquare, InfoIcon, RefreshCw, Users } from 'lucide-react';
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function Chat() {
+  const { language, translations } = useLanguage();
   const [selectedChat, setSelectedChat] = useState(null);
   const [message, setMessage] = useState('');
   const [client, setClient] = useState(null);
-  const [currentMenu, setCurrentMenu] = useState(null);
+  const [selectedClientUserCode, setSelectedClientUserCode] = useState(null);
+  const [availableClients, setAvailableClients] = useState([]);
+  const [mealPlanData, setMealPlanData] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingData, setIsFetchingData] = useState(true);
   const [error, setError] = useState(null);
@@ -42,95 +47,72 @@ export default function Chat() {
   }, [refreshKey]);
 
   useEffect(() => {
+    if (selectedClientUserCode) {
+      loadClientData(selectedClientUserCode);
+    }
+  }, [selectedClientUserCode]);
+
+  useEffect(() => {
     scrollToBottom();
   }, [selectedChat?.messages]);
+
+  const handleClientSelect = (userCode) => {
+    setSelectedClientUserCode(userCode);
+    setSelectedChat(null); // Reset chat when selecting new client
+  };
 
   const loadData = async () => {
     setIsFetchingData(true);
     setError(null);
     
     try {
-      let userData;
- try {
-  
-  const res = await fetch('/client.json');
-  userData = await res.json();
-  userData.selectedClientId = userData.id;  } 
-
-catch (err) {
-  // fallback for Netlify
-  // 👈 simulate selected client
-}
-
-
+      console.log("Loading available clients from Supabase...");
       
-      if (!userData.selectedClientId) {
-        setError("No client selected. Please select a client first.");
-        setIsFetchingData(false);
-        return;
-      }
+      // Load all available clients from chat_users table
+      const clients = await ChatUser.list();
+      setAvailableClients(clients);
       
-      const clientData = await Client.get(userData.selectedClientId);
+      console.log("Available clients loaded:", clients);
+      
+    } catch (error) {
+      console.error("Error loading clients:", error);
+      setError(translations.failedToLoadClients);
+    } finally {
+      setIsFetchingData(false);
+    }
+  };
+
+  const loadClientData = async (userCode) => {
+    if (!userCode) return;
+    
+    setIsFetchingData(true);
+    setError(null);
+    
+    try {
+      console.log("Loading client data for user_code:", userCode);
+      
+      // Get client data from chat_users table
+      const clientData = await ChatUser.getByUserCode(userCode);
       setClient(clientData);
       
-      // Check if clientData and user_code are valid
-      if (!clientData || !clientData.user_code) {
-        console.error("Client data or user_code missing:", clientData);
-        setError("Client data is incomplete. Please check client settings.");
-        setIsFetchingData(false);
-        return;
-      }
-      
-      // Get active menus first, then published, then drafts
-      const clientMenus = await Menu.filter({ 
-        user_code: clientData.user_code,
-        status: 'active'
-      });
-      
-      if (clientMenus.length === 0) {
-        const publishedMenus = await Menu.filter({ 
-          user_code: clientData.user_code,
-          status: 'published'
-        });
-        
-        if (publishedMenus.length > 0) {
-          setCurrentMenu(publishedMenus[0]);
-        } else {
-          const draftMenus = await Menu.filter({ user_code: clientData.user_code });
-          if (draftMenus.length > 0) {
-            setCurrentMenu(draftMenus[0]);
-          }
-        }
-      } else {
-        setCurrentMenu(clientMenus[0]);
-      }
+      // Get meal plan data from meal_plans_and_schemas table
+      const mealPlan = await ChatUser.getMealPlanByUserCode(userCode);
+      setMealPlanData(mealPlan);
       
       console.log("Client data loaded:", clientData);
-      console.log("User code:", clientData.user_code);
+      console.log("Meal plan data loaded:", mealPlan);
       
-      // First try to find existing chat
-      const chats = await ChatEntity.filter({ 
-        client_id: clientData.id,
-        user_code: clientData.user_code
-      });
-      
-      console.log("Found chats:", chats);
-      
-      if (chats && chats.length > 0) {
-        setSelectedChat(chats[0]);
-      } else {
-        // Create new chat with proper user_code
-        const newChat = await ChatEntity.create({
-          client_id: clientData.id,
-          user_code: clientData.user_code,
-          messages: []
-        });
-        console.log("Created new chat:", newChat);
-        setSelectedChat(newChat);
-      }
+      // Create a new temporary chat for this client (in memory only)
+      const newChat = {
+        id: `temp-${userCode}-${Date.now()}`,
+        user_code: userCode,
+        messages: []
+      };
+      setSelectedChat(newChat);
+      console.log("Created temporary chat for user:", userCode);
     } catch (error) {
-      console.error("Error loading data:", error);
-      setError("Failed to load chat data. Please try again later.");
+      console.error("Error loading client data:", error);
+      setError(translations.failedToLoadClientData);
     } finally {
       setIsFetchingData(false);
     }
@@ -152,45 +134,96 @@ catch (err) {
           userMessage.image_url = `data:image/jpeg;base64,${base64Image}`;
         } catch (uploadError) {
           console.error("Error uploading image:", uploadError);
-          setError("Failed to upload image. Please try again.");
+          setError(translations.failedToUpload);
           setIsLoading(false);
           return;
         }
       }
 
       // Update chat with user message
-      const updatedMessages = [...(selectedChat.messages || []), userMessage];
+      const currentMessages = selectedChat?.messages || [];
+      const updatedMessages = [...currentMessages, userMessage];
 
       const chatHistoryForPrompt = updatedMessages
         .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
         .join('\n');
 
-      await ChatEntity.update(selectedChat.id, { messages: updatedMessages });
-
       // Prepare client profile for AI context
       const clientProfile = {
         name: client.full_name,
-        age: client.age,
-        gender: client.gender,
-        height: client.height,
-        weight: client.weight,
-        activity_level: client.activity_level,
-        goal: client.goal,
-        dietary_restrictions: client.dietary_restrictions || []
+        user_code: client.user_code,
+        // Add any additional client fields that might be available
+        ...(client.age && { age: client.age }),
+        ...(client.gender && { gender: client.gender }),
+        ...(client.height && { height: client.height }),
+        ...(client.weight && { weight: client.weight }),
+        ...(client.activity_level && { activity_level: client.activity_level }),
+        ...(client.goal && { goal: client.goal })
       };
+
+      // Prepare meal plan context
+      const mealPlanContext = mealPlanData ? {
+        meal_plan: mealPlanData.meal_plan,
+        daily_total_calories: mealPlanData.daily_total_calories,
+        macros_target: mealPlanData.macros_target,
+        recommendations: mealPlanData.recommendations,
+        dietary_restrictions: mealPlanData.dietary_restrictions
+      } : null;
 
       // Prepare AI prompt
       let aiPrompt;
+      const instruction = `You are a professional and friendly nutrition coach for BetterChoice.
+Your response must be in natural, conversational language. DO NOT output JSON, code, or markdown.
+Address the client by their first name: ${client.full_name.split(' ')[0]}.
+
+Here is the context for your response:
+- Client Profile: ${JSON.stringify(clientProfile)}
+- Chat History (most recent messages are last): 
+${chatHistoryForPrompt}
+- Current Meal Plan: ${mealPlanContext ? JSON.stringify(mealPlanContext) : 'Not available.'}
+
+---
+Your task is to respond to the user's message below.
+`;
+
       if (base64Image) {
-        aiPrompt = "Analyze this image for food content:";
+        aiPrompt = `${instruction}The user has sent an image and a message. Analyze them and provide a helpful response.\nUSER MESSAGE: "${message}"`;
       } else {
-        aiPrompt = `You are a professional nutrition coach assistant for BetterChoice Nutrition service.\n\nCLIENT PROFILE:\n${JSON.stringify(clientProfile)}\n\nCHAT HISTORY:\n${chatHistoryForPrompt}\n\n${currentMenu ? `CURRENT MENU PLAN:\n${JSON.stringify(currentMenu)}` : 'No current menu plan.'}\n\nUSER MESSAGE:\n${message}`;
+        aiPrompt = `${instruction}The user has sent a message. Provide a helpful response.\nUSER MESSAGE: "${message}"`;
       }
 
       // Default fallback response in case AI fails
-      let aiResponse = `Thank you for your message${userMessage.image_url ? ' and the food image' : ''}. \n\nBased on your profile (${clientProfile.gender}, ${clientProfile.age} years old, goal: ${clientProfile.goal}), here are some nutrition insights:\n\n1. Your current calorie target should be approximately ${clientProfile.gender === 'male' ? 
-        (clientProfile.goal === 'lose' ? '1800-2000' : clientProfile.goal === 'gain' ? '2500-2800' : '2200-2400') : 
-        (clientProfile.goal === 'lose' ? '1500-1700' : clientProfile.goal === 'gain' ? '2000-2200' : '1800-2000')} calories per day\n\n2. Focus on getting adequate protein (${clientProfile.goal === 'lose' ? '1.6-2.0' : '1.2-1.6'} g/kg of body weight) to maintain muscle mass\n\n3. Stay well-hydrated with at least 8 glasses of water daily\n\n${userMessage.image_url ? `\nRegarding the food in your image:\n- This appears to be a balanced meal with protein, vegetables, and some carbohydrates\n- Ensure portion sizes align with your calorie goals\n- Consider adding more vegetables for additional volume and nutrients with minimal calories\n` : ''}\n\nWould you like more specific advice on meal timing, portion sizes, or nutrient distribution?`;
+      let aiResponse = `Thank you for your message${userMessage.image_url ? ' and the food image' : ''}. \n\n`;
+      
+      if (mealPlanContext) {
+        aiResponse += `Based on your personalized meal plan:\n\n`;
+        if (mealPlanContext.daily_total_calories) {
+          aiResponse += `• Your daily calorie target: ${mealPlanContext.daily_total_calories} calories\n`;
+        }
+        if (mealPlanContext.macros_target) {
+          aiResponse += `• Your macro targets: ${JSON.stringify(mealPlanContext.macros_target)}\n`;
+        }
+        if (mealPlanContext.dietary_restrictions) {
+          aiResponse += `• Dietary restrictions: ${JSON.stringify(mealPlanContext.dietary_restrictions)}\n`;
+        }
+        if (mealPlanContext.recommendations) {
+          aiResponse += `\nRecommendations for you:\n${mealPlanContext.recommendations}\n`;
+        }
+      } else {
+        aiResponse += `Here are some general nutrition insights:\n\n`;
+        aiResponse += `1. Focus on balanced meals with protein, healthy fats, and complex carbohydrates\n`;
+        aiResponse += `2. Stay well-hydrated with at least 8 glasses of water daily\n`;
+        aiResponse += `3. Eat regular meals to maintain stable energy levels\n`;
+      }
+      
+      if (userMessage.image_url) {
+        aiResponse += `\n\nRegarding the food in your image:\n`;
+        aiResponse += `- This appears to be a meal you've shared for analysis\n`;
+        aiResponse += `- Consider how it fits into your daily nutrition goals\n`;
+        aiResponse += `- Feel free to ask specific questions about the nutritional content\n`;
+      }
+      
+      aiResponse += `\n\nWould you like more specific advice about your meal plan or nutrition goals?`;
 
       // Try to get AI response, use fallback if it fails
       try {
@@ -206,9 +239,27 @@ catch (err) {
         console.error('Error getting AI response, using fallback:', aiError);
       }
 
+      // Clean up the response to remove any prepended JSON
+      if (aiResponse.trim().startsWith('{')) {
+        const lastBracketIndex = aiResponse.lastIndexOf('}');
+        if (lastBracketIndex !== -1) {
+          const potentialJson = aiResponse.substring(0, lastBracketIndex + 1);
+          const remainingText = aiResponse.substring(lastBracketIndex + 1).trim();
+          
+          try {
+            // Only strip the JSON if there is text following it.
+            if (remainingText) {
+              JSON.parse(potentialJson);
+              aiResponse = remainingText;
+            }
+          } catch (e) {
+            // It wasn't valid JSON, so do nothing and keep the original response.
+          }
+        }
+      }
+
       // Update chat with AI response
       const finalMessages = [...updatedMessages, { role: 'assistant', content: aiResponse }];
-      await ChatEntity.update(selectedChat.id, { messages: finalMessages });
 
       // Update local state
       setSelectedChat(prev => ({
@@ -222,7 +273,7 @@ catch (err) {
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (error) {
       console.error('Error sending message:', error);
-      setError('Failed to send message. Please try again.');
+      setError(translations.failedToSend);
     } finally {
       setIsLoading(false);
     }
@@ -275,108 +326,156 @@ catch (err) {
   return (
     <div className="h-[calc(100vh-8rem)]">
       <div className="flex flex-col h-full">
+        {/* Client Selection */}
         <Card className="mb-4">
           <CardHeader>
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
-              <div>
-                <CardTitle>Chat with {client?.full_name}</CardTitle>
-                <CardDescription>Client Code: {client?.user_code}</CardDescription>
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div className="flex-1">
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="h-5 w-5" />
+                  {translations.selectClientToChat}
+                </CardTitle>
+                <CardDescription>{translations.chooseClientFromList}</CardDescription>
               </div>
-              {currentMenu && (
-                <div className="text-sm text-right">
-                  <span className="text-gray-500">Current menu: </span>
-                  <span className="font-medium">{currentMenu.programName}</span>
-                </div>
-              )}
+              <div className="w-full md:w-auto md:min-w-[300px]">
+                <Select value={selectedClientUserCode || ""} onValueChange={handleClientSelect}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={translations.selectAClient} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableClients.map((client) => (
+                      <SelectItem key={client.user_code} value={client.user_code}>
+                        {client.full_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardHeader>
         </Card>
-        
-        <Card className="flex-1 flex flex-col mb-4">
-          <CardContent className="flex-1 p-4 overflow-hidden">
-            <ScrollArea className="h-full pr-4">
-              {selectedChat?.messages?.length > 0 ? (
-                selectedChat.messages.map((msg, index) => (
-                  <div
-                    key={index}
-                    className={`mb-4 flex ${
-                      msg.role === 'user' ? 'justify-end' : 'justify-start'
-                    }`}
-                  >
-                    <div
-                      className={`rounded-lg px-4 py-2 max-w-[80%] ${
-                        msg.role === 'user'
-                          ? 'bg-green-600 text-white'
-                          : 'bg-gray-100 text-gray-900'
-                      }`}
-                    >
-                      {msg.image_url && (
-                        <img
-                          src={msg.image_url}
-                          alt="Uploaded food"
-                          className="rounded-lg mb-2 max-w-full"
-                        />
-                      )}
-                      <div className="whitespace-pre-wrap">{msg.content}</div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-center p-8 text-gray-500">
-                  <MessageSquare className="h-12 w-12 text-gray-300 mb-4" />
-                  <h3 className="text-xl font-medium mb-2">Start a Conversation</h3>
-                  <p className="max-w-md">
-                    Chat with {client?.full_name} about their nutrition plan. 
-                    You can also share food images for analysis.
-                  </p>
-                </div>
-              )}
-              <div ref={chatEndRef} />
-            </ScrollArea>
-          </CardContent>
-        </Card>
 
-        <div className="flex gap-2">
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept="image/*"
-            className="hidden"
-            onChange={handleFileChange}
-          />
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isLoading}
-            className={`border-green-200 ${imageFile ? 'bg-green-50 text-green-600' : 'hover:bg-green-50'}`}
-          >
-            <ImageIcon className="h-5 w-5" />
-          </Button>
-          <Input
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder={`Message ${client?.full_name}...`}
-            disabled={isLoading}
-            className="border-green-200 focus:ring-green-500"
-          />
-          <Button
-            onClick={handleSend}
-            disabled={(!message.trim() && !imageFile) || isLoading}
-            className="bg-green-600 hover:bg-green-700"
-          >
-            {isLoading ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <Send className="h-5 w-5" />
+        {/* Chat Header - only show when client is selected */}
+        {client && (
+          <Card className="mb-4">
+            <CardHeader>
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+                <div>
+                  <CardTitle>{translations.chatWith} {client.full_name}</CardTitle>
+                  <CardDescription>{translations.clientCode}: {client.user_code}</CardDescription>
+                </div>
+                {mealPlanData && (
+                  <div className="text-sm text-right">
+                    <span className="text-gray-500">{translations.dailyCalories}: </span>
+                    <span className="font-medium">{mealPlanData.daily_total_calories || translations.notSet}</span>
+                  </div>
+                )}
+              </div>
+            </CardHeader>
+          </Card>
+        )}
+        
+        {/* Chat Area - only show when client is selected */}
+        {client ? (
+          <>
+            <Card className="flex-1 flex flex-col mb-4">
+              <CardContent className="flex-1 p-4 overflow-hidden">
+                <ScrollArea className="h-full pr-4">
+                  {selectedChat?.messages?.length > 0 ? (
+                    selectedChat.messages.map((msg, index) => (
+                      <div
+                        key={index}
+                        className={`mb-4 flex ${
+                          msg.role === 'user' ? 'justify-end' : 'justify-start'
+                        }`}
+                      >
+                        <div
+                          className={`rounded-lg px-4 py-2 max-w-[80%] ${
+                            msg.role === 'user'
+                              ? 'bg-green-600 text-white'
+                              : 'bg-gray-100 text-gray-900'
+                          }`}
+                        >
+                          {msg.image_url && (
+                            <img
+                              src={msg.image_url}
+                              alt={translations.uploadedFood}
+                              className="rounded-lg mb-2 max-w-full"
+                            />
+                          )}
+                          <div className="whitespace-pre-wrap">{msg.content}</div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-center p-8 text-gray-500">
+                      <MessageSquare className="h-12 w-12 text-gray-300 mb-4" />
+                      <h3 className="text-xl font-medium mb-2">{translations.startConversation}</h3>
+                      <p className="max-w-md">
+                        {translations.chatWith} {client.full_name} {translations.chatAboutNutrition}
+                      </p>
+                    </div>
+                  )}
+                  <div ref={chatEndRef} />
+                </ScrollArea>
+              </CardContent>
+            </Card>
+
+            <div className="flex gap-2">
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/*"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isLoading}
+                className={`border-green-200 ${imageFile ? 'bg-green-50 text-green-600' : 'hover:bg-green-50'}`}
+              >
+                <ImageIcon className="h-5 w-5" />
+              </Button>
+              <Input
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder={`${translations.messageClient} ${client.full_name}...`}
+                disabled={isLoading}
+                className="border-green-200 focus:ring-green-500"
+              />
+              <Button
+                onClick={handleSend}
+                disabled={(!message.trim() && !imageFile) || isLoading}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                {isLoading ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <Send className="h-5 w-5" />
+                )}
+              </Button>
+            </div>
+            {imageFile && (
+              <div className="mt-2 text-sm text-green-600">
+                {translations.imageSelected}: {imageFile.name}
+              </div>
             )}
-          </Button>
-        </div>
-        {imageFile && (
-          <div className="mt-2 text-sm text-green-600">
-            Image selected: {imageFile.name}
-          </div>
+          </>
+        ) : (
+          <Card className="flex-1 flex flex-col mb-4">
+            <CardContent className="flex-1 p-4 overflow-hidden">
+              <div className="h-full flex flex-col items-center justify-center text-center p-8 text-gray-500">
+                <Users className="h-16 w-16 text-gray-300 mb-4" />
+                <h3 className="text-xl font-medium mb-2">{translations.noClientSelected}</h3>
+                <p className="max-w-md">
+                  {translations.selectClientToStart}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
         )}
       </div>
     </div>

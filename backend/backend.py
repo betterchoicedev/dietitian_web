@@ -17,6 +17,7 @@ import datetime
 import requests
 from copy import deepcopy
 import re
+from supabase import create_client, Client
 
 
 logging.basicConfig(level=logging.INFO)
@@ -27,6 +28,12 @@ load_dotenv()
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+
+# Initialize Supabase client
+supabase_url = os.getenv("supabaseUrl")
+supabase_key = os.getenv("supabaseKey")
+supabase: Client = create_client(supabase_url, supabase_key)
 
 @app.route("/api/translate", methods=["POST"])
 def api_translate_menu():
@@ -85,6 +92,8 @@ def api_translate_menu():
             for ii, ing in enumerate(opt.get("ingredients", [])):
                 texts.append(ing.get("item", ""))
                 paths.append(("meals", mi, optKey, "ingredients", ii, "item"))
+                texts.append(ing.get("household_measure", ""))
+                paths.append(("meals", mi, optKey, "ingredients", ii, "household_measure"))
         alternatives = meal.get("alternatives", [])
         for ai, alt in enumerate(alternatives):
             texts.append(alt.get("meal_title", ""))
@@ -92,6 +101,8 @@ def api_translate_menu():
             for ii, ing in enumerate(alt.get("ingredients", [])):
                 texts.append(ing.get("item", ""))
                 paths.append(("meals", mi, "alternatives", ai, "ingredients", ii, "item"))
+                texts.append(ing.get("household_measure", ""))
+                paths.append(("meals", mi, "alternatives", ai, "ingredients", ii, "household_measure"))
 
     # 2. For Hebrew: replace mapped phrases/words with placeholders, send to Azure, then restore
     placeholder_map = []  # List of dicts: {ph: hebrew}
@@ -146,6 +157,14 @@ def api_translate_menu():
         for key in path[:-1]:
             obj = obj[key]
         obj[path[-1]] = translated
+
+    # Translate all ingredients
+    for meal in new_menu['meals']:
+        for option in [meal['main'], meal['alternative']] + meal.get('alternatives', []):
+            for ingredient in option['ingredients']:
+                ingredient['item'] = translate(ingredient['item'], target)
+                ingredient['household_measure'] = translate(ingredient['household_measure'], target)
+
     return jsonify(new_menu)
 
 @app.route('/api/menu-pdf', methods=['POST'])
@@ -158,10 +177,10 @@ def generate_menu_pdf():
     width, height = letter
     y = height - 40
     margin = 40
-    card_width = min(520, width - 2*margin)
-    card_padding = 18
+    card_width = width - 2*margin - 20  # Make all frames the same width
+    card_padding = 20
     card_height = 90
-    line_height = 13
+    line_height = 12
     first_page = True
     client_name = "OBI"
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -225,22 +244,42 @@ def generate_menu_pdf():
     # --- Daily Totals Card ---
     if "totals" in menu:
         totals = menu["totals"]
+        # Create a more elegant totals card with gradient-like effect
         c.setFillColor(green_bg)
-        c.roundRect((width-card_width)/2, y-60, card_width, 60, 12, fill=1, stroke=0)
-        c.setFont("Helvetica-Bold", 15)
+        c.roundRect((width-card_width)/2, y-70, card_width, 70, 15, fill=1, stroke=0)
+        
+        # Add a subtle border
+        c.setStrokeColor(green_accent)
+        c.setLineWidth(2)
+        c.roundRect((width-card_width)/2, y-70, card_width, 70, 15, fill=0, stroke=1)
+        
+        # Title with smaller, more elegant font
+        c.setFont("Helvetica-Bold", 12)
         c.setFillColor(green_accent)
-        c.drawString((width-card_width)/2+card_padding, y-18, "Daily Totals")
-        c.setFont("Helvetica-Bold", 13)
+        c.drawString((width-card_width)/2+card_padding, y-22, "Daily Nutritional Summary")
+        
+        # Macro values with smaller, cleaner fonts
+        c.setFont("Helvetica-Bold", 11)
         x0 = (width-card_width)/2+card_padding
+        
+        # Calories
         c.setFillColor(green_accent)
-        c.drawString(x0, y-38, f"{totals.get('calories', 0)} kcal")
+        c.drawString(x0, y-42, f"{totals.get('calories', 0)} kcal")
+        
+        # Macros with better spacing
         c.setFillColor(orange_accent)
-        c.drawString(x0+120, y-38, f"Carbs: {totals.get('carbs', 0)}g")
+        c.drawString(x0+110, y-42, f"Carbs: {totals.get('carbs', 0)}g")
         c.setFillColor(yellow_accent)
-        c.drawString(x0+240, y-38, f"Fat: {totals.get('fat', 0)}g")
+        c.drawString(x0+220, y-42, f"Fat: {totals.get('fat', 0)}g")
         c.setFillColor(blue_accent)
-        c.drawString(x0+340, y-38, f"Protein: {totals.get('protein', 0)}g")
-        y -= 60 + 20
+        c.drawString(x0+310, y-42, f"Protein: {totals.get('protein', 0)}g")
+        
+        # Add a subtle separator line
+        c.setStrokeColor(colors.HexColor("#d1fae5"))
+        c.setLineWidth(1)
+        c.line((width-card_width)/2+card_padding, y-55, (width+card_width)/2-card_padding, y-55)
+        
+        y -= 70 + 25
 
     # --- Meals as Cards ---
     if "meals" in menu:
@@ -269,118 +308,277 @@ def generate_menu_pdf():
                 y = height - 40
             # --- Start of meal box (invisible, but reserve space) ---
             box_top = y
-            # Meal Header
+            
+            # Meal Header with improved frame design
             meal_name = meal.get('meal', '')
-            c.setFont("Helvetica-Bold", 18)
+            meal_header_height = 40
+            frame_x = margin + 10
+            
+            # Create simple, clean meal name frame
+            c.setFillColor(colors.HexColor("#f9fafb"))  # Very light gray background
+            c.roundRect(frame_x, y-meal_header_height, card_width, meal_header_height, 8, fill=1, stroke=0)
+            
+            # Add clean border
+            c.setStrokeColor(green_accent)
+            c.setLineWidth(2)
+            c.roundRect(frame_x, y-meal_header_height, card_width, meal_header_height, 8, fill=0, stroke=1)
+            
+            # Meal name with better typography
+            c.setFont("Helvetica-Bold", 16)
+            c.setFillColor(colors.HexColor("#1f2937"))  # Dark gray
+            # Center the text vertically in the frame
+            text_y = y - meal_header_height/2 - 3
+            c.drawString(frame_x + 20, text_y, meal_name)
+            
+            # Add a small decorative dot
             c.setFillColor(green_accent)
-            c.drawString(margin, y, meal_name)
-            y -= 10
-            c.setStrokeColor(border_color)
-            c.setLineWidth(1)
-            c.line(margin, y, width-margin, y)
-            y -= 10
-            # Main Option Card
+            c.circle(frame_x + 12, text_y + 2, 3, fill=1)
+            
+            y -= meal_header_height + 15
+            # Main Option Card with enhanced design and consistent width
             main = meal.get('main', {})
+            card_x = frame_x
+            
+            # Main card background with cleaner design
             c.setFillColor(green_bg)
-            c.roundRect((width-card_width)/2, y-main_card_height, card_width, main_card_height, 12, fill=1, stroke=0)
-            c.setFont("Helvetica-Bold", 13)
-            c.setFillColor(green_accent)
-            c.drawString((width-card_width)/2+card_padding, y-20, "Main Option")
-            y_main_title = y-36
+            c.roundRect(card_x, y-main_card_height, card_width, main_card_height, 8, fill=1, stroke=0)
+            
+            # Add clean border
+            c.setStrokeColor(green_accent)
+            c.setLineWidth(1)
+            c.roundRect(card_x, y-main_card_height, card_width, main_card_height, 8, fill=0, stroke=1)
+            
+            # Meal title with inline option label (no background)
+            y_main_title = y-25
             main_title = main.get('meal_title')
             if main_title:
-                c.setFont("Helvetica", 11)
-                c.setFillColor(colors.HexColor("#4ade80"))
-                c.drawString((width-card_width)/2+card_padding, y_main_title, main_title)
-                y_macros = y_main_title - 14
+                c.setFont("Helvetica-Bold", 11)
+                c.setFillColor(colors.HexColor("#059669"))  # Darker green
+                c.drawString(card_x+card_padding, y_main_title, f"{main_title} - Main Option")
+                y_content = y_main_title - 20
             else:
-                y_macros = y-36
+                c.setFont("Helvetica-Bold", 11)
+                c.setFillColor(colors.HexColor("#059669"))
+                c.drawString(card_x+card_padding, y_main_title, "Main Option")
+                y_content = y_main_title - 20
+            
+            # Macros on the right side, stacked vertically
             main_nut = main.get('nutrition', {})
-            nut_x = (width+card_width)/2-card_padding
+            macro_x = card_x + card_width - 130  # Right side positioning
+            macro_start_y = y-30
+            
             c.setFont("Helvetica-Bold", 11)
+            # Calories
             c.setFillColor(green_accent)
-            c.drawRightString(nut_x-270, y_macros, f"{main_nut.get('calories', 0)} kcal")
+            c.drawString(macro_x, macro_start_y, f"{main_nut.get('calories', 0)} kcal")
+            # Protein
+            c.setFillColor(blue_accent)
+            c.drawString(macro_x, macro_start_y - 15, f"Protein: {main_nut.get('protein', 0)}g")
+            # Carbs
             c.setFillColor(orange_accent)
-            c.drawRightString(nut_x-180, y_macros, f"Carbs: {main_nut.get('carbs', 0)}g")
+            c.drawString(macro_x, macro_start_y - 30, f"Carbs: {main_nut.get('carbs', 0)}g")
+            # Fat
             c.setFillColor(yellow_accent)
-            c.drawRightString(nut_x-90, y_macros, f"Fat: {main_nut.get('fat', 0)}g")
-            c.setFillColor(blue_accent)
-            c.drawRightString(nut_x, y_macros, f"Protein: {main_nut.get('protein', 0)}g")
-            c.setFont("Helvetica-Bold", 11)
-            c.setFillColor(colors.black)
-            ing_y = y_macros - 18
-            for ing in main_ings:
-                c.drawString((width-card_width)/2+card_padding+10, ing_y, f"• {ing.get('item','')}   {ing.get('quantity','')} {ing.get('unit','')}")
-                ing_y -= line_height + 2
+            c.drawString(macro_x, macro_start_y - 45, f"Fat: {main_nut.get('fat', 0)}g")
+            # Ingredients section with better formatting (left side, constrained width)
+            if main_ings:
+                ingredients_y_start = y_content
+                c.setFont("Helvetica-Bold", 10)
+                c.setFillColor(colors.HexColor("#374151"))  # Dark gray
+                c.drawString(card_x+card_padding, ingredients_y_start, "Ingredients:")
+                
+                c.setFont("Helvetica", 9)
+                c.setFillColor(colors.HexColor("#4b5563"))  # Medium gray
+                ing_y = ingredients_y_start - 15
+                max_text_width = macro_x - card_x - card_padding - 30  # Leave space for macros
+                
+                for ing in main_ings:
+                    # Add bullet point
+                    c.circle(card_x+card_padding+5, ing_y+3, 1.5, fill=1)
+                    # Ingredient text with household_measure included
+                    item = ing.get('item', '')
+                    quantity = ing.get('quantity', '')
+                    unit = ing.get('unit', '')
+                    household_measure = ing.get('household_measure', '')
+                    
+                    # Format: "Item - Quantity Unit (Household Measure)"
+                    if household_measure:
+                        ingredient_text = f"{item} - {quantity} {unit} ({household_measure})"
+                    else:
+                        ingredient_text = f"{item} - {quantity} {unit}"
+                    
+                    # More aggressive truncation to stay within frame
+                    if len(ingredient_text) > 35:
+                        ingredient_text = ingredient_text[:32] + "..."
+                    c.drawString(card_x+card_padding+12, ing_y, ingredient_text)
+                    ing_y -= line_height
             y -= main_card_height + 18
-            # Alternative Option Card (first alternative)
+            # Alternative Option Card with consistent design
             alt_opt = meal.get('alternative', {})
+            
+            # Alternative card background with cleaner design
             c.setFillColor(blue_bg)
-            c.roundRect((width-card_width)/2, y-alt_card_height, card_width, alt_card_height, 12, fill=1, stroke=0)
-            c.setFont("Helvetica-Bold", 13)
-            c.setFillColor(blue_accent)
-            c.drawString((width-card_width)/2+card_padding, y-20, "Alternative 1")
-            y_alt_title = y-36
+            c.roundRect(card_x, y-alt_card_height, card_width, alt_card_height, 8, fill=1, stroke=0)
+            
+            # Add clean border
+            c.setStrokeColor(blue_accent)
+            c.setLineWidth(1)
+            c.roundRect(card_x, y-alt_card_height, card_width, alt_card_height, 8, fill=0, stroke=1)
+            
+            # Alternative title with inline option label (no background)
+            y_alt_title = y-25
             alt_title = alt_opt.get('meal_title')
             if alt_title:
-                c.setFont("Helvetica", 11)
-                c.setFillColor(colors.HexColor("#38bdf8"))
-                c.drawString((width-card_width)/2+card_padding, y_alt_title, alt_title)
-                y_alt_macros = y_alt_title - 14
+                c.setFont("Helvetica-Bold", 11)
+                c.setFillColor(colors.HexColor("#0369a1"))  # Darker blue
+                c.drawString(card_x+card_padding, y_alt_title, f"{alt_title} - Alternative 1")
+                y_alt_content = y_alt_title - 20
             else:
-                y_alt_macros = y-36
+                c.setFont("Helvetica-Bold", 11)
+                c.setFillColor(colors.HexColor("#0369a1"))
+                c.drawString(card_x+card_padding, y_alt_title, "Alternative 1")
+                y_alt_content = y_alt_title - 20
+            
+            # Macros on the right side, stacked vertically
             alt_nut = alt_opt.get('nutrition', {})
+            alt_macro_x = card_x + card_width - 130
+            alt_macro_start_y = y-30
+            
             c.setFont("Helvetica-Bold", 11)
+            # Calories
             c.setFillColor(green_accent)
-            c.drawRightString(nut_x-270, y_alt_macros, f"{alt_nut.get('calories', 0)} kcal")
-            c.setFillColor(orange_accent)
-            c.drawRightString(nut_x-180, y_alt_macros, f"Carbs: {alt_nut.get('carbs', 0)}g")
-            c.setFillColor(yellow_accent)
-            c.drawRightString(nut_x-90, y_alt_macros, f"Fat: {alt_nut.get('fat', 0)}g")
+            c.drawString(alt_macro_x, alt_macro_start_y, f"{alt_nut.get('calories', 0)} kcal")
+            # Protein
             c.setFillColor(blue_accent)
-            c.drawRightString(nut_x, y_alt_macros, f"Protein: {alt_nut.get('protein', 0)}g")
-            c.setFont("Helvetica-Bold", 11)
-            c.setFillColor(colors.black)
-            ing_y = y_alt_macros - 18
-            for ing in alt_ings:
-                c.drawString((width-card_width)/2+card_padding+10, ing_y, f"• {ing.get('item','')}   {ing.get('quantity','')} {ing.get('unit','')}")
-                ing_y -= line_height + 2
+            c.drawString(alt_macro_x, alt_macro_start_y - 15, f"Protein: {alt_nut.get('protein', 0)}g")
+            # Carbs
+            c.setFillColor(orange_accent)
+            c.drawString(alt_macro_x, alt_macro_start_y - 30, f"Carbs: {alt_nut.get('carbs', 0)}g")
+            # Fat
+            c.setFillColor(yellow_accent)
+            c.drawString(alt_macro_x, alt_macro_start_y - 45, f"Fat: {alt_nut.get('fat', 0)}g")
+            # Alternative ingredients section with better formatting
+            if alt_ings:
+                alt_ingredients_y_start = y_alt_content
+                c.setFont("Helvetica-Bold", 10)
+                c.setFillColor(colors.HexColor("#374151"))  # Dark gray
+                c.drawString(card_x+card_padding, alt_ingredients_y_start, "Ingredients:")
+                
+                c.setFont("Helvetica", 9)
+                c.setFillColor(colors.HexColor("#4b5563"))  # Medium gray
+                ing_y = alt_ingredients_y_start - 15
+                
+                for ing in alt_ings:
+                    # Add bullet point
+                    c.circle(card_x+card_padding+5, ing_y+3, 1.5, fill=1)
+                    # Ingredient text with household_measure included
+                    item = ing.get('item', '')
+                    quantity = ing.get('quantity', '')
+                    unit = ing.get('unit', '')
+                    household_measure = ing.get('household_measure', '')
+                    
+                    # Format: "Item - Quantity Unit (Household Measure)"
+                    if household_measure:
+                        ingredient_text = f"{item} - {quantity} {unit} ({household_measure})"
+                    else:
+                        ingredient_text = f"{item} - {quantity} {unit}"
+                    
+                    # More aggressive truncation to stay within frame
+                    if len(ingredient_text) > 35:
+                        ingredient_text = ingredient_text[:32] + "..."
+                    c.drawString(card_x+card_padding+12, ing_y, ingredient_text)
+                    ing_y -= line_height
             y -= alt_card_height + 24
-            # Render all other alternatives
+            # Render all other alternatives with improved styling
             if other_alts:
-                c.setFont("Helvetica-Bold", 13)
+                # Section header with frame (consistent width)
+                section_height = 35
+                c.setFillColor(colors.HexColor("#fef3c7"))  # Light yellow background
+                c.roundRect(frame_x, y-section_height, card_width, section_height, 10, fill=1, stroke=0)
+                c.setStrokeColor(blue_accent)
+                c.setLineWidth(1.5)
+                c.roundRect(frame_x, y-section_height, card_width, section_height, 10, fill=0, stroke=1)
+                
+                c.setFont("Helvetica-Bold", 15)
                 c.setFillColor(blue_accent)
-                c.drawString(margin, y, "Other Alternatives:")
-                y -= 16
+                c.drawString(frame_x + 20, y-20, "Additional Alternatives")
+                y -= section_height + 15
+                
                 for alt_idx, alt in enumerate(other_alts):
                     alt_ings = alt.get('ingredients', [])
                     alt_card_height = max(card_height, card_padding*2 + line_height*len(alt_ings))
+                    
+                    # Additional alternative card background with cleaner design
                     c.setFillColor(blue_bg)
-                    c.roundRect((width-card_width)/2, y-alt_card_height, card_width, alt_card_height, 12, fill=1, stroke=0)
-                    c.setFont("Helvetica-Bold", 13)
-                    c.setFillColor(blue_accent)
-                    c.drawString((width-card_width)/2+card_padding, y-20, f"Alternative {alt_idx+2}")
+                    c.roundRect(card_x, y-alt_card_height, card_width, alt_card_height, 8, fill=1, stroke=0)
+                    
+                    # Add clean border
+                    c.setStrokeColor(blue_accent)
+                    c.setLineWidth(1)
+                    c.roundRect(card_x, y-alt_card_height, card_width, alt_card_height, 8, fill=0, stroke=1)
+                    
+                    # Alternative title with inline option label (no background)
+                    y_add_alt_title = y-25
                     alt_title = alt.get('meal_title')
                     if alt_title:
-                        c.setFont("Helvetica", 11)
-                        c.setFillColor(colors.HexColor("#38bdf8"))
-                        c.drawString((width-card_width)/2+card_padding, y-36, alt_title)
+                        c.setFont("Helvetica-Bold", 11)
+                        c.setFillColor(colors.HexColor("#0369a1"))
+                        c.drawString(card_x+card_padding, y_add_alt_title, f"{alt_title} - Alternative {alt_idx+2}")
+                        y_add_alt_content = y_add_alt_title - 20
+                    else:
+                        c.setFont("Helvetica-Bold", 11)
+                        c.setFillColor(colors.HexColor("#0369a1"))
+                        c.drawString(card_x+card_padding, y_add_alt_title, f"Alternative {alt_idx+2}")
+                        y_add_alt_content = y_add_alt_title - 20
+                    
+                    # Macros on the right side, stacked vertically
                     alt_nut = alt.get('nutrition', {})
+                    add_alt_macro_x = card_x + card_width - 130
+                    add_alt_macro_start_y = y-30
+                    
                     c.setFont("Helvetica-Bold", 11)
+                    # Calories
                     c.setFillColor(green_accent)
-                    c.drawRightString(nut_x-270, y-36, f"{alt_nut.get('calories', 0)} kcal")
-                    c.setFillColor(orange_accent)
-                    c.drawRightString(nut_x-180, y-36, f"Carbs: {alt_nut.get('carbs', 0)}g")
-                    c.setFillColor(yellow_accent)
-                    c.drawRightString(nut_x-90, y-36, f"Fat: {alt_nut.get('fat', 0)}g")
+                    c.drawString(add_alt_macro_x, add_alt_macro_start_y, f"{alt_nut.get('calories', 0)} kcal")
+                    # Protein
                     c.setFillColor(blue_accent)
-                    c.drawRightString(nut_x, y-36, f"Protein: {alt_nut.get('protein', 0)}g")
-                    c.setFont("Helvetica-Bold", 11)
-                    c.setFillColor(colors.black)
-                    ing_y = y-54
-                    for ing in alt_ings:
-                        c.drawString((width-card_width)/2+card_padding+10, ing_y, f"• {ing.get('item','')}   {ing.get('quantity','')} {ing.get('unit','')}")
-                        ing_y -= line_height + 2
+                    c.drawString(add_alt_macro_x, add_alt_macro_start_y - 15, f"Protein: {alt_nut.get('protein', 0)}g")
+                    # Carbs
+                    c.setFillColor(orange_accent)
+                    c.drawString(add_alt_macro_x, add_alt_macro_start_y - 30, f"Carbs: {alt_nut.get('carbs', 0)}g")
+                    # Fat
+                    c.setFillColor(yellow_accent)
+                    c.drawString(add_alt_macro_x, add_alt_macro_start_y - 45, f"Fat: {alt_nut.get('fat', 0)}g")
+                    # Additional alternative ingredients with better formatting
+                    if alt_ings:
+                        additional_ingredients_y_start = y_add_alt_content
+                        c.setFont("Helvetica-Bold", 10)
+                        c.setFillColor(colors.HexColor("#374151"))  # Dark gray
+                        c.drawString(card_x+card_padding, additional_ingredients_y_start, "Ingredients:")
+                        
+                        c.setFont("Helvetica", 9)
+                        c.setFillColor(colors.HexColor("#4b5563"))  # Medium gray
+                        ing_y = additional_ingredients_y_start - 15
+                        for ing in alt_ings:
+                            # Add bullet point
+                            c.circle(card_x+card_padding+5, ing_y+3, 1.5, fill=1)
+                            # Ingredient text with household_measure included
+                            item = ing.get('item', '')
+                            quantity = ing.get('quantity', '')
+                            unit = ing.get('unit', '')
+                            household_measure = ing.get('household_measure', '')
+                            
+                            # Format: "Item - Quantity Unit (Household Measure)"
+                            if household_measure:
+                                ingredient_text = f"{item} - {quantity} {unit} ({household_measure})"
+                            else:
+                                ingredient_text = f"{item} - {quantity} {unit}"
+                            
+                            # More aggressive truncation to stay within frame
+                            if len(ingredient_text) > 35:
+                                ingredient_text = ingredient_text[:32] + "..."
+                            c.drawString(card_x+card_padding+12, ing_y, ingredient_text)
+                            ing_y -= line_height
                     y -= alt_card_height + 18
             # --- End of meal box ---
             y = box_top - total_meal_height  # move y down by reserved height for next meal
@@ -398,24 +596,127 @@ def generate_menu_pdf():
     )
 
 
-def load_user_preferences():
+def load_user_preferences(user_code=None):
+    """
+    Load user preferences from Supabase chat_users table.
+    If user_code is not provided, falls back to first user or default values.
+    """
     try:
-        with open("../public/data.json", "r", encoding="utf-8") as file:
-            data = json.load(file)
-            return {
-                "calories_per_day": data["dailyTotalCalories"],
-                "macros": data["macros"],
-                "allergies": data["client"].get("food_allergies", []),
-                "limitations": data["client"].get("food_limitations", []),
-                "diet_type": "personalized",
-                "meal_count": len(data["meals"])
-            }
-    except FileNotFoundError:
-        logger.error("data.json file not found")
-        raise Exception("Configuration file not found")
-    except json.JSONDecodeError:
-        logger.error("Invalid JSON in data.json")
-        raise Exception("Invalid configuration file")
+        logger.info(f"🔍 Loading user preferences for user_code: {user_code}")
+        logger.info(f"Supabase URL: {supabase_url}")
+        logger.info(f"Supabase Key exists: {bool(supabase_key)}")
+        
+        if user_code:
+            # Fetch specific user by user_code
+            logger.info(f"Fetching user with user_code: {user_code}")
+            response = supabase.table('chat_users').select('*').eq('user_code', user_code).execute()
+            logger.info(f"Supabase response: {response}")
+            if response.data:
+                user_data = response.data[0]
+                logger.info(f"Found user: {user_data.get('user_code')}")
+            else:
+                logger.warning(f"No user found with user_code: {user_code}")
+                raise Exception(f"User not found: {user_code}")
+        else:
+            # Fallback: get first user or use default values
+            logger.info("No user_code provided, fetching first user")
+            response = supabase.table('chat_users').select('*').limit(1).execute()
+            logger.info(f"Fallback supabase response: {response}")
+            if response.data:
+                user_data = response.data[0]
+                logger.info(f"Using fallback user: {user_data.get('user_code')}")
+            else:
+                logger.warning("No users found in chat_users table, using default values")
+                return {
+                    "calories_per_day": 2000,
+                    "macros": {"protein": "150g", "fat": "80g", "carbs": "250g"},
+                    "allergies": [],
+                    "limitations": [],
+                    "diet_type": "personalized",
+                    "meal_count": 5,
+                    "client_preference": {}
+                }
+
+        # Debug: Log the raw user data
+        logger.info(f"Raw user data from Supabase: {json.dumps(user_data, indent=2, default=str)}")
+
+        # Parse macros - handle both string and object formats
+        macros = user_data.get("Macros", {})
+        if isinstance(macros, str):
+            try:
+                macros = json.loads(macros)
+            except:
+                macros = {"protein": "150g", "fat": "80g", "carbs": "250g"}
+        elif not macros:  # Handle None or empty
+            macros = {"protein": "150g", "fat": "80g", "carbs": "250g"}
+
+        # Parse arrays - handle both string and array formats
+        def parse_array_field(field_value):
+            if isinstance(field_value, list):
+                return field_value
+            elif isinstance(field_value, str):
+                try:
+                    return json.loads(field_value)
+                except:
+                    return field_value.split(',') if field_value else []
+            else:
+                return []
+
+        allergies = parse_array_field(user_data.get("food_allergies", []))
+        limitations = parse_array_field(user_data.get("food_limitations", []))
+
+        # Parse client_preference
+        client_preference = user_data.get("client_preference", {})
+        if isinstance(client_preference, str):
+            try:
+                client_preference = json.loads(client_preference)
+            except:
+                client_preference = {}
+
+        # Ensure we have valid values with proper defaults
+        calories_per_day = user_data.get("dailyTotalCalories")
+        if calories_per_day is None:
+            calories_per_day = 2000
+        else:
+            try:
+                calories_per_day = float(calories_per_day)
+            except (ValueError, TypeError):
+                calories_per_day = 2000
+
+        meal_count = user_data.get("number_of_meals")
+        if meal_count is None:
+            meal_count = 5
+        else:
+            try:
+                meal_count = int(meal_count)
+            except (ValueError, TypeError):
+                meal_count = 5
+
+        preferences = {
+            "calories_per_day": calories_per_day,
+            "macros": macros,
+            "allergies": allergies,
+            "limitations": limitations,
+            "diet_type": "personalized",
+            "meal_count": meal_count,
+            "client_preference": client_preference
+        }
+
+        logger.info(f"✅ Loaded user preferences for user_code: {user_data.get('user_code')}")
+        logger.info(f"Final preferences: {json.dumps(preferences, indent=2)}")
+        
+        # Validate that essential fields are not None
+        if preferences["calories_per_day"] is None:
+            logger.error("❌ calories_per_day is None after processing!")
+        if preferences["macros"] is None:
+            logger.error("❌ macros is None after processing!")
+        
+        return preferences
+
+    except Exception as e:
+        logger.error(f"Error loading user preferences: {str(e)}")
+        logger.error(f"Error traceback: {traceback.format_exc()}")
+        raise Exception(f"Failed to load user preferences: {str(e)}")
 
 # Azure OpenAI config
 openai.api_type = "azure"
@@ -447,7 +748,12 @@ def generate_menu_with_azure(user_preferences):
     "   - `ingredients`: list of ingredients, where each ingredient includes:\n"
     "       - `item`, `quantity`, `unit`, AND:\n"
     "       - `calories`, `protein`, `fat`, and `carbs` — specific to that ingredient.\n"
-    "   - `nutrition`: total for the meal, automatically calculated by summing the ingredients' values.\n\n"
+    "   - `nutrition`: total for the meal, automatically calculated by summing the ingredients' values.\n"
+    "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences.\n"
+    "If user has 'kosher' limitation, you MUST follow kosher dietary laws:\n"
+    "- NEVER mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) in the same meal\n"
+    "- Use only kosher-certified ingredients and brands\n"
+    "- Avoid non-kosher ingredients (pork, shellfish, etc.)\n\n"
     "After generating all meals, VERIFY that the daily totals (calories, protein, fat, carbs) are within ±5% of the user's goal.\n"
     "If not, regenerate until it is correct.\n\n"
     "Respond ONLY with valid JSON:\n"
@@ -455,24 +761,6 @@ def generate_menu_with_azure(user_preferences):
     "- `totals`: {calories, protein, fat, carbs} — summed across the day.\n"
     "- `note`: general advice or note to the user.\n"
 )
-
-#         system_prompt = (
-#     "You are a professional dietitian AI. Generate a 1-day meal plan with 5 meals: Breakfast, Morning Snack, Lunch, Afternoon Snack, Dinner.\n\n"
-#     "Requirements:\n"
-#     "- Total daily calories must be within ±5% of the user's target.\n"
-#     "- Total protein, fat, and carbs must each be within ±5% of target.\n"
-#     "- Each meal must have `main` and `alternative` options, each with:\n"
-#     "  - `name`, `ingredients` (list of {item, quantity, unit}), and `nutrition` ({calories, protein, fat, carbs}).\n\n"
-#     "After generating all meals, you MUST calculate and VERIFY that total calories and macros are within range. If not, regenerate until they are.\n\n"
-#     "Respond ONLY with valid JSON:\n"
-#     "- `meal_plan`: list of 5 meals\n"
-#     "- `totals`: {calories, protein, fat, carbs}\n"
-#     "- `note`: advice or tips\n"
-# )
-
-
-
-
 
 
 
@@ -509,11 +797,19 @@ Dietary restrictions:
         logger.error(f"Error generating menu: {str(e)}")
         raise
 
-@app.route("/api/menu", methods=["GET"])
+@app.route("/api/menu", methods=["GET", "POST"])
 @require_api_key
 def get_generated_menu():
     try:
-        user_preferences = load_user_preferences()
+        # Get user_code from query params (GET) or request body (POST)
+        user_code = None
+        if request.method == "POST":
+            data = request.get_json()
+            user_code = data.get("user_code") if data else None
+        else:
+            user_code = request.args.get("user_code")
+        
+        user_preferences = load_user_preferences(user_code)
         print("user_preferences:\n", user_preferences)
         result = generate_menu_with_azure(user_preferences)
         print("Azure response:\n", result)  # 👈 for debugging
@@ -526,7 +822,9 @@ def get_generated_menu():
 @app.route("/api/template", methods=["POST"])
 def api_template():
     try:
-        preferences = load_user_preferences()
+        data = request.get_json()
+        user_code = data.get("user_code") if data else None
+        preferences = load_user_preferences(user_code)
         logger.info("🔹 Received user preferences for template:\n%s", json.dumps(preferences, indent=2))
 
         system_prompt = (
@@ -536,6 +834,11 @@ def api_template():
     "For each meal, provide BOTH a main and an alternative option. "
     "Each option must include: `name`, `calories`, `protein`, `fat`, `carbs`, and `main_protein_source`. "
     "The nutrition values (calories, protein, fat, carbs) for the alternative should match the main meal as closely as possible (within ±5%). "
+    "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences. "
+    "If user has 'kosher' limitation, you MUST follow kosher dietary laws: "
+    "- NEVER suggest meals that mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) "
+    "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
+    "- Consider appropriate kosher meal combinations "
     "Distribute macros and calories sensibly across meals. "
     "Respond ONLY with valid JSON in this format:\n"
     "{ \"template\": [ "
@@ -593,7 +896,8 @@ def api_build_menu():
     try:
         data = request.json
         template = data.get("template")
-        preferences = load_user_preferences()
+        user_code = data.get("user_code")
+        preferences = load_user_preferences(user_code)
         if not template:
             return jsonify({"error": "Missing template"}), 400
 
@@ -625,9 +929,16 @@ def api_build_menu():
                     "You are a professional dietitian AI. "
                     "Given a meal template for one meal and user preferences, build the **main option only** for this meal. "
                     "The meal you generate MUST have the EXACT name as provided in 'meal_name'. "
-    "Provide: `meal_name`, `meal_title`, `ingredients` (list of objects with keys "
-      "`item`, `quantity`, `unit`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
-    "and `nutrition` (sum of ingredients). "
+                    "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences. "
+                    "If user has 'kosher' limitation, you MUST follow kosher dietary laws: "
+                    "- NEVER mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) in the same meal "
+                    "- Use only kosher-certified ingredients and brands "
+                    "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
+                    "Provide: `meal_name`, `meal_title`, `ingredients` (list of objects with keys "
+                    "`item`, ,`household_measure`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
+                    "and `nutrition` (sum of ingredients). "
+                    "IMPORTANT: For 'brand of pruduct', you MUST use real, specific brand names "
+                    "NEVER use 'Generic' or 'generic' as a brand name."
                     "Macros must match the template within ±30%. Respond only with valid JSON."
                 )
                 main_content = {
@@ -666,7 +977,8 @@ def api_build_menu():
                 # Validate main
                 validate_payload = {
                     "template": [{"main": main_macros}],
-                    "menu": [{"main": main_candidate}]
+                    "menu": [{"main": main_candidate}],
+                    "user_code": user_code
                 }
                 val_res = app.test_client().post(
                     "/api/validate-menu",
@@ -699,9 +1011,16 @@ def api_build_menu():
                     "You are a professional dietitian AI. "
                     "Given a meal template for one meal and user preferences, build the **alternative option only** for this meal. "
                     "The meal you generate MUST have the EXACT name as provided in 'meal_name'. "
-    "Provide: `meal_name`, `meal_title`, `ingredients` (list of objects with keys "
-      "`item`, `quantity`, `unit`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
-    "and `nutrition` (sum of ingredients). "
+                    "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences. "
+                    "If user has 'kosher' limitation, you MUST follow kosher dietary laws: "
+                    "- NEVER mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) in the same meal "
+                    "- Use only kosher-certified ingredients and brands "
+                    "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
+                    "Provide: `meal_name`, `meal_title`, `ingredients` (list of objects with keys "
+                    "`item`, ,`household_measure`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
+                    "and `nutrition` (sum of ingredients). "
+                    "IMPORTANT: For 'brand of pruduct', you MUST use real, specific brand names "
+                    "NEVER use 'Generic' or 'generic' as a brand name."
                     "Macros must match the template within ±30%. Respond only with valid JSON."
                 )
                 alt_content = {
@@ -740,7 +1059,8 @@ def api_build_menu():
                 # Validate alternative
                 validate_payload = {
                     "template": [{"alternative": alt_macros}],
-                    "menu": [{"alternative": alt_candidate}]
+                    "menu": [{"alternative": alt_candidate}],
+                    "user_code": user_code
                 }
                 val_res = app.test_client().post(
                     "/api/validate-menu",
@@ -772,33 +1092,8 @@ def api_build_menu():
 
         logger.info("✅ Finished building full menu.")
         totals = calculate_totals(full_menu)
-        # Log the entire menu and totals for debugging
-        for meal in full_menu:
-            for section in ("main", "alternative"):
-                block = meal.get(section, {})
-                for ing in block.get("ingredients", []):
-                    brand = ing.get("brand of pruduct", "")
-                    name  = ing.get("item", "")
-                    # Log what we’re about to look up
-                    app.logger.info(f"Looking up UPC for brand={brand!r}, name={name!r}")
-
-                    try:
-                        resp = requests.get(
-                            "https://dietitian-web.onrender.com/api/ingredient-upc",  # removed extra slash
-                            params={"brand": brand, "name": name},
-                            timeout=5
-                        )
-                        app.logger.info(f"UPC lookup HTTP {resp.status_code} — URL: {resp.url}")
-                        app.logger.info(f"UPC lookup response body: {resp.text}")
-
-                        resp.raise_for_status()
-                        data = resp.json()
-                        ing["UPC"] = data.get("upc")
-                        app.logger.info(f"Parsed UPC: {ing['UPC']!r}")
-
-                    except Exception as e:
-                        ing["UPC"] = None
-                        app.logger.warning(f"UPC lookup failed for {brand!r} {name!r}: {e}")
+        
+        # Return menu immediately without UPC codes
         logger.info("Full menu built: %s", json.dumps({"menu": full_menu, "totals": totals}, ensure_ascii=False, indent=2))
         return jsonify({"menu": full_menu, "totals": totals})
 
@@ -806,16 +1101,24 @@ def api_build_menu():
         logger.error("❌ Exception in /api/build-menu:\n%s", traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/api/validate-menu", methods=["POST"])
 def api_validate_menu():
     try:
         data = request.json
         template = data.get("template")
         menu = data.get("menu")
+        user_code = data.get("user_code")
 
         if not template or not menu or not isinstance(template, list) or not isinstance(menu, list):
             return jsonify({"is_valid": False, "issues": ["Missing or invalid template/menu"]}), 400
+
+        # Load user preferences for dietary restrictions
+        preferences = None
+        try:
+            preferences = load_user_preferences(user_code)
+        except Exception as e:
+            logger.warning(f"Could not load user preferences for validation: {e}")
+            preferences = {"limitations": []}
 
         macros = ["calories", "protein", "fat", "carbs"]
 
@@ -829,12 +1132,59 @@ def api_validate_menu():
                 return 0.4
             else:
                 return 0.3  # 30% margin for anything above 30
+
+        def validate_kosher_ingredients(ingredients, limitations):
+            """Validate kosher compliance for ingredients"""
+            if "kosher" not in [limit.lower() for limit in limitations]:
+                return []
+            
+            kosher_issues = []
+            
+            # Define meat and dairy ingredients
+            meat_items = ["chicken", "beef", "lamb", "turkey", "duck", "meat", "poultry"]
+            dairy_items = ["milk", "cream", "cheese", "yogurt", "butter", "dairy", "parmesan", "mozzarella", "ricotta", "cottage cheese"]
+            non_kosher_items = ["pork", "bacon", "ham", "shellfish", "shrimp", "lobster", "crab", "clam", "oyster", "scallop"]
+            
+            has_meat = False
+            has_dairy = False
+            meat_ingredients = []
+            dairy_ingredients = []
+            
+            for ingredient in ingredients:
+                item_name = ingredient.get("item", "").lower()
+                
+                # Check for non-kosher ingredients
+                for non_kosher in non_kosher_items:
+                    if non_kosher in item_name:
+                        kosher_issues.append(f"Non-kosher ingredient detected: {ingredient.get('item', '')}")
+                
+                # Check for meat
+                for meat in meat_items:
+                    if meat in item_name:
+                        has_meat = True
+                        meat_ingredients.append(ingredient.get("item", ""))
+                        break
+                
+                # Check for dairy
+                for dairy in dairy_items:
+                    if dairy in item_name:
+                        has_dairy = True
+                        dairy_ingredients.append(ingredient.get("item", ""))
+                        break
+            
+            # Check for meat + dairy violation
+            if has_meat and has_dairy:
+                kosher_issues.append(f"KOSHER VIOLATION: Cannot mix meat and dairy in the same meal. Found meat: {', '.join(meat_ingredients)} and dairy: {', '.join(dairy_ingredients)}")
+            
+            return kosher_issues
+
         issues = []
 
         # --- Main option feedback ---
         template_main = template[0].get("main")
         menu_main = menu[0].get("main")
         if template_main and menu_main:
+            # Validate nutritional macros
             for macro in macros:
                 tmpl_val = float(template_main.get(macro, 0))
                 menu_val = float(menu_main.get("nutrition", {}).get(macro, 0))
@@ -846,11 +1196,18 @@ def api_validate_menu():
                     issues.append(
                         f"{macro.capitalize()} is out of range for main: got {menu_val}g, target is {tmpl_val}g (allowed ±{int(margin*100)}%). {direction} {macro.lower()} ingredients."
                     )
+            
+            # Validate kosher compliance for main
+            main_ingredients = menu_main.get("ingredients", [])
+            kosher_issues_main = validate_kosher_ingredients(main_ingredients, preferences.get("limitations", []))
+            if kosher_issues_main:
+                issues.extend([f"Main option: {issue}" for issue in kosher_issues_main])
 
         # --- Alternative option feedback ---
         template_alt = template[0].get("alternative")
         menu_alt = menu[0].get("alternative")
         if template_alt and menu_alt:
+            # Validate nutritional macros
             for macro in macros:
                 tmpl_val = float(template_alt.get(macro, 0))
                 menu_val = float(menu_alt.get("nutrition", {}).get(macro, 0))
@@ -862,6 +1219,12 @@ def api_validate_menu():
                     issues.append(
                         f"{macro.capitalize()} is out of range for alternative: got {menu_val}g, target is {tmpl_val}g (allowed ±{int(margin*100)}%). {direction} {macro.lower()} ingredients."
                     )
+            
+            # Validate kosher compliance for alternative
+            alt_ingredients = menu_alt.get("ingredients", [])
+            kosher_issues_alt = validate_kosher_ingredients(alt_ingredients, preferences.get("limitations", []))
+            if kosher_issues_alt:
+                issues.extend([f"Alternative option: {issue}" for issue in kosher_issues_alt])
 
         is_valid = len(issues) == 0
 
@@ -883,7 +1246,8 @@ def api_validate_template():
     try:
         data = request.json
         template = data.get("template")
-        preferences = load_user_preferences()
+        user_code = data.get("user_code")
+        preferences = load_user_preferences(user_code)
 
         if not template or not isinstance(template, list):
             return jsonify({"error": "Invalid or missing template"}), 400
@@ -902,13 +1266,28 @@ def api_validate_template():
 
         # Get target macros from preferences
         def parse_macro(value):
-            return float(str(value).replace("g", "").strip())
+            if value is None:
+                return 0.0
+            try:
+                return float(str(value).replace("g", "").strip())
+            except (ValueError, TypeError):
+                return 0.0
+
+        # Safely get calories_per_day
+        calories_per_day = preferences.get("calories_per_day", 2000)
+        if calories_per_day is None:
+            calories_per_day = 2000
+
+        # Safely get macros
+        macros = preferences.get("macros", {})
+        if not macros:
+            macros = {"protein": "150g", "fat": "80g", "carbs": "250g"}
 
         target_macros = {
-            "calories": float(preferences["calories_per_day"]),
-            "protein": parse_macro(preferences["macros"]["protein"]),
-            "fat": parse_macro(preferences["macros"]["fat"]),
-            "carbs": parse_macro(preferences["macros"]["carbs"]),
+            "calories": float(calories_per_day),
+            "protein": parse_macro(macros.get("protein", "150g")),
+            "fat": parse_macro(macros.get("fat", "80g")),
+            "carbs": parse_macro(macros.get("carbs", "250g")),
         }
 
         def is_out_of_range(actual, target, margin=0.3):
@@ -969,6 +1348,167 @@ def api_validate_template():
         logger.error("❌ Exception in /api/validate-template:\n%s", traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/enrich-menu-with-upc', methods=['POST'])
+def enrich_menu_with_upc():
+    """
+    Asynchronous endpoint to add UPC codes to an existing menu.
+    Takes a menu JSON and returns it with UPC codes added to ingredients.
+    """
+    try:
+        data = request.json
+        menu = data.get("menu")
+        
+        if not menu:
+            return jsonify({"error": "Missing menu data"}), 400
+        
+        logger.info("🔍 Starting UPC enrichment for menu...")
+        
+        # Process each meal and add UPC codes
+        enriched_menu = []
+        for meal in menu:
+            enriched_meal = meal.copy()
+            
+            for section in ("main", "alternative"):
+                if section in enriched_meal:
+                    block = enriched_meal[section].copy()
+                    enriched_ingredients = []
+                    
+                    for ing in block.get("ingredients", []):
+                        enriched_ing = ing.copy()
+                        brand = enriched_ing.get("brand of pruduct", "")
+                        name = enriched_ing.get("item", "")
+                        
+                        # Log what we're about to look up
+                        app.logger.info(f"Looking up UPC for brand={brand!r}, name={name!r}")
+
+                        try:
+                            resp = requests.get(
+                                "https://dietitian-web.onrender.com/api/ingredient-upc",
+                                params={"brand": brand, "name": name},
+                                timeout=5
+                            )
+                            app.logger.info(f"UPC lookup HTTP {resp.status_code} — URL: {resp.url}")
+                            app.logger.info(f"UPC lookup response body: {resp.text}")
+
+                            resp.raise_for_status()
+                            upc_data = resp.json()
+                            enriched_ing["UPC"] = upc_data.get("upc")
+                            app.logger.info(f"Parsed UPC: {enriched_ing['UPC']!r}")
+
+                        except Exception as e:
+                            enriched_ing["UPC"] = None
+                            app.logger.warning(f"UPC lookup failed for {brand!r} {name!r}: {e}")
+                        
+                        enriched_ingredients.append(enriched_ing)
+                    
+                    block["ingredients"] = enriched_ingredients
+                    enriched_meal[section] = block
+            
+            enriched_menu.append(enriched_meal)
+        
+        logger.info("✅ UPC enrichment completed.")
+        return jsonify({"menu": enriched_menu})
+        
+    except Exception as e:
+        logger.error("❌ Exception in /api/enrich-menu-with-upc:\n%s", traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/batch-upc-lookup', methods=['POST'])
+def batch_upc_lookup():
+    """
+    Streamlined batch UPC lookup endpoint.
+    Takes a list of ingredients and returns UPC codes for all of them in one go.
+    Much more efficient than individual lookups.
+    """
+    try:
+        data = request.json
+        ingredients = data.get("ingredients", [])
+        
+        if not ingredients:
+            return jsonify({"error": "Missing ingredients data"}), 400
+        
+        logger.info(f"🔍 Starting batch UPC lookup for {len(ingredients)} ingredients...")
+        
+        results = []
+        
+        # Process all ingredients in parallel-like manner (simulate concurrent processing)
+        for ingredient in ingredients:
+            brand = ingredient.get("brand", "").strip()
+            name = ingredient.get("name", "").strip()
+            
+            if not brand and not name:
+                results.append({
+                    "brand": brand,
+                    "name": name,
+                    "upc": None,
+                    "error": "Missing brand and name"
+                })
+                continue
+            
+            try:
+                # Use the existing UPC lookup service
+                resp = requests.get(
+                    "https://dietitian-web.onrender.com/api/ingredient-upc",
+                    params={"brand": brand, "name": name},
+                    timeout=3  # Shorter timeout for batch processing
+                )
+                
+                if resp.status_code == 200:
+                    upc_data = resp.json()
+                    upc_code = upc_data.get("upc")
+                    
+                    results.append({
+                        "brand": brand,
+                        "name": name,
+                        "upc": upc_code
+                    })
+                    
+                    logger.info(f"✅ Found UPC for {brand} {name}: {upc_code}")
+                else:
+                    results.append({
+                        "brand": brand,
+                        "name": name,
+                        "upc": None,
+                        "error": f"HTTP {resp.status_code}"
+                    })
+                    logger.warning(f"❌ UPC lookup failed for {brand} {name}: HTTP {resp.status_code}")
+                    
+            except requests.exceptions.Timeout:
+                results.append({
+                    "brand": brand,
+                    "name": name,
+                    "upc": None,
+                    "error": "Timeout"
+                })
+                logger.warning(f"⏰ UPC lookup timed out for {brand} {name}")
+                
+            except Exception as e:
+                results.append({
+                    "brand": brand,
+                    "name": name,
+                    "upc": None,
+                    "error": str(e)
+                })
+                logger.warning(f"❌ UPC lookup failed for {brand} {name}: {e}")
+        
+        successful_lookups = len([r for r in results if r.get("upc")])
+        logger.info(f"✅ Batch UPC lookup completed: {successful_lookups}/{len(ingredients)} successful")
+        
+        return jsonify({
+            "results": results,
+            "summary": {
+                "total": len(ingredients),
+                "successful": successful_lookups,
+                "failed": len(ingredients) - successful_lookups
+            }
+        })
+        
+    except Exception as e:
+        logger.error("❌ Exception in /api/batch-upc-lookup:\n%s", traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/generate-alternative-meal', methods=['POST'])
 def generate_alternative_meal():
     data = request.get_json()
@@ -979,7 +1519,8 @@ def generate_alternative_meal():
 
     # Load user preferences as in /api/build-menu
     try:
-        preferences = load_user_preferences()
+        user_code = data.get("user_code")
+        preferences = load_user_preferences(user_code)
     except Exception as e:
         return jsonify({'error': f'Failed to load user preferences: {str(e)}'}), 500
 
@@ -987,7 +1528,14 @@ def generate_alternative_meal():
     system_prompt = (
         "You are a professional dietitian AI. Given a main meal, an existing alternative, and user preferences, generate a new, distinct alternative meal option. "
         "The new alternative should have similar calories and macros, but use different main ingredients than both the main and the current alternative. "
-        "Return ONLY the new alternative meal as valid JSON with: meal_title, ingredients (list of {item, quantity, unit, calories, protein, fat, carbs}), and nutrition (sum of ingredients)."
+        "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences. "
+        "If user has 'kosher' limitation, you MUST follow kosher dietary laws: "
+        "- NEVER mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) in the same meal "
+        "- Use only kosher-certified ingredients and brands "
+        "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
+        "IMPORTANT: For any brand names in ingredients, you MUST use real, specific brand names (e.g., 'Tnuva', 'Osem', 'Strauss', 'Elite'). "
+        "NEVER use 'Generic' or 'generic' as a brand name. Always specify actual commercial brands available in Israel. "
+        "Return ONLY the new alternative meal as valid JSON with: meal_title, ingredients (list of {item, brand of pruduct, household_measure, calories, protein, fat, carbs}), and nutrition (sum of ingredients)."
     )
     user_prompt = {
         "role": "user",

@@ -159,8 +159,8 @@ ${key}: ${value}`).join('\n')}
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <h1 className="text-2xl font-bold">{menu.programName}</h1>
-            <p className="text-sm text-gray-500">Menu Code: {menu.menu_code}</p>
+                    <h1 className="text-2xl font-bold">{menu.meal_plan_name}</h1>
+        <p className="text-sm text-gray-500">Menu Code: {menu.menu_code}</p>
           </div>
         </div>
         
@@ -206,71 +206,109 @@ ${key}: ${value}`).join('\n')}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               <div className="bg-green-50 rounded-lg p-3">
                 <p className="text-sm text-gray-500">Total Calories</p>
-                <p className="text-xl font-semibold text-green-700">{menu.dailyTotalCalories} kcal</p>
+                <p className="text-xl font-semibold text-green-700">
+                  {menu.meal_plan?.totals?.calories || menu.daily_total_calories || 0} kcal
+                </p>
               </div>
               <div className="bg-blue-50 rounded-lg p-3">
                 <p className="text-sm text-gray-500">Protein</p>
-                <p className="text-xl font-semibold text-blue-700">{menu.macros?.protein}</p>
+                <p className="text-xl font-semibold text-blue-700">
+                  {menu.meal_plan?.totals?.protein || menu.macros_target?.protein || 0}g
+                </p>
               </div>
               <div className="bg-amber-50 rounded-lg p-3">
                 <p className="text-sm text-gray-500">Carbs</p>
-                <p className="text-xl font-semibold text-amber-700">{menu.macros?.carbs}</p>
+                <p className="text-xl font-semibold text-amber-700">
+                  {menu.meal_plan?.totals?.carbs || menu.macros_target?.carbs || 0}g
+                </p>
               </div>
               <div className="bg-purple-50 rounded-lg p-3">
                 <p className="text-sm text-gray-500">Fat</p>
-                <p className="text-xl font-semibold text-purple-700">{menu.macros?.fat}</p>
+                <p className="text-xl font-semibold text-purple-700">
+                  {menu.meal_plan?.totals?.fat || menu.macros_target?.fat || 0}g
+                </p>
               </div>
             </div>
 
             <div className="space-y-6">
-              {menu.meals?.map((meal, index) => (
-                <div key={index} className="border rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-medium">{meal.mealName}</h3>
-                    <div className="text-sm text-gray-500">
-                      {meal.mealCalories} kcal | P: {meal.mealProtein} | F: {meal.mealFat}
+              {(menu.meal_plan?.meals || menu.meals)?.map((meal, index) => {
+                // Handle both old format and new main/alternative format
+                const mainMeal = meal.main || meal;
+                const altMeal = meal.alternative;
+                const mealName = meal.meal || mainMeal.meal_name || mainMeal.mealName || `Meal ${index + 1}`;
+                
+                return (
+                  <div key={index} className="border rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-lg font-medium">{mealName}</h3>
                     </div>
-                  </div>
-                  
-                  <div className="space-y-4">
-                    {meal.items?.map((item, itemIndex) => (
-                      <div key={itemIndex} className="bg-gray-50 rounded-lg p-3">
+                    
+                    {/* Main Option */}
+                    <div className="bg-green-50 rounded-lg p-3 mb-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="font-medium text-green-800">
+                          {mainMeal.meal_title || mainMeal.itemName || 'Main Option'}
+                        </h4>
+                        <div className="text-sm text-green-600">
+                          {mainMeal.nutrition?.calories || mainMeal.mealCalories || 0} kcal | 
+                          P: {mainMeal.nutrition?.protein || mainMeal.mealProtein || 0}g | 
+                          F: {mainMeal.nutrition?.fat || mainMeal.mealFat || 0}g
+                        </div>
+                      </div>
+                      
+                      {mainMeal.ingredients && mainMeal.ingredients.length > 0 && (
+                        <div className="mt-2">
+                          <p className="text-sm text-gray-500 mb-1">Ingredients:</p>
+                          <ul className="text-sm space-y-1">
+                            {mainMeal.ingredients.map((ing, ingIndex) => (
+                              <li key={ingIndex} className="flex items-center gap-2">
+                                <ChevronRight className="h-3 w-3 text-gray-400" />
+                                <span>
+                                  {ing.item || ing.ingredientName} ({ing.household_measure || ing.portionUser})
+                                  {ing.calories ? ` - ${ing.calories} cal ${ing.protein}g protein` : ''}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Alternative Option */}
+                    {altMeal && (
+                      <div className="bg-blue-50 rounded-lg p-3">
                         <div className="flex items-center justify-between mb-2">
-                          <h4 className="font-medium">{item.itemName}</h4>
-                          <div className="text-sm text-gray-500">
-                            {item.itemCalories} kcal | P: {item.itemProtein} | F: {item.itemFat}
+                          <h4 className="font-medium text-blue-800">
+                            {altMeal.meal_title || altMeal.itemName || 'Alternative Option'}
+                          </h4>
+                          <div className="text-sm text-blue-600">
+                            {altMeal.nutrition?.calories || altMeal.mealCalories || 0} kcal | 
+                            P: {altMeal.nutrition?.protein || altMeal.mealProtein || 0}g | 
+                            F: {altMeal.nutrition?.fat || altMeal.mealFat || 0}g
                           </div>
                         </div>
                         
-                        {item.ingredients && item.ingredients.length > 0 && (
+                        {altMeal.ingredients && altMeal.ingredients.length > 0 && (
                           <div className="mt-2">
                             <p className="text-sm text-gray-500 mb-1">Ingredients:</p>
                             <ul className="text-sm space-y-1">
-                              {item.ingredients.map((ing, ingIndex) => (
+                              {altMeal.ingredients.map((ing, ingIndex) => (
                                 <li key={ingIndex} className="flex items-center gap-2">
                                   <ChevronRight className="h-3 w-3 text-gray-400" />
-                                  {ing.ingredientName} ({ing.portionUser})
+                                  <span>
+                                    {ing.item || ing.ingredientName} ({ing.household_measure || ing.portionUser})
+                                    {ing.calories ? ` - ${ing.calories} cal ${ing.protein}g protein` : ''}
+                                  </span>
                                 </li>
                               ))}
                             </ul>
                           </div>
                         )}
-                        
-                        {item.alternatives && item.alternatives.length > 0 && (
-                          <div className="mt-3 border-t pt-2">
-                            <p className="text-sm text-gray-500 mb-1">Alternatives:</p>
-                            {item.alternatives.map((alt, altIndex) => (
-                              <div key={altIndex} className="text-sm text-gray-600 pl-2 border-l-2 border-gray-200 mt-2">
-                                {alt.itemName} ({alt.itemCalories} kcal | P: {alt.itemProtein} | F: {alt.itemFat})
-                              </div>
-                            ))}
-                          </div>
-                        )}
                       </div>
-                    ))}
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>

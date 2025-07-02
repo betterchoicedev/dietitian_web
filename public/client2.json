@@ -1,0 +1,308 @@
+{
+    "user_code": "AASSDD",
+    "programName": "Michael Chen - Personalized Meal Plan",
+    "dailyTotalCalories": 3085,
+    "macros": {
+      "protein": "231g",
+      "carbs": "347g",
+      "fat": "86g"
+    },
+    "meals": [
+      {
+        "mealName": "Breakfast",
+        "mealCalories": 771,
+        "mealProtein": "58g",
+        "mealFat": "22g",
+        "items": [
+          {
+            "itemName": "Oat Protein Bowl",
+            "itemCalories": 350,
+            "itemProtein": "28g",
+            "itemCarbs": "45g",
+            "itemFat": "8g",
+            "ingredients": [
+              {
+                "ingredientName": "Rolled Oats",
+                "brand": "Quaker",
+                "upc": "0001112223334",
+                "portionSI": "50g",
+                "portionUser": "½ cup",
+                "protein": "5g",
+                "carbs": "34g",
+                "fat": "3g"
+              },
+              {
+                "ingredientName": "Whey Protein Isolate",
+                "brand": "Optimum Nutrition",
+                "upc": "0012345678905",
+                "portionSI": "30g",
+                "portionUser": "1 scoop",
+                "protein": "24g",
+                "carbs": "3g",
+                "fat": "2g"
+              }
+            ]
+          },
+          {
+            "itemName": "Almond Butter Banana Toast",
+            "itemCalories": 421,
+            "itemProtein": "30g",
+            "itemCarbs": "48g",
+            "itemFat": "14g",
+            "ingredients": [
+              {
+                "ingredientName": "Whole grain Bread",
+                "brand": "Dave’s Killer Bread",
+                "upc": "0003891234567",
+                "portionSI": "60g",
+                "portionUser": "2 slices",
+                "protein": "12g",
+                "carbs": "36g",
+                "fat": "2g"
+              },
+              {
+                "ingredientName": "Almond Butter",
+                "brand": "Barney Butter",
+                "upc": "0009456789012",
+                "portionSI": "30g",
+                "portionUser": "2 Tbsp",
+                "protein": "7g",
+                "carbs": "6g",
+                "fat": "13g"
+              },
+              {
+                "ingredientName": "Banana",
+                "brand": "Chiquita",
+                "upc": "0001234500678",
+                "portionSI": "100g",
+                "portionUser": "1 small",
+                "protein": "1g",
+                "carbs": "24g",
+                "fat": "0g"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "mealName": "Morning Snack",
+        "mealCalories": 312,
+        "mealProtein": "28g",
+        "mealFat": "10g",
+        "items": [
+          {
+            "itemName": "Greek Yogurt & Berries",
+            "itemCalories": 312,
+            "itemProtein": "28g",
+            "itemCarbs": "35g",
+            "itemFat": "10g",
+            "ingredients": [
+              {
+                "ingredientName": "Non fat Greek Yogurt",
+                "brand": "Fage 0%",
+                "upc": "0005678901234",
+                "portionSI": "200g",
+                "portionUser": "¾ cup",
+                "protein": "20g",
+                "carbs": "10g",
+                "fat": "0g"
+              },
+              {
+                "ingredientName": "Mixed Berries",
+                "brand": "Driscoll’s",
+                "upc": "0006789012345",
+                "portionSI": "150g",
+                "portionUser": "1 cup",
+                "protein": "2g",
+                "carbs": "20g",
+                "fat": "0g"
+              },
+              {
+                "ingredientName": "Chia Seeds",
+                "brand": "Nutiva",
+                "upc": "0007890123456",
+                "portionSI": "15g",
+                "portionUser": "1 Tbsp",
+                "protein": "3g",
+                "carbs": "5g",
+                "fat": "10g"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "mealName": "Lunch",
+        "mealCalories": 779,
+        "mealProtein": "54g",
+        "mealFat": "24g",
+        "items": [
+          {
+            "itemName": "Grilled Chicken Quinoa Salad",
+            "itemCalories": 779,
+            "itemProtein": "54g",
+            "itemCarbs": "65g",
+            "itemFat": "24g",
+            "ingredients": [
+              {
+                "ingredientName": "Chicken Breast, grilled",
+                "brand": "Tyson",
+                "upc": "0008901234567",
+                "portionSI": "180g",
+                "portionUser": "1 breast",
+                "protein": "50g",
+                "carbs": "0g",
+                "fat": "10g"
+              },
+              {
+                "ingredientName": "Cooked Quinoa",
+                "brand": "Bob’s Red Mill",
+                "upc": "0009012345678",
+                "portionSI": "150g",
+                "portionUser": "1 cup",
+                "protein": "8g",
+                "carbs": "34g",
+                "fat": "4g"
+              },
+              {
+                "ingredientName": "Mixed Greens",
+                "brand": "Earthbound Farm",
+                "upc": "0004321234567",
+                "portionSI": "70g",
+                "portionUser": "2 cups",
+                "protein": "2g",
+                "carbs": "6g",
+                "fat": "0g"
+              },
+              {
+                "ingredientName": "Olive Oil & Lemon Dressing",
+                "brand": "Homemade",
+                "upc": "",
+                "portionSI": "30g",
+                "portionUser": "2 Tbsp",
+                "protein": "0g",
+                "carbs": "1g",
+                "fat": "10g"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "mealName": "Afternoon Snack",
+        "mealCalories": 343,
+        "mealProtein": "30g",
+        "mealFat": "11g",
+        "items": [
+          {
+            "itemName": "Protein Shake & Apple",
+            "itemCalories": 343,
+            "itemProtein": "30g",
+            "itemCarbs": "38g",
+            "itemFat": "11g",
+            "ingredients": [
+              {
+                "ingredientName": "Whey Protein Isolate",
+                "brand": "Optimum Nutrition",
+                "upc": "0012345678905",
+                "portionSI": "30g",
+                "portionUser": "1 scoop",
+                "protein": "24g",
+                "carbs": "3g",
+                "fat": "2g"
+              },
+              {
+                "ingredientName": "Low fat Milk",
+                "brand": "Organic Valley 1%",
+                "upc": "0011122233344",
+                "portionSI": "250ml",
+                "portionUser": "1 cup",
+                "protein": "8g",
+                "carbs": "12g",
+                "fat": "2g"
+              },
+              {
+                "ingredientName": "Apple",
+                "brand": "Honeycrisp",
+                "upc": "0009988877766",
+                "portionSI": "182g",
+                "portionUser": "1 medium",
+                "protein": "0g",
+                "carbs": "23g",
+                "fat": "0g"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "mealName": "Dinner",
+        "mealCalories": 880,
+        "mealProtein": "61g",
+        "mealFat": "19g",
+        "items": [
+          {
+            "itemName": "Salmon, Sweet Potato & Veggies",
+            "itemCalories": 880,
+            "itemProtein": "61g",
+            "itemCarbs": "70g",
+            "itemFat": "19g",
+            "ingredients": [
+              {
+                "ingredientName": "Atlantic Salmon, baked",
+                "brand": "Norwegian",
+                "upc": "0010567891234",
+                "portionSI": "200g",
+                "portionUser": "1 fillet",
+                "protein": "46g",
+                "carbs": "0g",
+                "fat": "14g"
+              },
+              {
+                "ingredientName": "Sweet Potato, baked",
+                "brand": "Local",
+                "upc": "",
+                "portionSI": "200g",
+                "portionUser": "1 medium",
+                "protein": "4g",
+                "carbs": "46g",
+                "fat": "0g"
+              },
+              {
+                "ingredientName": "Steamed Broccoli",
+                "brand": "Green Giant",
+                "upc": "0005678899999",
+                "portionSI": "120g",
+                "portionUser": "1 cup",
+                "protein": "5g",
+                "carbs": "11g",
+                "fat": "1g"
+              },
+              {
+                "ingredientName": "Olive Oil drizzle",
+                "brand": "Extra Virgin",
+                "upc": "",
+                "portionSI": "10g",
+                "portionUser": "2 tsp",
+                "protein": "0g",
+                "carbs": "0g",
+                "fat": "4g"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "recommendations": [
+      {
+        "recommendation_key": "generalComments",
+        "recommendation_value": "Given your very active lifestyle and training five days a week, it's important to focus on a balanced diet with adequate macronutrients to support muscle recovery and energy levels."
+      },
+      {
+        "recommendation_key": "hydration",
+        "recommendation_value": "Maintain adequate hydration by drinking at least 3 liters of water daily—monitor urine color to ensure proper hydration; it should be light yellow."
+      }
+    ],
+    "updated": "2025-04-20"
+  }
+  

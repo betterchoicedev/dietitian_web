@@ -11,6 +11,8 @@ import DataGenerator from '@/pages/DataGenerator';
 import NutritionPlan from '@/pages/NutritionPlan';
 import '@/styles/rtl.css';
 import MenuCreate from './pages/MenuCreate';
+import MenuLoad from './pages/MenuLoad';
+import RecipesPage from './pages/RecipesPage';
 
 // Protected Route component
 function ProtectedRoute({ children }) {
@@ -28,7 +30,7 @@ function PublicRoute({ children }) {
   const { user } = useAuth();
   
   if (user) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
   
   return children;
@@ -52,9 +54,12 @@ function App() {
               </PublicRoute>
             } />
             
+            {/* Root redirect to login */}
+            <Route path="/" element={<Navigate to="/login" replace />} />
+            
             {/* Protected Routes - All wrapped in Layout */}
             <Route element={<Layout />}>
-              <Route path="/" element={
+              <Route path="/dashboard" element={
                 <ProtectedRoute>
                   <Dashboard />
                 </ProtectedRoute>
@@ -84,10 +89,18 @@ function App() {
                   <MenuCreate />
                 </ProtectedRoute>
               } />
+              <Route path="/MenuLoad" element={
+                <ProtectedRoute>
+                  <MenuLoad />
+                </ProtectedRoute>
+              } />
+              <Route path="/menuload" element={<Navigate to="/MenuLoad" replace />} />
+              <Route path="/recipes" element={
+                <ProtectedRoute>
+                  <RecipesPage />
+                </ProtectedRoute>
+              } />
             </Route>
-            
-            {/* Redirect /dashboard to / */}
-            <Route path="/dashboard" element={<Navigate to="/" replace />} />
           </Routes>
         </LanguageProvider>
       </AuthProvider>

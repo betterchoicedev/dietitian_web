@@ -91,12 +91,20 @@ export default function Menus() {
       
       let loadedMenus = [];
       try {
-        loadedMenus = await Menu.filter({ created_by: userData.email }, '-created_date');
+        // Load only meal plans (not schemas) for this dietitian
+        loadedMenus = await Menu.filter({ 
+          record_type: 'meal_plan',
+          dietitian_id: userData.id 
+        }, '-created_date');
       } catch (fetchError) {
         console.error("Error in initial menu fetch:", fetchError);
         try {
-          loadedMenus = await Menu.list();
-          loadedMenus = loadedMenus.filter(menu => menu.created_by === userData.email);
+          // Fallback: load all and filter
+          const allMenus = await Menu.list();
+          loadedMenus = allMenus.filter(menu => 
+            menu.record_type === 'meal_plan' && 
+            menu.dietitian_id === userData.id
+          );
         } catch (listError) {
           console.error("Fallback menu fetch also failed:", listError);
           throw new Error("Failed to load menus after multiple attempts");
@@ -108,13 +116,14 @@ export default function Menus() {
           const updatedMenus = await updateExistingMenuCodes(loadedMenus);
           setMenus(updatedMenus);
           
-          const uniqueCodes = [...new Set(updatedMenus.map(menu => menu.user_code).filter(Boolean))];
-          setUserCodes(uniqueCodes);
+          // Extract user codes for the new schema
+          const uniqueUserCodes = [...new Set(updatedMenus.map(menu => menu.user_code).filter(Boolean))];
+          setUserCodes(uniqueUserCodes);
         } catch (updateError) {
           console.error("Error updating menu codes:", updateError);
           setMenus(loadedMenus);
-          const uniqueCodes = [...new Set(loadedMenus.map(menu => menu.user_code).filter(Boolean))];
-          setUserCodes(uniqueCodes);
+          const uniqueUserCodes = [...new Set(loadedMenus.map(menu => menu.user_code).filter(Boolean))];
+          setUserCodes(uniqueUserCodes);
         }
       } else {
         setMenus([]);
@@ -143,7 +152,7 @@ export default function Menus() {
 
   const filteredMenus = menus.filter(menu => {
     const matchesSearch = 
-      (menu.programName?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      (menu.meal_plan_name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
        menu.menu_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
        menu.user_code?.toLowerCase().includes(searchTerm.toLowerCase()));
     
@@ -243,6 +252,15 @@ export default function Menus() {
             Export
           </Button>
           <Link 
+            to={createPageUrl('MenuLoad')} 
+            className="flex-1 sm:flex-none"
+          >
+            <Button variant="outline" className="w-full">
+              <FileText className="w-4 h-4 mr-2" />
+              Load & Edit
+            </Button>
+          </Link>
+          <Link 
             to={createPageUrl('MenuCreate')} 
             className="flex-1 sm:flex-none"
           >
@@ -310,10 +328,10 @@ export default function Menus() {
             <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
               <div className="space-y-1">
                 <CardTitle className="text-lg font-medium">
-                  {menu.programName || 'Untitled Menu'}
+                  {menu.meal_plan_name || 'Untitled Menu'}
                 </CardTitle>
                 <CardDescription>
-                  <span>Client Code: {menu.user_code || 'N/A'}</span>
+                  <span>User Code: {menu.user_code || 'N/A'}</span>
                 </CardDescription>
               </div>
               <Badge 
@@ -328,19 +346,19 @@ export default function Menus() {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <p className="text-gray-500">Total Calories</p>
-                  <p className="font-medium">{menu.dailyTotalCalories || 0} kcal</p>
+                  <p className="font-medium">{menu.daily_total_calories || 0} kcal</p>
                 </div>
                 <div>
                   <p className="text-gray-500">Protein</p>
-                  <p className="font-medium">{menu.macros?.protein || '0g'}</p>
+                  <p className="font-medium">{menu.macros_target?.protein || '0g'}</p>
                 </div>
                 <div>
                   <p className="text-gray-500">Carbs</p>
-                  <p className="font-medium">{menu.macros?.carbs || '0g'}</p>
+                  <p className="font-medium">{menu.macros_target?.carbs || '0g'}</p>
                 </div>
                 <div>
                   <p className="text-gray-500">Fat</p>
-                  <p className="font-medium">{menu.macros?.fat || '0g'}</p>
+                  <p className="font-medium">{menu.macros_target?.fat || '0g'}</p>
                 </div>
               </div>
 
@@ -387,7 +405,7 @@ export default function Menus() {
               Delete Menu Plan
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete the menu "{menuToDelete?.programName || 'Untitled Menu'}"?
+              Are you sure you want to delete the menu "{menuToDelete?.meal_plan_name || 'Untitled Menu'}"?
               This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>

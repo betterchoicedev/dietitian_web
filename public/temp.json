@@ -1,0 +1,612 @@
+ {
+    "programName": "Roee Bina - Personalized Nutrition Plan",
+    "dailyTotalCalories": 2100,
+    "macros": {
+      "fat": "65g",
+      "carbs": "180g",
+      "protein": "160g"
+    },
+    "recommendations": {
+      "supplements": "Consider omega-3 (600mg), Vitamin D (1000 IU), and a daily multivitamin.",
+      "hydration": "Drink at least 2.5 liters of water daily.",
+      "sleep": "Aim for 7\u20138 hours of uninterrupted sleep.",
+      "general": "Avoid skipping meals; stay consistent with meal timing."
+    },
+    "client": {
+      "name": "Roee Bina",
+      "email": "roee.bina@example.com",
+      "phone": "+972-50-1234567",
+      "usercode": "AABBCC",
+      "userid": 1111,
+      "age": 28,
+      "height_cm": 182,
+      "weight_kg": 77,
+      "food_allergies": [],
+      "food_limitations": [
+        "Pork",
+        "Shellfish"
+      ]
+    },
+    "timezone": "Asia/Jerusalem",
+    "status": "active",
+    "active_from": "2025-06-05",
+    "active_until": "2025-06-06",
+    "meals": [
+      {
+        "mealName": "Pre-Morning",
+        "recommendedTime": "1000",
+        "prepTimeMinutes": 1,
+        "reminder": "Quick snack for energy boost.",
+        "mealCalories": 300,
+        "mealProtein": "20g",
+        "mealFat": "8g",
+        "items": [
+          {
+            "itemName": "Yogurt PRO with chocolate crisps and banana",
+            "itemCalories": 300,
+            "itemProtein": "20g",
+            "itemFat": "8g",
+            "ingredients": [
+              {
+                "ingredientName": "Yogurt PRO chocolate",
+                "brand": "Tnuva",
+                "upc": "7290004111223",
+                "portionSI": "200 g",
+                "portionUser": "1 container",
+                "protein": "18g",
+                "fat": "3g",
+                "alternatives": []
+              },
+              {
+                "ingredientName": "Banana",
+                "brand": "Generic",
+                "upc": "0",
+                "portionSI": "120 g",
+                "portionUser": "1 medium banana",
+                "protein": "1g",
+                "fat": "0.3g",
+                "alternatives": []
+              }
+            ],
+            "alternatives": [
+              {
+                "itemName": "Protein bar and a pear",
+                "itemCalories": 295,
+                "itemProtein": "19g",
+                "itemFat": "7g",
+                "ingredients": [
+                  {
+                    "ingredientName": "Protein bar chocolate",
+                    "brand": "Quest",
+                    "upc": "888849000003",
+                    "portionSI": "60 g",
+                    "portionUser": "1 bar",
+                    "protein": "18g",
+                    "fat": "7g",
+                    "alternatives": []
+                  },
+                  {
+                    "ingredientName": "Pear",
+                    "brand": "Generic",
+                    "upc": "0",
+                    "portionSI": "130 g",
+                    "portionUser": "1 medium pear",
+                    "protein": "1g",
+                    "fat": "0.2g",
+                    "alternatives": []
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "notes": []
+      },
+      {
+        "mealName": "Breakfast",
+        "recommendedTime": "0730",
+        "prepTimeMinutes": 5,
+        "reminder": "Choose one of the toast options.",
+        "mealCalories": 400,
+        "mealProtein": "25g",
+        "mealFat": "15g",
+        "items": [
+          {
+            "itemName": "Spelt toast with 2 eggs and mayo",
+            "itemCalories": 400,
+            "itemProtein": "25g",
+            "itemFat": "15g",
+            "ingredients": [
+              {
+                "ingredientName": "Spelt bread",
+                "brand": "Lechem Eretz",
+                "upc": "7290002222221",
+                "portionSI": "80 g",
+                "portionUser": "2 slices",
+                "protein": "8g",
+                "fat": "2g",
+                "alternatives": []
+              },
+              {
+                "ingredientName": "Eggs",
+                "brand": "Generic",
+                "upc": "0",
+                "portionSI": "100 g",
+                "portionUser": "2 eggs",
+                "protein": "14g",
+                "fat": "10g",
+                "alternatives": []
+              },
+              {
+                "ingredientName": "Mayonnaise",
+                "brand": "Hellmann's",
+                "upc": "048001204224",
+                "portionSI": "15 g",
+                "portionUser": "1 tbsp",
+                "protein": "0g",
+                "fat": "3g",
+                "alternatives": []
+              }
+            ],
+            "alternatives": [
+              {
+                "itemName": "Spelt toast with 2 slices 15% cheese",
+                "itemCalories": 390,
+                "itemProtein": "24g",
+                "itemFat": "14g",
+                "ingredients": [
+                  {
+                    "ingredientName": "Spelt bread",
+                    "brand": "Lechem Eretz",
+                    "upc": "7290002222221",
+                    "portionSI": "80 g",
+                    "portionUser": "2 slices",
+                    "protein": "8g",
+                    "fat": "2g",
+                    "alternatives": []
+                  },
+                  {
+                    "ingredientName": "Cheese 15%",
+                    "brand": "Tnuva",
+                    "upc": "7290010001217",
+                    "portionSI": "40 g",
+                    "portionUser": "2 slices",
+                    "protein": "14g",
+                    "fat": "10g",
+                    "alternatives": []
+                  }
+                ]
+              },
+              {
+                "itemName": "Spelt toast with 2 tbsp tahini and silan",
+                "itemCalories": 400,
+                "itemProtein": "15g",
+                "itemFat": "18g",
+                "ingredients": [
+                  {
+                    "ingredientName": "Spelt bread",
+                    "brand": "Lechem Eretz",
+                    "upc": "7290002222221",
+                    "portionSI": "80 g",
+                    "portionUser": "2 slices",
+                    "protein": "8g",
+                    "fat": "2g",
+                    "alternatives": []
+                  },
+                  {
+                    "ingredientName": "Raw tahini",
+                    "brand": "Barake",
+                    "upc": "7290003711111",
+                    "portionSI": "30 g",
+                    "portionUser": "2 tbsp",
+                    "protein": "6g",
+                    "fat": "16g",
+                    "alternatives": []
+                  },
+                  {
+                    "ingredientName": "Silan (date syrup)",
+                    "brand": "Yad Mordechai",
+                    "upc": "7290004111145",
+                    "portionSI": "10 g",
+                    "portionUser": "1 tsp",
+                    "protein": "1g",
+                    "fat": "0g",
+                    "alternatives": []
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "notes": []
+      },
+      {
+        "mealName": "Lunch",
+        "recommendedTime": "1300",
+        "prepTimeMinutes": 25,
+        "reminder": "Choose one protein and one carb option.",
+        "mealCalories": 600,
+        "mealProtein": "45g",
+        "mealFat": "20g",
+        "items": [
+          {
+            "itemName": "Schnitzel or Asado with rice or couscous and soup",
+            "itemCalories": 600,
+            "itemProtein": "45g",
+            "itemFat": "20g",
+            "ingredients": [
+              {
+                "ingredientName": "Protein option",
+                "brand": "Homemade",
+                "upc": "0",
+                "portionSI": "120 g",
+                "portionUser": "2 schnitzels or 100g Asado",
+                "protein": "30g",
+                "fat": "15g",
+                "alternatives": [
+                  {
+                    "ingredientName": "Schnitzel (medium, baked)",
+                    "brand": "Homemade",
+                    "upc": "0",
+                    "portionSI": "120 g",
+                    "portionUser": "2 pieces",
+                    "protein": "28g",
+                    "fat": "14g",
+                    "alternatives": []
+                  },
+                  {
+                    "ingredientName": "Asado (braised)",
+                    "brand": "Homemade",
+                    "upc": "0",
+                    "portionSI": "100 g",
+                    "portionUser": "~100g",
+                    "protein": "32g",
+                    "fat": "16g",
+                    "alternatives": []
+                  }
+                ]
+              },
+              {
+                "ingredientName": "Carb option",
+                "brand": "Generic",
+                "upc": "0",
+                "portionSI": "200 g",
+                "portionUser": "10\u201312 tbsp",
+                "protein": "5g",
+                "fat": "2g",
+                "alternatives": [
+                  {
+                    "ingredientName": "White rice",
+                    "brand": "Osem",
+                    "upc": "7290003022211",
+                    "portionSI": "200 g",
+                    "portionUser": "10\u201312 tbsp",
+                    "protein": "5g",
+                    "fat": "1g",
+                    "alternatives": []
+                  },
+                  {
+                    "ingredientName": "Couscous with vegetable soup",
+                    "brand": "Homemade",
+                    "upc": "0",
+                    "portionSI": "200 g",
+                    "portionUser": "10\u201312 tbsp with 1 cup soup",
+                    "protein": "5g",
+                    "fat": "3g",
+                    "alternatives": []
+                  }
+                ]
+              }
+            ],
+            "alternatives": [
+              {
+                "itemName": "Chicken breast or beef patties with rice and vegetables",
+                "itemCalories": 590,
+                "itemProtein": "46g",
+                "itemFat": "18g",
+                "ingredients": [
+                  {
+                    "ingredientName": "Protein option",
+                    "brand": "Homemade",
+                    "upc": "0",
+                    "portionSI": "150 g",
+                    "portionUser": "3 chicken pieces or 8-10 patties",
+                    "protein": "35g",
+                    "fat": "14g",
+                    "alternatives": [
+                      {
+                        "ingredientName": "Chicken breast, grilled",
+                        "brand": "Tirat Zvi",
+                        "upc": "7290004500121",
+                        "portionSI": "150 g",
+                        "portionUser": "3 palm-sized pieces",
+                        "protein": "36g",
+                        "fat": "6g",
+                        "alternatives": []
+                      },
+                      {
+                        "ingredientName": "Beef patties (grilled)",
+                        "brand": "Homemade",
+                        "upc": "0",
+                        "portionSI": "140 g",
+                        "portionUser": "8\u201310 patties",
+                        "protein": "34g",
+                        "fat": "14g",
+                        "alternatives": []
+                      }
+                    ]
+                  },
+                  {
+                    "ingredientName": "White rice and mixed vegetables",
+                    "brand": "Generic",
+                    "upc": "0",
+                    "portionSI": "200 g",
+                    "portionUser": "10\u201312 tbsp",
+                    "protein": "5g",
+                    "fat": "2g",
+                    "alternatives": []
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "notes": [
+          "Choose one combination for lunch."
+        ]
+      },
+      {
+        "mealName": "Middle Meal",
+        "recommendedTime": "1630",
+        "prepTimeMinutes": 5,
+        "reminder": "Choose one of the balanced snacks.",
+        "mealCalories": 350,
+        "mealProtein": "20g",
+        "mealFat": "10g",
+        "items": [
+          {
+            "itemName": "Cottage cheese and avocado in half pita",
+            "itemCalories": 350,
+            "itemProtein": "20g",
+            "itemFat": "10g",
+            "ingredients": [
+              {
+                "ingredientName": "Cottage cheese 5%",
+                "brand": "Tnuva",
+                "upc": "7290004111176",
+                "portionSI": "125 g",
+                "portionUser": "\u00bd container",
+                "protein": "14g",
+                "fat": "5g",
+                "alternatives": []
+              },
+              {
+                "ingredientName": "Avocado",
+                "brand": "Generic",
+                "upc": "0",
+                "portionSI": "70 g",
+                "portionUser": "\u00bd avocado",
+                "protein": "1g",
+                "fat": "8g",
+                "alternatives": []
+              },
+              {
+                "ingredientName": "Whole wheat pita",
+                "brand": "Angel Bakery",
+                "upc": "7290002220003",
+                "portionSI": "40 g",
+                "portionUser": "\u00bd pita",
+                "protein": "5g",
+                "fat": "1g",
+                "alternatives": []
+              }
+            ],
+            "alternatives": [
+              {
+                "itemName": "Yogurt protein shake with banana, date, and peanut butter",
+                "itemCalories": 370,
+                "itemProtein": "25g",
+                "itemFat": "10g",
+                "ingredients": [
+                  {
+                    "ingredientName": "Greek yogurt 0%",
+                    "brand": "Tnuva",
+                    "upc": "7290004111180",
+                    "portionSI": "200 g",
+                    "portionUser": "1 cup",
+                    "protein": "18g",
+                    "fat": "0g",
+                    "alternatives": []
+                  },
+                  {
+                    "ingredientName": "Banana",
+                    "brand": "Generic",
+                    "upc": "0",
+                    "portionSI": "120 g",
+                    "portionUser": "1 banana",
+                    "protein": "1g",
+                    "fat": "0.3g",
+                    "alternatives": []
+                  },
+                  {
+                    "ingredientName": "Date",
+                    "brand": "Generic",
+                    "upc": "0",
+                    "portionSI": "20 g",
+                    "portionUser": "1 large date",
+                    "protein": "0.2g",
+                    "fat": "0g",
+                    "alternatives": []
+                  },
+                  {
+                    "ingredientName": "Peanut butter",
+                    "brand": "Skippy",
+                    "upc": "037600105222",
+                    "portionSI": "5 g",
+                    "portionUser": "1 tsp",
+                    "protein": "2g",
+                    "fat": "4g",
+                    "alternatives": []
+                  }
+                ]
+              },
+              {
+                "itemName": "Yogurt protein shake with granola and fruit",
+                "itemCalories": 360,
+                "itemProtein": "23g",
+                "itemFat": "8g",
+                "ingredients": [
+                  {
+                    "ingredientName": "Greek yogurt 0%",
+                    "brand": "Tnuva",
+                    "upc": "7290004111180",
+                    "portionSI": "200 g",
+                    "portionUser": "1 cup",
+                    "protein": "18g",
+                    "fat": "0g",
+                    "alternatives": []
+                  },
+                  {
+                    "ingredientName": "Granola",
+                    "brand": "Nature Valley",
+                    "upc": "016000485352",
+                    "portionSI": "60 g",
+                    "portionUser": "6 tbsp",
+                    "protein": "4g",
+                    "fat": "6g",
+                    "alternatives": []
+                  },
+                  {
+                    "ingredientName": "Apple",
+                    "brand": "Generic",
+                    "upc": "0",
+                    "portionSI": "150 g",
+                    "portionUser": "1 medium apple",
+                    "protein": "1g",
+                    "fat": "0.3g",
+                    "alternatives": []
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "notes": []
+      },
+      {
+        "mealName": "Dinner",
+        "recommendedTime": "1930",
+        "prepTimeMinutes": 15,
+        "reminder": "Pick one of the light dinner options.",
+        "mealCalories": 550,
+        "mealProtein": "40g",
+        "mealFat": "18g",
+        "items": [
+          {
+            "itemName": "Eggs and tuna in a carb wrap",
+            "itemCalories": 550,
+            "itemProtein": "40g",
+            "itemFat": "18g",
+            "ingredients": [
+              {
+                "ingredientName": "Eggs",
+                "brand": "Generic",
+                "upc": "0",
+                "portionSI": "100 g",
+                "portionUser": "2 eggs",
+                "protein": "14g",
+                "fat": "10g",
+                "alternatives": []
+              },
+              {
+                "ingredientName": "Canned tuna in water",
+                "brand": "Starkist",
+                "upc": "7290003023022",
+                "portionSI": "120 g",
+                "portionUser": "1 can",
+                "protein": "25g",
+                "fat": "1g",
+                "alternatives": []
+              },
+              {
+                "ingredientName": "Carb wrap base",
+                "brand": "Generic",
+                "upc": "0",
+                "portionSI": "80 g",
+                "portionUser": "1 tortilla / 2 spelt pitas / 2 slices bread",
+                "protein": "5g",
+                "fat": "2g",
+                "alternatives": [
+                  {
+                    "ingredientName": "Whole wheat tortilla",
+                    "brand": "Mission",
+                    "upc": "073731009274",
+                    "portionSI": "80 g",
+                    "portionUser": "1 large tortilla",
+                    "protein": "5g",
+                    "fat": "2g",
+                    "alternatives": []
+                  },
+                  {
+                    "ingredientName": "Spelt pita",
+                    "brand": "Angel Bakery",
+                    "upc": "7290002220023",
+                    "portionSI": "100 g",
+                    "portionUser": "2 pitas",
+                    "protein": "6g",
+                    "fat": "2g",
+                    "alternatives": []
+                  },
+                  {
+                    "ingredientName": "Whole wheat bread",
+                    "brand": "Osem",
+                    "upc": "7290003501115",
+                    "portionSI": "60 g",
+                    "portionUser": "2 slices",
+                    "protein": "5g",
+                    "fat": "1g",
+                    "alternatives": []
+                  }
+                ]
+              }
+            ],
+            "alternatives": [
+              {
+                "itemName": "Stir-fried chicken or turkey filets with carbs",
+                "itemCalories": 560,
+                "itemProtein": "42g",
+                "itemFat": "17g",
+                "ingredients": [
+                  {
+                    "ingredientName": "Stir-fried chicken filets",
+                    "brand": "Tirat Zvi",
+                    "upc": "7290004500145",
+                    "portionSI": "160 g",
+                    "portionUser": "2\u20133 pieces",
+                    "protein": "38g",
+                    "fat": "10g",
+                    "alternatives": [
+                      {
+                        "ingredientName": "Stir-fried turkey filets",
+                        "brand": "Tirat Zvi",
+                        "upc": "7290004500146",
+                        "portionSI": "160 g",
+                        "portionUser": "2\u20133 pieces",
+                        "protein": "38g",
+                        "fat": "10g",
+                        "alternatives": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "notes": [
+          "Choose one full meal. Use wraps or grains as described."
+        ]
+      }
+    ]
+  }
+  

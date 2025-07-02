@@ -12,6 +12,13 @@
     "activity_level": "moderate",
     "goal": "maintain",
     "dietary_restrictions": ["Pork", "Shellfish"],
-    "notes": "Active lifestyle, follows a personalized nutrition plan"
+    "notes": "Active lifestyle, follows a personalized nutrition plan",
+    "meals": 5,
+    "client_preference":[
+      "loves pasta"
+    ] 
+
+   
   }
+  
   

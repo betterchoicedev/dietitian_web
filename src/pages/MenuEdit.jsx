@@ -60,9 +60,23 @@ export default function MenuEdit() {
         
         console.log("Loaded menu data:", {
           id: menu.id,
+          record_type: menu.record_type,
           user_code: menu.user_code,
-          client_id: menu.client_id
+          meal_plan_name: menu.meal_plan_name
         });
+        
+        // Handle the new schema structure
+        if (menu.record_type === 'schema') {
+          setError("Cannot edit a schema template. Convert to meal plan first.");
+          return;
+        }
+        
+        // Extract meals from meal_plan JSON
+        if (menu.meal_plan && menu.meal_plan.meals) {
+          menu.meals = menu.meal_plan.meals;
+        } else if (!menu.meals) {
+          menu.meals = [];
+        }
         
         // Normalize recommendations structure
         if (!menu.recommendations) {
@@ -73,10 +87,6 @@ export default function MenuEdit() {
             recommendation_key: key,
             recommendation_value: value
           }));
-        }
-
-        if (!menu.meals) {
-          menu.meals = [];
         }
 
         if (!menu.menu_code || menu.menu_code.length !== 9 || !/^\d{9}$/.test(menu.menu_code)) {
@@ -93,32 +103,14 @@ export default function MenuEdit() {
         
         setMenuData(menu);
 
+        // Load client data using user_code from the new schema
         if (menu.user_code) {
           try {
             const clients = await Client.filter({ user_code: menu.user_code });
-            console.log("Found clients for user_code:", clients);
             if (clients && clients.length > 0) {
               setClient(clients[0]);
             } else {
-              console.warn("No clients found for user_code:", menu.user_code);
-              
-              // Try to find client by client_id as fallback
-              if (menu.client_id) {
-                try {
-                  const clientById = await Client.get(menu.client_id);
-                  if (clientById) {
-                    setClient(clientById);
-                    
-                    // Update menu with correct user_code if needed
-                    if (clientById.user_code && clientById.user_code !== menu.user_code) {
-                      await Menu.update(menuId, { user_code: clientById.user_code });
-                      menu.user_code = clientById.user_code;
-                    }
-                  }
-                } catch (clientIdErr) {
-                  console.error("Error finding client by ID:", clientIdErr);
-                }
-              }
+              console.warn("No client found for user_code:", menu.user_code);
             }
           } catch (clientErr) {
             console.error("Error loading client:", clientErr);
@@ -172,19 +164,23 @@ export default function MenuEdit() {
         }));
       }
       
-      // Ensure user_code and client_id are preserved
+      // Update the meal_plan JSON with the current meals
+      updatedMenu.meal_plan = {
+        ...updatedMenu.meal_plan,
+        meals: updatedMenu.meals,
+        totals: updatedMenu.totals
+      };
+      
+      // Ensure user_code is preserved
       if (client && client.user_code && !updatedMenu.user_code) {
         updatedMenu.user_code = client.user_code;
       }
       
-      if (client && client.id && !updatedMenu.client_id) {
-        updatedMenu.client_id = client.id;
-      }
-      
       console.log("Updating menu with:", {
         id: updatedMenu.id,
+        record_type: updatedMenu.record_type,
         user_code: updatedMenu.user_code,
-        client_id: updatedMenu.client_id
+        meal_plan_name: updatedMenu.meal_plan_name
       });
       
       const result = await Menu.update(updatedMenu.id, updatedMenu);

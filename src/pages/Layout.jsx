@@ -37,6 +37,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from '@/contexts/AuthContext';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { LanguageToggle } from '@/components/ui/language-toggle';
 import { EventBus } from '@/utils/EventBus';
 
 export default function Layout() {
@@ -66,7 +67,7 @@ export default function Layout() {
   React.useEffect(() => {
     const loadUserData = async () => {
       if (!user) return;
-      // don’t run twice
+      // don't run twice
       if (dataLoadedRef.current) return;
   
       console.log('Loading auth user data (id & email)…');
@@ -104,7 +105,7 @@ export default function Layout() {
         .eq('id', user.id);
 
       if (updateError) throw updateError;
-      navigate(createPageUrl('Dashboard'));
+      navigate('/dashboard');
     } catch (error) {
       console.error('Error updating selected client:', error);
     }
@@ -149,32 +150,54 @@ export default function Layout() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-100 via-green-200 to-green-300">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 bg-mesh">
       {/* Header */}
-      <header className="border-b glass shadow-md backdrop-blur-md bg-white/40">
-        <div className="flex h-16 items-center px-4 gap-4">
-          {/* Logo placeholder replaced with image */}
-          <div className="hidden md:flex items-center mr-4">
-            <img src="/nutrition-logo.png" alt="BetterChoice Logo" className="w-10 h-10" />
-          </div>
+      <header className="border-b border-border/40 glass-premium shadow-premium backdrop-blur-xl bg-white/60">
+        <div className="flex h-16 items-center px-4 md:px-6 gap-2 md:gap-4">
+          {/* Mobile Menu Button */}
           <Button
             variant="ghost"
-            className="md:hidden"
+            className="md:hidden hover:bg-primary/10 mr-2"
             size="icon"
             onClick={() => setSidebarOpen(true)}
           >
-            <MenuIcon className="h-6 w-6" />
+            <MenuIcon className="h-5 w-5" />
           </Button>
+
+          {/* Logo */}
+          <div className="hidden md:flex items-center mr-6">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <img src="/logo-placeholder.png" alt="BetterChoice Logo" className="w-10 h-10 drop-shadow-md" />
+                <div className="absolute inset-0 rounded-full bg-gradient-to-br from-primary/20 to-transparent"></div>
+              </div>
+              <div className="flex flex-col">
+                <h1 className="text-lg font-bold text-gradient-primary">BetterChoice</h1>
+                <p className="text-xs text-muted-foreground/60">Professional Nutrition</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Mobile Logo */}
+          <div className="md:hidden flex items-center mr-2">
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <img src="/logo-placeholder.png" alt="BetterChoice Logo" className="w-8 h-8 drop-shadow-md" />
+                <div className="absolute inset-0 rounded-full bg-gradient-to-br from-primary/20 to-transparent"></div>
+              </div>
+              <h1 className="text-base font-bold text-gradient-primary">BetterChoice</h1>
+            </div>
+          </div>
           
-          <div className="flex-1">
+          <div className="flex-1 flex justify-center">
             {clients.length > 0 && (
               <Select value={selectedClient} onValueChange={handleClientChange}>
-                <SelectTrigger className="w-[300px]">
+                <SelectTrigger className="w-full max-w-[320px] md:w-[320px] bg-white/80 backdrop-blur-sm border-border/60 shadow-sm hover:border-primary/40 transition-all duration-300">
                   <SelectValue placeholder={translations.selectClient} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="bg-white/95 backdrop-blur-xl border-border/60">
                   {clients.map((client) => (
-                    <SelectItem key={client.id} value={client.id}>
+                    <SelectItem key={client.id} value={client.id} className="hover:bg-primary/5">
                       {client.full_name}
                     </SelectItem>
                   ))}
@@ -183,38 +206,46 @@ export default function Layout() {
             )}
           </div>
 
-          <Button
-            onClick={() => handleLanguageSwitch(language === 'en' ? 'he' : 'en')}
-            className="border border-green-400 text-green-700 bg-white/80 shadow-sm hover:bg-green-50 hover:text-green-800 font-semibold px-4 py-2 rounded-lg transition"
-          >
-            <span className="ml-2">{translations.switchLanguage}</span>
-          </Button>
+          <div className="flex items-center gap-3">
+            <LanguageToggle />
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                <Avatar className="h-8 w-8">
-                  <AvatarFallback>{userData?.email?.[0]?.toUpperCase()}</AvatarFallback>
-                </Avatar>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-56" align="end" forceMount>
-              <DropdownMenuItem className="flex-col items-start">
-                <div className="text-sm font-medium">{userData?.email}</div>
-                <div className="text-xs text-gray-500">{userData?.specialization}</div>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleSignOut}>
-                <LogOut className="mr-2 h-4 w-4" />
-                <span>{translations.signOut}</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="relative h-10 w-10 rounded-full hover:bg-primary/10 transition-all duration-300">
+                  <Avatar className="h-9 w-9 shadow-sm ring-2 ring-primary/10">
+                    <AvatarFallback className="bg-gradient-to-br from-primary to-primary-lighter text-white font-semibold">
+                      {userData?.email?.[0]?.toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-64 bg-white/95 backdrop-blur-xl border-border/60 shadow-xl" align="end" forceMount>
+                <DropdownMenuItem className="flex-col items-start p-4 hover:bg-primary/5">
+                  <div className="text-sm font-semibold text-foreground">{userData?.email}</div>
+                  <div className="text-xs text-muted-foreground/70">{userData?.specialization}</div>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleSignOut} className="hover:bg-destructive/5 text-destructive">
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>{translations.signOut}</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </header>
 
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-40 md:hidden backdrop-blur-sm animate-scale-in"
+          onClick={() => setSidebarOpen(false)}
+          onTouchStart={(e) => e.preventDefault()}
+        />
+      )}
+
       {/* Sidebar */}
       <div className={cn(
-        "fixed inset-y-0 w-64 glass bg-white/60 border-r shadow-lg backdrop-blur-md z-20 transition-transform duration-200 ease-in-out",
+        "fixed inset-y-0 w-64 md:w-72 glass-premium bg-white/90 border-r border-border/40 shadow-xl backdrop-blur-2xl z-50 transition-transform duration-300 ease-out",
         {
           'translate-x-0': sidebarOpen,
           '-translate-x-full': !sidebarOpen,
@@ -225,70 +256,95 @@ export default function Layout() {
           'border-l': language === 'he'
         }
       )}>
-        <div className="flex h-16 items-center justify-between px-4 border-b">
-          {/* Logo in sidebar replaced with image */}
-          <div className="flex items-center gap-2">
-            <img src="/nutrition-logo.png" alt="BetterChoice Logo" className="w-8 h-8" />
-            <h1 className="text-xl font-semibold text-green-800">BetterChoice</h1>
+        <div className="flex h-16 items-center justify-between px-6 border-b border-border/30">
+          {/* Sidebar Logo */}
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <img src="/logo-placeholder.png" alt="BetterChoice Logo" className="w-8 h-8 drop-shadow-sm" />
+              <div className="absolute inset-0 rounded-full bg-gradient-to-br from-primary/20 to-transparent"></div>
+            </div>
+            <div className="flex flex-col">
+              <h1 className="text-lg font-bold text-gradient-primary">BetterChoice</h1>
+              <p className="text-xs text-muted-foreground/60">Professional Platform</p>
+            </div>
           </div>
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden"
+            className="md:hidden hover:bg-destructive/10 hover:text-destructive rounded-lg w-10 h-10"
             onClick={() => setSidebarOpen(false)}
           >
-            <X className="h-6 w-6" />
+            <X className="h-5 w-5" />
           </Button>
         </div>
         
-        <nav className="space-y-2 p-4">
-          <Link to="/">
-            <Button variant="ghost" className="w-full justify-start">
-              <Activity className="mr-2 h-4 w-4" />
-              {translations.home}
+        <nav className="space-y-1 p-4 pb-8 md:pb-4">
+          <Link to="/dashboard" onClick={() => setSidebarOpen(false)}>
+            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-primary/8 hover:text-primary-darker transition-all duration-300 group">
+              <Activity className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+              <span className="font-medium">{translations.home}</span>
             </Button>
           </Link>
-          <Link to={createPageUrl('Users')}>
-            <Button variant="ghost" className="w-full justify-start">
-              <Users className="mr-2 h-4 w-4" />
-              {translations.users}
+          <Link to={createPageUrl('Users')} onClick={() => setSidebarOpen(false)}>
+            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-primary/8 hover:text-primary-darker transition-all duration-300 group">
+              <Users className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+              <span className="font-medium">{translations.users}</span>
             </Button>
           </Link>
-          <Link to={createPageUrl('Chat')}>
-            <Button variant="ghost" className="w-full justify-start">
-              <MessageSquare className="mr-2 h-4 w-4" />
-              {translations.chat}
+          <Link to={createPageUrl('Chat')} onClick={() => setSidebarOpen(false)}>
+            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-primary/8 hover:text-primary-darker transition-all duration-300 group">
+              <MessageSquare className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+              <span className="font-medium">{translations.chat}</span>
             </Button>
           </Link>
-          <Link to={createPageUrl('MenuCreate')}>
-            <Button variant="ghost" className="w-full justify-start">
-              <ListChecks className="mr-2 h-4 w-4" />
-              {translations.menuCreate}
+          <Link to={createPageUrl('MenuCreate')} onClick={() => setSidebarOpen(false)}>
+            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-success/8 hover:text-success-darker transition-all duration-300 group">
+              <ListChecks className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+              <span className="font-medium">{translations.menuCreate}</span>
+            </Button>
+          </Link>
+          <Link to="/recipes" onClick={() => setSidebarOpen(false)}>
+            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-warning/8 hover:text-warning transition-all duration-300 group">
+              <FileText className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+              <span className="font-medium">Recipes</span>
+            </Button>
+          </Link>
+          <Link to="/menuload" onClick={() => setSidebarOpen(false)}>
+            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-info/8 hover:text-info transition-all duration-300 group">
+              <FileText className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+              <span className="font-medium">Menu Load</span>
             </Button>
           </Link>
         </nav>
+        
+        {/* Sidebar Footer */}
+        <div className="absolute bottom-4 left-4 right-4 hidden md:block">
+          <div className="bg-gradient-to-r from-primary/10 to-success/10 rounded-xl p-4 border border-primary/20">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 bg-success rounded-full animate-pulse-glow"></div>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-foreground/80">System Status</p>
+                <p className="text-xs text-muted-foreground/60">All systems operational</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Main content */}
       <main className={cn(
-        "min-h-[calc(100vh-4rem)] transition-all duration-200 ease-in-out",
+        "min-h-[calc(100vh-4rem)] transition-all duration-300 ease-out",
         {
-          'md:pl-64': language === 'en',
-          'md:pr-64': language === 'he'
+          'md:pl-64 xl:pl-72': language === 'en',
+          'md:pr-64 xl:pr-72': language === 'he'
         }
       )}>
-        <div className="container mx-auto p-4">
-          <Outlet />
+        <div className="container mx-auto p-4 md:p-6 max-w-7xl">
+          <div className="animate-slide-up">
+            <Outlet />
+          </div>
         </div>
       </main>
-
-      {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-10 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
     </div>
   );
 }
