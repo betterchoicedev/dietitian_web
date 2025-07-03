@@ -256,7 +256,7 @@ const MenuCreate = () => {
 
 
   async function downloadPdf(menu) {
-    const response = await fetch('http://127.0.0.1:5000/api/menu-pdf', {
+    const response = await fetch('https://dietitian-web-backend.onrender.com/api/menu-pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ menu })
@@ -491,7 +491,7 @@ const MenuCreate = () => {
       setProgressStep(`🔍 Looking up ${uniqueIngredients.length} new ingredients (${cacheHits} found in cache, ${cacheHitRate}% hit rate)...`);
 
       // Step 2: Batch UPC lookup for all ingredients
-      const batchResponse = await fetch("http://127.0.0.1:5000/api/batch-upc-lookup", {
+      const batchResponse = await fetch("https://dietitian-web-backend.onrender.com/api/batch-upc-lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ingredients: uniqueIngredients }),
@@ -545,7 +545,7 @@ const MenuCreate = () => {
     try {
       setProgressStep('🔄 Using fallback UPC lookup...');
       
-      const enrichRes = await fetch("http://127.0.0.1:5000/api/enrich-menu-with-upc", {
+      const enrichRes = await fetch("https://dietitian-web-backend.onrender.com/api/enrich-menu-with-upc", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ menu: menuToEnrich.meals }),
@@ -585,7 +585,7 @@ const MenuCreate = () => {
       setProgress(5);
       setProgressStep('🎯 Analyzing client preferences...');
       
-      const templateRes = await fetch("http://127.0.0.1:5000/api/template", { 
+      const templateRes = await fetch("https://dietitian-web-backend.onrender.com/api/template", { 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_code: selectedUser.user_code })
@@ -601,7 +601,7 @@ const MenuCreate = () => {
       setProgress(30);
       setProgressStep('🍽️ Creating personalized meals...');
       
-      const buildRes = await fetch("http://127.0.0.1:5000/api/build-menu", {
+      const buildRes = await fetch("https://dietitian-web-backend.onrender.com/api/build-menu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template, user_code: selectedUser.user_code }),
