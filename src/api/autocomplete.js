@@ -155,7 +155,7 @@ export async function getIngredientNutrition(englishName) {
           Energy,
           Protein,
           Total_lipid__fat_,
-          Carbohydrate__by_difference_,
+          Carbohydrate,
           english_name,
           hebrew_name
         FROM foods_storage WITH (NOLOCK)
@@ -170,7 +170,7 @@ export async function getIngredientNutrition(englishName) {
         Energy: 0,
         Protein: 0,
         Total_lipid__fat_: 0,
-        Carbohydrate__by_difference_: 0,
+        Carbohydrate: 0,
         english_name: englishName,
         hebrew_name: ''
       };

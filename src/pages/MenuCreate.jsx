@@ -12,7 +12,7 @@ import { EventBus } from '@/utils/EventBus';
 import ReactToPdf from 'react-to-pdf';
 import { supabase } from '@/lib/supabase';
 
-
+// https://dietitian-web-backend.onrender.com
 
 const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
   const [isEditing, setIsEditing] = useState(false);
@@ -144,7 +144,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
           calories: nutritionData.Energy || 0,
         protein: nutritionData.Protein || 0,
         fat: nutritionData.Total_lipid__fat_ || 0,
-        carbs: nutritionData.Carbohydrate__by_difference_ || 0,
+        carbs: nutritionData.Carbohydrate || 0,
         'brand of pruduct': nutritionData.brand || ''
       };
 
@@ -218,8 +218,28 @@ const MenuCreate = () => {
   const pdfRef = React.useRef();
   const [showShoppingList, setShowShoppingList] = useState(false);
   const [shoppingList, setShoppingList] = useState([]);
-  const [menu, setMenu] = useState(null);
-  const [originalMenu, setOriginalMenu] = useState(null);
+  
+  // Load menu state from localStorage on initialization
+  const [menu, setMenu] = useState(() => {
+    try {
+      const saved = localStorage.getItem('menuCreate_menu');
+      return saved ? JSON.parse(saved) : null;
+    } catch (err) {
+      console.warn('Failed to load menu from localStorage:', err);
+      return null;
+    }
+  });
+  
+  const [originalMenu, setOriginalMenu] = useState(() => {
+    try {
+      const saved = localStorage.getItem('menuCreate_originalMenu');
+      return saved ? JSON.parse(saved) : null;
+    } catch (err) {
+      console.warn('Failed to load originalMenu from localStorage:', err);
+      return null;
+    }
+  });
+  
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -227,7 +247,17 @@ const MenuCreate = () => {
   const [progressStep, setProgressStep] = useState('');
   const [enrichingUPC, setEnrichingUPC] = useState(false);
   const [users, setUsers] = useState([]);
-  const [selectedUser, setSelectedUser] = useState(null);
+  
+  const [selectedUser, setSelectedUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('menuCreate_selectedUser');
+      return saved ? JSON.parse(saved) : null;
+    } catch (err) {
+      console.warn('Failed to load selectedUser from localStorage:', err);
+      return null;
+    }
+  });
+  
   const [loadingUsers, setLoadingUsers] = useState(true);
   const navigate = useNavigate();
   const { language, translations } = useLanguage();
@@ -251,6 +281,50 @@ const MenuCreate = () => {
       console.warn('Failed to save UPC cache to localStorage:', err);
     }
   }, [upcCache]);
+
+  // Save menu state to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      if (menu) {
+        const menuWithTimestamp = {
+          ...menu,
+          _savedAt: new Date().toISOString(),
+          _selectedUser: selectedUser
+        };
+        localStorage.setItem('menuCreate_menu', JSON.stringify(menuWithTimestamp));
+      } else {
+        localStorage.removeItem('menuCreate_menu');
+      }
+    } catch (err) {
+      console.warn('Failed to save menu to localStorage:', err);
+    }
+  }, [menu, selectedUser]);
+
+  // Save originalMenu state to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      if (originalMenu) {
+        localStorage.setItem('menuCreate_originalMenu', JSON.stringify(originalMenu));
+      } else {
+        localStorage.removeItem('menuCreate_originalMenu');
+      }
+    } catch (err) {
+      console.warn('Failed to save originalMenu to localStorage:', err);
+    }
+  }, [originalMenu]);
+
+  // Save selectedUser state to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      if (selectedUser) {
+        localStorage.setItem('menuCreate_selectedUser', JSON.stringify(selectedUser));
+      } else {
+        localStorage.removeItem('menuCreate_selectedUser');
+      }
+    } catch (err) {
+      console.warn('Failed to save selectedUser to localStorage:', err);
+    }
+  }, [selectedUser]);
 
 
 
@@ -567,6 +641,18 @@ const MenuCreate = () => {
     }
   };
 
+  // Clear saved menu state when starting fresh
+  const clearSavedMenuState = () => {
+    try {
+      localStorage.removeItem('menuCreate_menu');
+      localStorage.removeItem('menuCreate_originalMenu');
+      setMenu(null);
+      setOriginalMenu(null);
+    } catch (err) {
+      console.warn('Failed to clear saved menu state:', err);
+    }
+  };
+
   const fetchMenu = async () => {
     if (!selectedUser) {
       setError('Please select a client before generating a menu.');
@@ -574,6 +660,9 @@ const MenuCreate = () => {
     }
 
     try {
+      // Clear previous menu data when generating new menu
+      clearSavedMenuState();
+      
       setLoading(true);
       setError(null);
       setProgress(0);
@@ -738,7 +827,7 @@ const MenuCreate = () => {
       console.log('💾 Saving combined schema + meal plan...');
       const combinedPayload = {
         record_type: 'meal_plan',
-        meal_plan_name: 'Generated Menu Plan with Schema',
+        meal_plan_name: `Meal Plan - ${selectedUser?.full_name || 'Unknown Client'}`,
         schema: schemaTemplate,        // Schema template in same row
         meal_plan: originalMenu,       // Full meal plan in same row
         status: 'draft',
@@ -763,6 +852,9 @@ const MenuCreate = () => {
       setError(null);
       console.log('🎉 Schema and menu plan saved in single record!');
       alert('Schema and menu plan saved successfully!');
+      
+      // Clear saved state since it's now permanently saved
+      clearSavedMenuState();
       
     } catch (err) {
       console.error('❌ Error during save process:', err);
@@ -1134,15 +1226,34 @@ const MenuCreate = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Button variant="outline" size="icon" onClick={() => navigate(-1)}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div>
-          <h1 className="text-2xl font-bold">
-            {translations.generateMenu || 'Generate Menu Plan'}
-          </h1>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="icon" onClick={() => navigate(-1)}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold">
+              {translations.generateMenu || 'Generate Menu Plan'}
+            </h1>
+          </div>
         </div>
+        
+        {/* Clear menu button when menu exists */}
+        {menu && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-red-600 hover:bg-red-50 border-red-300"
+            onClick={() => {
+              if (window.confirm('Are you sure you want to clear the current menu and start fresh? This action cannot be undone.')) {
+                clearSavedMenuState();
+                setError(null);
+              }
+            }}
+          >
+            Start Fresh
+          </Button>
+        )}
       </div>
 
       {error && (
@@ -1151,6 +1262,57 @@ const MenuCreate = () => {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+
+      {/* Saved Menu Restoration */}
+      {!menu && !loading && (() => {
+        try {
+          const savedMenu = localStorage.getItem('menuCreate_menu');
+          if (!savedMenu) return false;
+          const parsed = JSON.parse(savedMenu);
+          const savedAt = parsed._savedAt ? new Date(parsed._savedAt).toLocaleString() : 'Unknown time';
+          const savedUser = parsed._selectedUser?.full_name || 'Unknown client';
+          
+          return (
+            <Alert className="border-blue-200 bg-blue-50">
+              <Clock className="h-4 w-4" />
+              <AlertTitle className="text-blue-800">Previous Menu Found</AlertTitle>
+              <AlertDescription className="text-blue-700">
+                We found a previously generated menu for <strong>{savedUser}</strong> from <strong>{savedAt}</strong>. 
+                Would you like to continue working on it or start fresh?
+                <div className="flex gap-3 mt-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-white hover:bg-blue-100 border-blue-300 text-blue-700"
+                    onClick={() => {
+                      // Restore from localStorage - menu state is already loaded in useState
+                      // We just need to trigger a re-render by setting loading briefly
+                      setLoading(true);
+                      setTimeout(() => setLoading(false), 100);
+                    }}
+                  >
+                    <ArrowRight className="h-4 w-4 mr-1" />
+                    Continue Previous Menu
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="hover:bg-red-50 border-red-300 text-red-700"
+                    onClick={() => {
+                      clearSavedMenuState();
+                      setError(null);
+                    }}
+                  >
+                    Start Fresh
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          );
+        } catch (err) {
+          return false;
+        }
+      })()}
 
       {/* User Selection */}
       <Card>
@@ -1348,23 +1510,29 @@ const MenuCreate = () => {
       {/* Save Button and Cache Management (not in PDF) */}
       {menu && menu.meals && menu.meals.length > 0 && (
         <div className="flex justify-between items-center">
-          {/* Cache Statistics */}
-          <div className="text-sm text-gray-600">
-            <span className="font-medium">UPC Cache:</span> {upcCache.size} ingredients stored
-            {upcCache.size > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setUpcCache(new Map());
-                  localStorage.removeItem('upc_cache');
-                  alert('UPC cache cleared successfully!');
-                }}
-                className="ml-3 text-xs"
-              >
-                Clear Cache
-              </Button>
-            )}
+          {/* Cache Statistics and Auto-save indicator */}
+          <div className="text-sm text-gray-600 space-y-1">
+            <div>
+              <span className="font-medium">UPC Cache:</span> {upcCache.size} ingredients stored
+              {upcCache.size > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setUpcCache(new Map());
+                    localStorage.removeItem('upc_cache');
+                    alert('UPC cache cleared successfully!');
+                  }}
+                  className="ml-3 text-xs"
+                >
+                  Clear Cache
+                </Button>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-2 h-2 bg-green-500 rounded-full"></span>
+              <span className="text-xs text-green-600">Menu auto-saved locally</span>
+            </div>
           </div>
           
           {/* Save Button */}

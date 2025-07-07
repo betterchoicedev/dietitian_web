@@ -148,18 +148,39 @@ export default function Chat() {
         .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
         .join('\n');
 
-      // Prepare client profile for AI context
+      // Prepare comprehensive client profile for AI context
       const clientProfile = {
         name: client.full_name,
         user_code: client.user_code,
-        // Add any additional client fields that might be available
+        // Personal information
         ...(client.age && { age: client.age }),
+        ...(client.date_of_birth && { date_of_birth: client.date_of_birth }),
         ...(client.gender && { gender: client.gender }),
+        ...(client.weight_kg && { weight_kg: client.weight_kg }),
+        ...(client.height_cm && { height_cm: client.height_cm }),
+        ...(client.user_language && { user_language: client.user_language }),
+        
+        // Health and dietary information
+        ...(client.food_allergies && { food_allergies: client.food_allergies }),
+        ...(client.food_limitations && { food_limitations: client.food_limitations }),
+        ...(client.Activity_level && { activity_level: client.Activity_level }),
+        ...(client.goal && { goal: client.goal }),
+        
+        // Nutrition targets and preferences
+        ...(client.dailyTotalCalories && { daily_total_calories: client.dailyTotalCalories }),
+        ...(client.number_of_meals && { number_of_meals: client.number_of_meals }),
+        ...(client.macros && { macros: client.macros }),
+        ...(client.client_preference && { client_preference: client.client_preference }),
+        ...(client.recommendations && { recommendations: client.recommendations }),
+        
+        // Legacy fields for backward compatibility
         ...(client.height && { height: client.height }),
         ...(client.weight && { weight: client.weight }),
-        ...(client.activity_level && { activity_level: client.activity_level }),
-        ...(client.goal && { goal: client.goal })
+        ...(client.activity_level && { activity_level: client.activity_level })
       };
+
+      // Log comprehensive client profile for debugging
+      console.log('🧠 Comprehensive client profile being sent to LLM:', JSON.stringify(clientProfile, null, 2));
 
       // Prepare meal plan context
       const mealPlanContext = mealPlanData ? {
@@ -176,14 +197,30 @@ export default function Chat() {
 Your response must be in natural, conversational language. DO NOT output JSON, code, or markdown.
 Address the client by their first name: ${client.full_name.split(' ')[0]}.
 
-Here is the context for your response:
-- Client Profile: ${JSON.stringify(clientProfile)}
-- Chat History (most recent messages are last): 
+Here is the comprehensive context for your response:
+
+CLIENT PROFILE:
+${JSON.stringify(clientProfile, null, 2)}
+
+DIETARY CONSIDERATIONS:
+${clientProfile.food_allergies ? `- Food Allergies: ${Array.isArray(clientProfile.food_allergies) ? clientProfile.food_allergies.join(', ') : clientProfile.food_allergies}` : '- No known food allergies'}
+${clientProfile.food_limitations ? `- Food Limitations: ${Array.isArray(clientProfile.food_limitations) ? clientProfile.food_limitations.join(', ') : clientProfile.food_limitations}` : '- No specific food limitations'}
+${clientProfile.activity_level ? `- Activity Level: ${clientProfile.activity_level}` : ''}
+${clientProfile.goal ? `- Health Goal: ${clientProfile.goal}` : ''}
+
+NUTRITION TARGETS:
+${clientProfile.daily_total_calories ? `- Daily Calories: ${clientProfile.daily_total_calories} kcal` : ''}
+${clientProfile.number_of_meals ? `- Number of Meals: ${clientProfile.number_of_meals}` : ''}
+${clientProfile.macros ? `- Macro Targets: ${typeof clientProfile.macros === 'string' ? clientProfile.macros : JSON.stringify(clientProfile.macros)}` : ''}
+
+CHAT HISTORY (most recent messages are last):
 ${chatHistoryForPrompt}
-- Current Meal Plan: ${mealPlanContext ? JSON.stringify(mealPlanContext) : 'Not available.'}
+
+CURRENT MEAL PLAN:
+${mealPlanContext ? JSON.stringify(mealPlanContext, null, 2) : 'Not available.'}
 
 ---
-Your task is to respond to the user's message below.
+Your task is to respond to the user's message below, taking into account their specific dietary needs, health goals, allergies, limitations, and nutrition targets.
 `;
 
       if (base64Image) {
@@ -193,27 +230,65 @@ Your task is to respond to the user's message below.
       }
 
       // Default fallback response in case AI fails
-      let aiResponse = `Thank you for your message${userMessage.image_url ? ' and the food image' : ''}. \n\n`;
+      let aiResponse = `Hi ${client.full_name.split(' ')[0]}! Thank you for your message${userMessage.image_url ? ' and the food image' : ''}. \n\n`;
+      
+      // Include personalized information from client profile
+      if (clientProfile.daily_total_calories || clientProfile.macros || clientProfile.goal) {
+        aiResponse += `Based on your profile:\n\n`;
+        
+        if (clientProfile.daily_total_calories) {
+          aiResponse += `• Your daily calorie target: ${clientProfile.daily_total_calories} calories\n`;
+        }
+        if (clientProfile.macros) {
+          const macrosText = typeof clientProfile.macros === 'string' ? clientProfile.macros : JSON.stringify(clientProfile.macros);
+          aiResponse += `• Your macro targets: ${macrosText}\n`;
+        }
+        if (clientProfile.goal) {
+          aiResponse += `• Your health goal: ${clientProfile.goal}\n`;
+        }
+        if (clientProfile.activity_level) {
+          aiResponse += `• Your activity level: ${clientProfile.activity_level}\n`;
+        }
+        if (clientProfile.number_of_meals) {
+          aiResponse += `• Your meal plan: ${clientProfile.number_of_meals} meals per day\n`;
+        }
+        
+        // Add dietary considerations
+        if (clientProfile.food_allergies || clientProfile.food_limitations) {
+          aiResponse += `\nDietary considerations:\n`;
+          if (clientProfile.food_allergies) {
+            const allergies = Array.isArray(clientProfile.food_allergies) ? clientProfile.food_allergies.join(', ') : clientProfile.food_allergies;
+            aiResponse += `• Allergies: ${allergies}\n`;
+          }
+          if (clientProfile.food_limitations) {
+            const limitations = Array.isArray(clientProfile.food_limitations) ? clientProfile.food_limitations.join(', ') : clientProfile.food_limitations;
+            aiResponse += `• Limitations: ${limitations}\n`;
+          }
+        }
+      }
       
       if (mealPlanContext) {
-        aiResponse += `Based on your personalized meal plan:\n\n`;
+        aiResponse += `\nYour current meal plan details:\n`;
         if (mealPlanContext.daily_total_calories) {
-          aiResponse += `• Your daily calorie target: ${mealPlanContext.daily_total_calories} calories\n`;
+          aiResponse += `• Plan calories: ${mealPlanContext.daily_total_calories} calories\n`;
         }
         if (mealPlanContext.macros_target) {
-          aiResponse += `• Your macro targets: ${JSON.stringify(mealPlanContext.macros_target)}\n`;
+          aiResponse += `• Plan macro targets: ${JSON.stringify(mealPlanContext.macros_target)}\n`;
         }
         if (mealPlanContext.dietary_restrictions) {
-          aiResponse += `• Dietary restrictions: ${JSON.stringify(mealPlanContext.dietary_restrictions)}\n`;
+          aiResponse += `• Plan dietary restrictions: ${JSON.stringify(mealPlanContext.dietary_restrictions)}\n`;
         }
         if (mealPlanContext.recommendations) {
-          aiResponse += `\nRecommendations for you:\n${mealPlanContext.recommendations}\n`;
+          aiResponse += `\nPersonalized recommendations:\n${mealPlanContext.recommendations}\n`;
         }
       } else {
-        aiResponse += `Here are some general nutrition insights:\n\n`;
+        aiResponse += `\nHere are some general nutrition insights tailored for you:\n\n`;
         aiResponse += `1. Focus on balanced meals with protein, healthy fats, and complex carbohydrates\n`;
         aiResponse += `2. Stay well-hydrated with at least 8 glasses of water daily\n`;
         aiResponse += `3. Eat regular meals to maintain stable energy levels\n`;
+        if (clientProfile.goal) {
+          aiResponse += `4. Keep your health goal in mind: ${clientProfile.goal}\n`;
+        }
       }
       
       if (userMessage.image_url) {

@@ -53,6 +53,7 @@ export default function Clients() {
   const [currentClient, setCurrentClient] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [showAll, setShowAll] = useState(false);
   const [formData, setFormData] = useState({
     user_code: '',
     full_name: '',
@@ -104,6 +105,10 @@ export default function Clients() {
     client.user_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     client.phone_number?.includes(searchTerm)
   );
+
+  // Limit displayed clients to 5 unless "Show All" is clicked or searching
+  const displayedClients = searchTerm || showAll ? filteredClients : filteredClients.slice(0, 5);
+  const hasMoreClients = !searchTerm && !showAll && filteredClients.length > 5;
 
   const resetForm = () => {
     setFormData({
@@ -277,9 +282,37 @@ export default function Clients() {
   };
 
   const calculateBMI = (weight, height) => {
-    if (!weight || !height) return null;
-    const heightInM = height / 100;
-    const bmi = weight / (heightInM * heightInM);
+    // Handle different field names and formats
+    let weightValue = weight || 0;
+    let heightValue = height || 0;
+    
+    if (!weightValue || !heightValue) return null;
+    
+    // Convert to numbers and validate
+    let weightNum = parseFloat(weightValue);
+    let heightNum = parseFloat(heightValue);
+    
+    // Validate reasonable ranges
+    if (isNaN(weightNum) || isNaN(heightNum)) return null;
+    if (weightNum <= 0 || weightNum > 1000) return null; // Weight should be between 0-1000kg
+    
+    // Handle height in different formats
+    if (heightNum <= 0) return null;
+    
+    // If height is very small (like 1.82), assume it's in meters, convert to cm
+    if (heightNum > 0 && heightNum < 10) {
+      heightNum = heightNum * 100; // Convert meters to centimeters
+    }
+    
+    // Height should be reasonable (between 50cm and 300cm)
+    if (heightNum < 50 || heightNum > 300) return null;
+    
+    const heightInM = heightNum / 100;
+    const bmi = weightNum / (heightInM * heightInM);
+    
+    // Validate BMI is in reasonable range
+    if (bmi < 5 || bmi > 100) return null; // BMI should be between 5-100
+    
     return bmi.toFixed(1);
   };
 
@@ -321,17 +354,47 @@ export default function Clients() {
         <Input
           placeholder="Search clients by name, email, code, or phone..."
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={(e) => {
+            setSearchTerm(e.target.value);
+            // Reset "Show All" when searching
+            if (e.target.value && showAll) {
+              setShowAll(false);
+            }
+          }}
           className="max-w-sm"
         />
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Clients ({filteredClients.length})</CardTitle>
-          <CardDescription>
-            View and manage your client profiles
-          </CardDescription>
+          <div className="flex justify-between items-center">
+            <div>
+              <CardTitle>
+                Clients ({displayedClients.length}{showAll || searchTerm ? '' : ` of ${filteredClients.length}`})
+              </CardTitle>
+              <CardDescription>
+                View and manage your client profiles
+              </CardDescription>
+            </div>
+            {hasMoreClients && (
+              <Button 
+                variant="outline" 
+                onClick={() => setShowAll(true)}
+                className="text-green-600 border-green-600 hover:bg-green-50"
+              >
+                Show All ({filteredClients.length})
+              </Button>
+            )}
+            {showAll && !searchTerm && filteredClients.length > 5 && (
+              <Button 
+                variant="outline" 
+                onClick={() => setShowAll(false)}
+                className="text-gray-600 border-gray-600 hover:bg-gray-50"
+              >
+                Show Less
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -353,9 +416,19 @@ export default function Clients() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredClients.length > 0 ? (
-                    filteredClients.map((client) => {
-                      const bmi = calculateBMI(client.weight_kg, client.height_cm);
+                  {displayedClients.length > 0 ? (
+                    displayedClients.map((client) => {
+                      // Handle different field name formats
+                      const weight = client.weight_kg || client.weight || client.Weight;
+                      let height = client.height_cm || client.height || client.Height;
+                      
+                      // Convert height to cm for display if it's in meters
+                      let displayHeight = height;
+                      if (height && parseFloat(height) > 0 && parseFloat(height) < 10) {
+                        displayHeight = (parseFloat(height) * 100).toFixed(0);
+                      }
+                      
+                      const bmi = calculateBMI(weight, height);
                       return (
                         <TableRow key={client.user_code || client.id}>
                           <TableCell className="font-medium">
@@ -394,12 +467,16 @@ export default function Clients() {
                           </TableCell>
                           <TableCell>
                             <div className="text-sm">
-                              {client.height_cm && client.weight_kg ? (
+                              {height && weight ? (
                                 <div>
-                                  <div>{client.height_cm}cm, {client.weight_kg}kg</div>
-                                  {bmi && (
+                                  <div>{displayHeight}cm, {weight}kg</div>
+                                  {bmi ? (
                                     <div className="text-gray-500">
                                       BMI: {bmi} ({getBMIStatus(bmi)})
+                                    </div>
+                                  ) : (
+                                    <div className="text-red-400 text-xs">
+                                      Invalid BMI data
                                     </div>
                                   )}
                                 </div>

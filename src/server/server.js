@@ -238,8 +238,8 @@ app.get('/api/ingredient-upc-hebrew', async (req, res) => {
   }
 });
 
-// Health check endpoint
-app.get('/health', async (req, res) => {
+// Health check endpoints (multiple paths for compatibility)
+const healthCheck = async (req, res) => {
   try {
     const pool = await getConnection();
     const result = await pool.request().query('SELECT 1 as test');
@@ -257,7 +257,13 @@ app.get('/health', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   }
-});
+};
+
+// Multiple health check endpoints for different platforms
+app.get('/health', healthCheck);
+app.get('/healthz', healthCheck);
+app.get('/health-check', healthCheck);
+app.get('/', healthCheck); // Root endpoint as health check
 
 // Graceful shutdown handling
 process.on('SIGINT', async () => {

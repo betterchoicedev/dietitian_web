@@ -158,13 +158,6 @@ def api_translate_menu():
             obj = obj[key]
         obj[path[-1]] = translated
 
-    # Translate all ingredients
-    for meal in new_menu['meals']:
-        for option in [meal['main'], meal['alternative']] + meal.get('alternatives', []):
-            for ingredient in option['ingredients']:
-                ingredient['item'] = translate(ingredient['item'], target)
-                ingredient['household_measure'] = translate(ingredient['household_measure'], target)
-
     return jsonify(new_menu)
 
 @app.route('/api/menu-pdf', methods=['POST'])
@@ -281,19 +274,66 @@ def generate_menu_pdf():
         
         y -= 70 + 25
 
+    # Helper function to estimate text lines for better height calculation
+    def estimate_ingredient_lines(ingredients, max_text_width):
+        total_lines = 0
+        for ing in ingredients:
+            item = ing.get('item', '')
+            quantity = ing.get('quantity', '')
+            unit = ing.get('unit', '')
+            household_measure = ing.get('household_measure', '')
+            
+            if household_measure:
+                ingredient_text = f"{item} - {quantity} {unit} ({household_measure})"
+            else:
+                ingredient_text = f"{item} - {quantity} {unit}"
+            
+            # Estimate number of lines this text would wrap to
+            if c.stringWidth(ingredient_text, "Helvetica", 9) > max_text_width:
+                words = ingredient_text.split()
+                lines = 1
+                current_line = ""
+                
+                for word in words:
+                    test_line = current_line + (" " if current_line else "") + word
+                    if c.stringWidth(test_line, "Helvetica", 9) > max_text_width:
+                        if current_line:
+                            lines += 1
+                            current_line = word
+                        else:
+                            current_line = word
+                    else:
+                        current_line = test_line
+                
+                total_lines += lines
+            else:
+                total_lines += 1
+        
+        return total_lines
+
     # --- Meals as Cards ---
     if "meals" in menu:
         for meal in menu["meals"]:
             # --- Calculate total height needed for this meal box ---
             main_ings = meal.get('main', {}).get('ingredients', [])
             alt_ings = meal.get('alternative', {}).get('ingredients', [])
-            main_card_height = max(card_height, card_padding*2 + line_height*len(main_ings))
-            alt_card_height = max(card_height, card_padding*2 + line_height*len(alt_ings))
+            
+            # More accurate height calculation considering text wrapping
+            macro_x = margin + 10 + card_width - 130  # Position where macros start
+            max_text_width = macro_x - (margin + 10) - card_padding - 30
+            
+            main_ing_lines = estimate_ingredient_lines(main_ings, max_text_width) if main_ings else 0
+            alt_ing_lines = estimate_ingredient_lines(alt_ings, max_text_width) if alt_ings else 0
+            
+            main_card_height = max(card_height, card_padding*2 + line_height*main_ing_lines + 35)  # 35 for title + "Ingredients:" label
+            alt_card_height = max(card_height, card_padding*2 + line_height*alt_ing_lines + 35)
+            
             other_alts = meal.get('alternatives', [])
             other_alt_heights = []
             for alt in other_alts:
                 alt_ings = alt.get('ingredients', [])
-                other_alt_heights.append(max(card_height, card_padding*2 + line_height*len(alt_ings)))
+                alt_ing_lines = estimate_ingredient_lines(alt_ings, max_text_width) if alt_ings else 0
+                other_alt_heights.append(max(card_height, card_padding*2 + line_height*alt_ing_lines + 35))
             # Height for meal header, main, alt, label, all alternatives, and paddings
             meal_header_height = 38
             label_height = 18 if other_alts else 0
@@ -407,10 +447,37 @@ def generate_menu_pdf():
                     else:
                         ingredient_text = f"{item} - {quantity} {unit}"
                     
-                    # More aggressive truncation to stay within frame
-                    if len(ingredient_text) > 35:
-                        ingredient_text = ingredient_text[:32] + "..."
-                    c.drawString(card_x+card_padding+12, ing_y, ingredient_text)
+                    # Use text wrapping instead of truncation for better readability
+                    max_width = macro_x - card_x - card_padding - 30
+                    if c.stringWidth(ingredient_text, "Helvetica", 9) > max_width:
+                        # Split long text into multiple lines
+                        words = ingredient_text.split()
+                        lines = []
+                        current_line = ""
+                        
+                        for word in words:
+                            test_line = current_line + (" " if current_line else "") + word
+                            if c.stringWidth(test_line, "Helvetica", 9) <= max_width:
+                                current_line = test_line
+                            else:
+                                if current_line:
+                                    lines.append(current_line)
+                                    current_line = word
+                                else:
+                                    # Single word too long, keep it as is
+                                    current_line = word
+                        
+                        if current_line:
+                            lines.append(current_line)
+                        
+                        # Draw each line
+                        for line_idx, line in enumerate(lines):
+                            c.drawString(card_x+card_padding+12, ing_y - (line_idx * line_height), line)
+                        
+                        # Adjust y position for multiple lines
+                        ing_y -= (len(lines) - 1) * line_height
+                    else:
+                        c.drawString(card_x+card_padding+12, ing_y, ingredient_text)
                     ing_y -= line_height
             y -= main_card_height + 18
             # Alternative Option Card with consistent design
@@ -483,10 +550,37 @@ def generate_menu_pdf():
                     else:
                         ingredient_text = f"{item} - {quantity} {unit}"
                     
-                    # More aggressive truncation to stay within frame
-                    if len(ingredient_text) > 35:
-                        ingredient_text = ingredient_text[:32] + "..."
-                    c.drawString(card_x+card_padding+12, ing_y, ingredient_text)
+                    # Use text wrapping instead of truncation for better readability
+                    alt_max_width = alt_macro_x - card_x - card_padding - 30
+                    if c.stringWidth(ingredient_text, "Helvetica", 9) > alt_max_width:
+                        # Split long text into multiple lines
+                        words = ingredient_text.split()
+                        lines = []
+                        current_line = ""
+                        
+                        for word in words:
+                            test_line = current_line + (" " if current_line else "") + word
+                            if c.stringWidth(test_line, "Helvetica", 9) <= alt_max_width:
+                                current_line = test_line
+                            else:
+                                if current_line:
+                                    lines.append(current_line)
+                                    current_line = word
+                                else:
+                                    # Single word too long, keep it as is
+                                    current_line = word
+                        
+                        if current_line:
+                            lines.append(current_line)
+                        
+                        # Draw each line
+                        for line_idx, line in enumerate(lines):
+                            c.drawString(card_x+card_padding+12, ing_y - (line_idx * line_height), line)
+                        
+                        # Adjust y position for multiple lines
+                        ing_y -= (len(lines) - 1) * line_height
+                    else:
+                        c.drawString(card_x+card_padding+12, ing_y, ingredient_text)
                     ing_y -= line_height
             y -= alt_card_height + 24
             # Render all other alternatives with improved styling
@@ -574,10 +668,37 @@ def generate_menu_pdf():
                             else:
                                 ingredient_text = f"{item} - {quantity} {unit}"
                             
-                            # More aggressive truncation to stay within frame
-                            if len(ingredient_text) > 35:
-                                ingredient_text = ingredient_text[:32] + "..."
-                            c.drawString(card_x+card_padding+12, ing_y, ingredient_text)
+                            # Use text wrapping instead of truncation for better readability
+                            add_alt_max_width = add_alt_macro_x - card_x - card_padding - 30
+                            if c.stringWidth(ingredient_text, "Helvetica", 9) > add_alt_max_width:
+                                # Split long text into multiple lines
+                                words = ingredient_text.split()
+                                lines = []
+                                current_line = ""
+                                
+                                for word in words:
+                                    test_line = current_line + (" " if current_line else "") + word
+                                    if c.stringWidth(test_line, "Helvetica", 9) <= add_alt_max_width:
+                                        current_line = test_line
+                                    else:
+                                        if current_line:
+                                            lines.append(current_line)
+                                            current_line = word
+                                        else:
+                                            # Single word too long, keep it as is
+                                            current_line = word
+                                
+                                if current_line:
+                                    lines.append(current_line)
+                                
+                                # Draw each line
+                                for line_idx, line in enumerate(lines):
+                                    c.drawString(card_x+card_padding+12, ing_y - (line_idx * line_height), line)
+                                
+                                # Adjust y position for multiple lines
+                                ing_y -= (len(lines) - 1) * line_height
+                            else:
+                                c.drawString(card_x+card_padding+12, ing_y, ingredient_text)
                             ing_y -= line_height
                     y -= alt_card_height + 18
             # --- End of meal box ---
@@ -606,10 +727,13 @@ def load_user_preferences(user_code=None):
         logger.info(f"Supabase URL: {supabase_url}")
         logger.info(f"Supabase Key exists: {bool(supabase_key)}")
         
+        # Define the specific fields we need to reduce data transfer
+        selected_fields = 'user_code,food_allergies,dailyTotalCalories,recommendations,food_limitations,goal,number_of_meals,client_preference,macros'
+        
         if user_code:
             # Fetch specific user by user_code
             logger.info(f"Fetching user with user_code: {user_code}")
-            response = supabase.table('chat_users').select('*').eq('user_code', user_code).execute()
+            response = supabase.table('chat_users').select(selected_fields).eq('user_code', user_code).execute()
             logger.info(f"Supabase response: {response}")
             if response.data:
                 user_data = response.data[0]
@@ -620,7 +744,7 @@ def load_user_preferences(user_code=None):
         else:
             # Fallback: get first user or use default values
             logger.info("No user_code provided, fetching first user")
-            response = supabase.table('chat_users').select('*').limit(1).execute()
+            response = supabase.table('chat_users').select(selected_fields).limit(1).execute()
             logger.info(f"Fallback supabase response: {response}")
             if response.data:
                 user_data = response.data[0]
@@ -641,7 +765,7 @@ def load_user_preferences(user_code=None):
         logger.info(f"Raw user data from Supabase: {json.dumps(user_data, indent=2, default=str)}")
 
         # Parse macros - handle both string and object formats
-        macros = user_data.get("Macros", {})
+        macros = user_data.get("macros", {})
         if isinstance(macros, str):
             try:
                 macros = json.loads(macros)
@@ -839,18 +963,21 @@ def api_template():
     "- NEVER suggest meals that mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) "
     "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
     "- Consider appropriate kosher meal combinations "
-    "Distribute macros and calories sensibly across meals. "
+    "\n\n"
+    "MACRO DISTRIBUTION RULES:\n"
+    "1. Calculate per-meal averages: daily_calories ÷ number_of_meals, daily_protein ÷ number_of_meals, etc.\n"
+    "2. Distribute macros within ±30% of the per-meal average (e.g., if average is 12g fat per meal, range is 8-16g)\n"
+    "3. Ensure the sum of all meals equals the daily targets (±2%)\n"
+    "4. No single meal should exceed 40% of any daily macro\n"
+    "5. Breakfast/snacks: typically lower calories/protein, moderate fat\n"
+    "6. Lunch/dinner: can be higher in all macros but stay within the ±30% range\n"
+    "\n\n"
     "Respond ONLY with valid JSON in this format:\n"
     "{ \"template\": [ "
     "{\"meal\": \"Breakfast\","
     "\"main\": {\"name\": \"Omelet & Toast\", \"calories\": 400, ... },"
     "\"alternative\": {\"name\": \"Greek Yogurt Bowl\", \"calories\": 400, ... }"
     "}, ... ]} "
-    "\n\n"
-    "IMPORTANT: Set the macro targets for each meal according to the typical macro profile of the main protein source."
-    " Do NOT set a low fat target for salmon or beef meals – allow higher fat where realistic."
-    " For Dinner, if using salmon, set protein target to 40-50g and fat to 25-35g; for lean beef, allow fat 20-30g. "
-    "Distribute total daily protein and fat according to the main protein in each meal so no meal requires an unrealistic macro split."
 )
 
 
@@ -902,7 +1029,7 @@ def api_build_menu():
             return jsonify({"error": "Missing template"}), 400
 
         # ✅ Validate the template before building meals
-        val_res = app.test_client().post("/api/validate-template", json={"template": template})
+        val_res = app.test_client().post("/api/validate-template", json={"template": template, "user_code": user_code})
         val_data = val_res.get_json()
 
         if not val_data.get("is_valid"):
@@ -939,7 +1066,7 @@ def api_build_menu():
                     "and `nutrition` (sum of ingredients). "
                     "IMPORTANT: For 'brand of pruduct', you MUST use real, specific brand names "
                     "NEVER use 'Generic' or 'generic' as a brand name."
-                    "Macros must match the template within ±30%. Respond only with valid JSON."
+                    "Macros must match the template within ±40%. Respond only with valid JSON."
                 )
                 main_content = {
                     "meal_name": meal_name,
@@ -1021,7 +1148,7 @@ def api_build_menu():
                     "and `nutrition` (sum of ingredients). "
                     "IMPORTANT: For 'brand of pruduct', you MUST use real, specific brand names "
                     "NEVER use 'Generic' or 'generic' as a brand name."
-                    "Macros must match the template within ±30%. Respond only with valid JSON."
+                    "Macros must match the template within ±40%. Respond only with valid JSON."
                 )
                 alt_content = {
                     "meal_name": meal_name,
@@ -1247,6 +1374,10 @@ def api_validate_template():
         data = request.json
         template = data.get("template")
         user_code = data.get("user_code")
+        
+        logger.info(f"🔍 validate-template called with user_code: {user_code}")
+        logger.info(f"🔍 Request data keys: {list(data.keys()) if data else 'None'}")
+        
         preferences = load_user_preferences(user_code)
 
         if not template or not isinstance(template, list):
@@ -1278,17 +1409,24 @@ def api_validate_template():
         if calories_per_day is None:
             calories_per_day = 2000
 
-        # Safely get macros
+        # Safely get macros with proper defaults
         macros = preferences.get("macros", {})
         if not macros:
             macros = {"protein": "150g", "fat": "80g", "carbs": "250g"}
-
+        
+        # Parse macros with fallbacks only if the macro is missing from user preferences
         target_macros = {
             "calories": float(calories_per_day),
             "protein": parse_macro(macros.get("protein", "150g")),
-            "fat": parse_macro(macros.get("fat", "80g")),
+            "fat": parse_macro(macros.get("fat", "80g")), 
             "carbs": parse_macro(macros.get("carbs", "250g")),
         }
+        
+        # Add debug logging
+        logger.info(f"🔍 Template validation using user_code: {user_code}")
+        logger.info(f"🔍 Loaded preferences calories_per_day: {preferences.get('calories_per_day')}")
+        logger.info(f"🔍 Raw macros from preferences: {macros}")
+        logger.info(f"🔍 Parsed target_macros: {target_macros}")
 
         def is_out_of_range(actual, target, margin=0.3):
             if target == 0:

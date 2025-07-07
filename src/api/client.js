@@ -467,7 +467,24 @@ export const entities = {
         
         const { data, error } = await supabase
           .from('chat_users')
-          .select('*')
+          .select(`
+            *,
+            age,
+            date_of_birth,
+            gender,
+            weight_kg,
+            height_cm,
+            food_allergies,
+            user_language,
+            dailyTotalCalories,
+            recommendations,
+            food_limitations,
+            Activity_level,
+            goal,
+            number_of_meals,
+            client_preference,
+            macros
+          `)
           .eq('user_code', userCode)
           .single();
         
@@ -476,7 +493,7 @@ export const entities = {
           throw new Error(`Supabase error: ${error.message}`);
         }
         
-        console.log('✅ Retrieved chat user from Supabase:', data);
+        console.log('✅ Retrieved chat user from Supabase with full profile:', data);
         return data;
         
       } catch (err) {
