@@ -377,10 +377,10 @@ const fallbackImage = '/logo-placeholder.png';
 // Translation function for recipes using backend API
 const translateRecipes = async (recipes, targetLang = 'he') => {
   try {
-    const response = await fetch('https://dietitian-web-backend.onrender.com/api/translate', {
+    const response = await fetch('https://dietitian-web-backend.onrender.com/api/translate-recipes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ menu: { recipes }, targetLang }),
+      body: JSON.stringify({ recipes, targetLang }),
     });
 
     if (!response.ok) {
@@ -391,9 +391,10 @@ const translateRecipes = async (recipes, targetLang = 'he') => {
     const translatedRecipes = result.recipes || recipes;
     
     // Preserve the original group structure with icons and colors
-    return recipes.map((originalGroup, index) => ({
-      ...originalGroup, // Keep icon, color, and group name
-      recipes: translatedRecipes[index]?.recipes || originalGroup.recipes
+    return translatedRecipes.map((translatedGroup, index) => ({
+      ...recipes[index], // Keep original icon, color properties
+      group: translatedGroup.group, // Use translated group name
+      recipes: translatedGroup.recipes // Use translated recipes
     }));
   } catch (error) {
     console.error('Error translating recipes:', error);

@@ -35,6 +35,149 @@ supabase_url = os.getenv("supabaseUrl")
 supabase_key = os.getenv("supabaseKey")
 supabase: Client = create_client(supabase_url, supabase_key)
 
+@app.route("/api/translate-recipes", methods=["POST"])
+def api_translate_recipes():
+    data = request.get_json()
+    recipes = data.get("recipes", [])
+    target = data.get("targetLang", "he")
+
+    # Custom translation mapping for specific food terms (phrases first, then single words)
+    custom_terms = [
+      {"en": "Whole Wheat Toast", "he": "טוסט חיטה מלאה"},
+      {"en": "Egg Wrap", "he": "טורטייה ממולאת ביצה"},
+      {"en": "Veggie Wrap", "he": "טורטייה ממולאת ירקות"},
+      {"en": "Egg and Veggie Wrap", "he": "טורטייה ממולאת ביצה וירקות"},
+      # ... add more phrases as needed ...
+      {"en": "Wrap", "he": "טורטייה ממולאת"},
+      {"en": "Roll", "he": "לחמנייה"},
+      {"en": "Pocket", "he": "כיס פיתה"},
+      {"en": "Bar", "he": "חטיף"},
+      {"en": "Chips", "he": "צ'יפס / קריספס"},
+      {"en": "Biscuit", "he": "ביסקוויט / עוגייה"},
+      {"en": "Cookie", "he": "עוגייה"},
+      {"en": "Pudding", "he": "פודינג"},
+      {"en": "Mousse", "he": "מוס"},
+      {"en": "Dressing", "he": "רוטב לסלט"},
+      {"en": "Entrée", "he": "מנה עיקרית / מנת פתיחה"},
+      {"en": "Starter", "he": "מנה ראשונה"},
+      {"en": "Batter", "he": "בלילה"},
+      {"en": "Toast", "he": "טוסט"},
+      {"en": "Jam", "he": "ריבה"},
+      {"en": "Roll-up", "he": "חטיף גליל"},
+      {"en": "Popsicle", "he": "ארטיק"},
+      {"en": "Cider", "he": "סיידר / מיץ תפוחים"},
+      {"en": "Cereal", "he": "דגני בוקר"},
+      {"en": "Stew", "he": "תבשיל"},
+    ]
+    # Sort terms by length of English phrase, descending (longest first)
+    custom_terms.sort(key=lambda t: -len(t["en"]))
+    custom_map = {t["en"].lower(): t["he"] for t in custom_terms}
+    custom_words = [t["en"] for t in custom_terms]
+
+    # 1. Gather every string you want to translate from recipes structure
+    texts = []
+    paths = []
+    
+    for gi, group in enumerate(recipes):
+        # Translate group name
+        texts.append(group.get("group", ""))
+        paths.append(("groups", gi, "group"))
+        
+        for ri, recipe in enumerate(group.get("recipes", [])):
+            # Translate recipe title
+            texts.append(recipe.get("title", ""))
+            paths.append(("groups", gi, "recipes", ri, "title"))
+            
+            # Translate recipe tips
+            if recipe.get("tips"):
+                texts.append(recipe.get("tips", ""))
+                paths.append(("groups", gi, "recipes", ri, "tips"))
+            
+            # Translate recipe instructions
+            for ii, instruction in enumerate(recipe.get("instructions", [])):
+                texts.append(instruction)
+                paths.append(("groups", gi, "recipes", ri, "instructions", ii))
+            
+            # Translate recipe ingredients
+            for ii, ingredient in enumerate(recipe.get("ingredients", [])):
+                texts.append(ingredient)
+                paths.append(("groups", gi, "recipes", ri, "ingredients", ii))
+            
+            # Translate recipe tags
+            for ti, tag in enumerate(recipe.get("tags", [])):
+                texts.append(tag)
+                paths.append(("groups", gi, "recipes", ri, "tags", ti))
+
+    # 2. For Hebrew: replace mapped phrases/words with placeholders, send to Azure, then restore
+    placeholder_map = []  # List of dicts: {ph: hebrew}
+    texts_for_azure = []
+    if target == "he":
+        for i, t in enumerate(texts):
+            orig = t
+            ph_map = {}
+            ph_idx = 0
+            # Replace each mapped phrase/word with a unique placeholder (longest first)
+            def repl_func(match):
+                nonlocal ph_idx
+                en_word = match.group(0)
+                ph = f"__CUSTOMWORD{ph_idx}__"
+                ph_map[ph] = custom_map[en_word.lower()]
+                ph_idx += 1
+                return ph
+            for en_word in custom_words:
+                pattern = r'(?<!\w)'+re.escape(en_word)+r'(?!\w)'
+                t = re.sub(pattern, repl_func, t, flags=re.IGNORECASE)
+            placeholder_map.append(ph_map)
+            texts_for_azure.append(t)
+    else:
+        texts_for_azure = texts
+        placeholder_map = [{} for _ in texts]
+
+    # 3. Call Azure Translator in bulk
+    endpoint = os.getenv("AZURE_TRANSLATOR_ENDPOINT")
+    key      = os.getenv("AZURE_TRANSLATOR_KEY")
+    region   = os.getenv("AZURE_TRANSLATOR_REGION")
+    url = f"{endpoint}/translate?api-version=3.0&to={target}"
+    headers = {
+      "Ocp-Apim-Subscription-Key": key,
+      "Ocp-Apim-Subscription-Region": region,
+      "Content-Type": "application/json"
+    }
+    body = [{"Text": t} for t in texts_for_azure]
+    translations = []
+    if body:
+        resp = requests.post(url, headers=headers, json=body)
+        resp.raise_for_status()
+        translations = resp.json()   # a list, same length as body
+    
+    # 4. Restore placeholders with Hebrew terms and apply to new structure
+    new_recipes = deepcopy(recipes)
+    for idx, trans_item in enumerate(translations):
+        translated = trans_item["translations"][0]["text"]
+        # Replace placeholders with Hebrew
+        for ph, heb in placeholder_map[idx].items():
+            translated = translated.replace(ph, heb)
+        
+        # Apply translation to the correct path in new_recipes
+        path = paths[idx]
+        obj = new_recipes
+        for key in path[:-1]:
+            if isinstance(key, int):
+                obj = obj[key]
+            elif key == "groups":
+                continue  # Skip the "groups" prefix
+            else:
+                obj = obj[key]
+        
+        # Set the translated value
+        final_key = path[-1]
+        if isinstance(obj, list) and isinstance(final_key, int):
+            obj[final_key] = translated
+        else:
+            obj[final_key] = translated
+
+    return jsonify({"recipes": new_recipes})
+
 @app.route("/api/translate", methods=["POST"])
 def api_translate_menu():
     data = request.get_json()
@@ -952,8 +1095,8 @@ def api_template():
         logger.info("🔹 Received user preferences for template:\n%s", json.dumps(preferences, indent=2))
 
         system_prompt = """
-You are a professional dietitian AI specializing in practical, balanced meal planning.
-Your goal is to produce a meal template that a real person can cook and enjoy, while strictly hitting their daily calorie and macro targets using everyday ingredients.
+You are a professional dietitian AI specializing in personalized, practical meal planning.
+Your mission: generate a realistic meal template that a real person can cook and enjoy, while strictly hitting their daily calorie & macro targets, honoring every user’s unique preferences, allergies, and dietary rules.
 
 INPUTS:
 - daily_calories (kcal)
@@ -963,52 +1106,50 @@ INPUTS:
 - number_of_meals (integer)
 - dietary_restrictions (e.g., kosher, vegetarian, gluten-free)
 - food_allergies (list of foods/ingredients to avoid)
-- client_preferences (likes/dislikes)
+- client_preferences (free-form list, e.g. “loves pasta”, “hates mushrooms”, “prefers spicy”)
 
 FOR EACH MEAL:
-• Provide both a “main” and an “alternative.”  
-• Include exactly these fields:  
-  – name (string)  
-  – calories (integer)  
-  – protein (integer, g)  
-  – fat (integer, g)  
-  – carbs (integer, g)  
+• Output a “main” and an “alternative.”  
+• Each must include exactly:
+  – name (string)
+  – calories (integer)
+  – protein (integer, g)
+  – fat (integer, g)
+  – carbs (integer, g)
   – main_protein_source (string)
 
-LOGIC & VALIDATION STEPS (iterate until all pass):
-1. **Compute per-meal averages**:  
-     per_cal   = daily_calories ÷ number_of_meals  
-     per_pro   = daily_protein  ÷ number_of_meals  
-     per_fat   = daily_fat      ÷ number_of_meals  
-     per_carbs = daily_carbs    ÷ number_of_meals  
+PREFERENCE LOGIC:
+1. **Exclusions:** Exclude any ingredient/dish matching food_allergies or “dislikes…” in client_preferences.
+2. **Inclusions:** Aim to feature each “likes…” item at least once, if macros & restrictions allow.
+3. **Neutral items:** Neither forced nor forbidden.
+4. **Balance likes:** Don’t overuse one liked item—distribute favorites evenly.
 
-2. **Allergy & Limitation Check**:  
-   - Remove or substitute any ingredient matching food_allergies.  
-   - Enforce dietary_restrictions and any additional client_limitations (e.g., kosher, no pork, no shellfish, vegetarian).
+MACRO DISTRIBUTION & VALIDATION (loop until all pass):
+1. Compute per-meal averages:
+   per_cal   = daily_calories ÷ number_of_meals
+   per_pro   = daily_protein   ÷ number_of_meals
+   per_fat   = daily_fat       ÷ number_of_meals
+   per_carbs = daily_carbs     ÷ number_of_meals
+2. **Meal check:** For each meal & macro,
+   - If < per_avg × 0.70 OR > per_avg × 1.30 → adjust portions or swap ingredients.
+   - Ensure no meal > 45% of any daily macro.
+3. **Alternative match:** 
+   - Main vs alternative within ±15% calories & protein, ±25% fat & carbs.
+   - Prioritize protein match, then tweak fat/carbs.
+4. **Daily totals:** Sum all meals → must be within ±5% of each daily target.
+   - If out of range → rebalance meals (lean ⇄ higher-fat) and re-run checks.
 
-3. **Meal-level check**:  
-   For each meal and each macro (calories, protein, fat, carbs):  
-   - IF value < per_avg × 0.70 OR > per_avg × 1.30  
-       → ADJUST portion size or SWAP ingredient  
-   - ENSURE no meal > 45% of any daily macro  
+FEASIBILITY CONSTRAINTS:
+- ≤7 common ingredients per dish.
+- Only standard cooking methods (grill, bake, steam, sauté).
+- No specialty powders unless explicitly allowed.
 
-4. **Alternative match**:  
-   - Alternatives must match mains within ±15% calories & protein, ±25% fat & carbs  
-   - PRIORITIZE protein match first, then tweak fat/carbs  
-
-5. **Daily total check**:  
-   - Sum all meals → must be within ±5% of daily targets  
-   - IF totals out of range  
-       → ADJUST one or more meals (lean ⇒ higher or high ⇒ lean)  
-       → RE-RUN all meal-level checks  
-
-6. **Feasibility constraints**:  
-   - ≤7 common ingredients per dish  
-   - Only standard cooking methods (grill, bake, steam, sauté)  
-   - Avoid powdered isolates unless explicitly allowed  
+VARIETY & TASTINESS:
+- Use at least three different main_protein_sources across the day.
+- Include two distinct global flavor profiles (e.g., Mediterranean, Asian, Mexican) unless user specifies otherwise.
 
 RESPONSE FORMAT:
-Respond **only** with valid JSON:
+Respond **only** with valid JSON, exactly like this:
 
 {
   "template": [
