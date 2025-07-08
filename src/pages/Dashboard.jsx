@@ -188,16 +188,6 @@ export default function Dashboard() {
       link: createPageUrl('Chat')
     },
     {
-      title: translations.viewAnalytics || 'View Analytics',
-      description: translations.analyzeNutrition || 'Analyze nutrition data',
-      icon: BarChart3,
-      color: 'text-orange-600',
-      bgColor: 'bg-orange-50',
-      hoverColor: 'hover:bg-orange-100',
-      borderColor: 'border-orange-200',
-      link: createPageUrl('MenuAnalysis')
-    },
-    {
       title: translations.recipeManagement || 'Recipe Management',
       description: translations.browseRecipes || 'Browse and manage recipes',
       icon: Heart,
@@ -216,7 +206,8 @@ export default function Dashboard() {
       hoverColor: 'hover:bg-indigo-100',
       borderColor: 'border-indigo-200',
       link: createPageUrl('NutritionPlan')
-    }
+    },
+    
   ];
 
   return (
@@ -365,7 +356,7 @@ export default function Dashboard() {
               <div className="w-8 h-8 rounded-lg bg-green-500 flex items-center justify-center">
                 <ChefHat className="w-4 h-4 text-white" />
               </div>
-              {translations.menuOverview || 'Menu Overview'}
+              {translations.menuoverview || 'Menu Overview'}
             </CardTitle>
           </CardHeader>
           <CardContent>

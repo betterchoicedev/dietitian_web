@@ -80,6 +80,7 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
 const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
+  const [originalValue, setOriginalValue] = useState(value);
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -88,6 +89,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
   useEffect(() => {
     setEditValue(value);
+    setOriginalValue(value);
   }, [value]);
 
   useEffect(() => {
@@ -132,6 +134,24 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
     }, 300);
   };
 
+  const handleKeyPress = (e) => {
+    if (e.key === 'Escape') {
+      // Cancel editing and revert to original value
+      setEditValue(originalValue);
+      setIsEditing(false);
+      setShowSuggestions(false);
+      setSuggestions([]);
+    }
+  };
+
+  const handleBlur = () => {
+    // Always revert to original value - only database suggestions should trigger changes
+    setEditValue(originalValue);
+    setIsEditing(false);
+    setShowSuggestions(false);
+    setSuggestions([]);
+  };
+
   const handleSelect = async (suggestion) => {
     try {
       const response = await fetch(`https://dietitian-web.onrender.com/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`);
@@ -157,14 +177,18 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
     }
   };
 
+  const startEditing = () => {
+    setOriginalValue(value); // Store the current value as original
+    setEditValue(value);
+    setIsEditing(true);
+    setSuggestions([]);
+    setShowSuggestions(false);
+  };
+
   if (!isEditing) {
     return (
       <div
-        onClick={() => {
-          setIsEditing(true);
-          setSuggestions([]);
-          setShowSuggestions(false);
-        }}
+        onClick={startEditing}
         className="cursor-pointer hover:bg-gray-50 px-2 py-1 rounded text-right"
         dir="rtl"
       >
@@ -180,6 +204,8 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
         type="text"
         value={editValue}
         onChange={handleInputChange}
+        onKeyDown={handleKeyPress}
+        onBlur={handleBlur}
         onFocus={() => setShowSuggestions(true)}
         className="w-full px-2 py-1 border border-gray-300 rounded text-right"
         dir="rtl"
@@ -565,7 +591,7 @@ const MenuCreate = () => {
       setProgressStep(`🔍 Looking up ${uniqueIngredients.length} new ingredients (${cacheHits} found in cache, ${cacheHitRate}% hit rate)...`);
 
       // Step 2: Batch UPC lookup for all ingredients
-      const batchResponse = await fetch("https://dietitian-web-backend.onrender.com/api/batch-upc-lookup", {
+      const batchResponse = await fetch("https://dietitian-web.onrender.com/api/batch-upc-lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ingredients: uniqueIngredients }),
@@ -619,7 +645,7 @@ const MenuCreate = () => {
     try {
       setProgressStep('🔄 Using fallback UPC lookup...');
       
-      const enrichRes = await fetch("https://dietitian-web-backend.onrender.com/api/enrich-menu-with-upc", {
+      const enrichRes = await fetch("https://dietitian-web.onrender.com/api/enrich-menu-with-upc", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ menu: menuToEnrich.meals }),

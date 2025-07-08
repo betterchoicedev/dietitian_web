@@ -75,9 +75,25 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
 const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
+  const [originalValue, setOriginalValue] = useState(value);
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef(null);
+  const searchTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    setEditValue(value);
+    setOriginalValue(value);
+  }, [value]);
+
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const fetchSuggestions = async (query) => {
     if (query.length < 2) {
@@ -85,54 +101,137 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
       return;
     }
 
+    setIsLoading(true);
     try {
-      const response = await fetch('/api/autocomplete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ingredient_name: query, limit: 5 })
-      });
+      // Try MenuCreate API first, fallback to original API
+      let response = await fetch(`https://dietitian-web.onrender.com/api/suggestions?query=${encodeURIComponent(query)}`);
       
       if (response.ok) {
         const data = await response.json();
-        setSuggestions(data.suggestions || []);
+        setSuggestions(data || []);
+      } else {
+        // Fallback to original API
+        response = await fetch('/api/autocomplete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ingredient_name: query, limit: 5 })
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setSuggestions(data.suggestions || []);
+        }
       }
     } catch (error) {
       console.error('Error fetching suggestions:', error);
+      setSuggestions([]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleInputChange = (e) => {
     const newValue = e.target.value;
     setEditValue(newValue);
-    fetchSuggestions(newValue);
     setShowSuggestions(true);
+
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    searchTimeoutRef.current = setTimeout(() => {
+      fetchSuggestions(newValue);
+    }, 300);
   };
 
-  const handleSelect = async (suggestion) => {
-    const nutritionData = {
-      calories: Math.round(suggestion.Energy || 0),
-      protein: Math.round(suggestion.Protein || 0),
-      fat: Math.round(suggestion.Fat || 0),
-      carbs: Math.round(suggestion.Carbohydrate || 0)
-    };
+  const handleKeyPress = (e) => {
+    if (e.key === 'Escape') {
+      // Cancel editing and revert to original value
+      setEditValue(originalValue);
+      setIsEditing(false);
+      setShowSuggestions(false);
+      setSuggestions([]);
+    }
+  };
 
-    const newValues = {
-      item: suggestion.name,
-      household_measure: suggestion.household_measure || '',
-      ...nutritionData
-    };
-
-    onChange(newValues, mealIndex, optionIndex, ingredientIndex);
-    setEditValue(suggestion.name);
+  const handleBlur = () => {
+    // Always revert to original value - only database suggestions should trigger changes
+    setEditValue(originalValue);
     setIsEditing(false);
     setShowSuggestions(false);
     setSuggestions([]);
   };
 
+  const handleSelect = async (suggestion) => {
+    try {
+      let updatedValues;
+      
+      // Check if this is from the enhanced API (MenuCreate style)
+      if (suggestion.hebrew && suggestion.english) {
+        const response = await fetch(`https://dietitian-web.onrender.com/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`);
+        if (response.ok) {
+          const nutritionData = await response.json();
+          updatedValues = {
+            item: suggestion.hebrew || suggestion.english,
+            household_measure: suggestion.household_measure || '',
+            calories: nutritionData.Energy || 0,
+            protein: nutritionData.Protein || 0,
+            fat: nutritionData.Total_lipid__fat_ || 0,
+            carbs: nutritionData.Carbohydrate || 0,
+            'brand of pruduct': nutritionData.brand || ''
+          };
+        } else {
+          // Fallback to basic data
+          updatedValues = {
+            item: suggestion.hebrew || suggestion.english,
+            household_measure: suggestion.household_measure || '',
+            calories: 0,
+            protein: 0,
+            fat: 0,
+            carbs: 0,
+            'brand of pruduct': ''
+          };
+        }
+        setEditValue(suggestion.hebrew || suggestion.english);
+      } else {
+        // Handle original API format
+        const nutritionData = {
+          calories: Math.round(suggestion.Energy || 0),
+          protein: Math.round(suggestion.Protein || 0),
+          fat: Math.round(suggestion.Fat || 0),
+          carbs: Math.round(suggestion.Carbohydrate || 0)
+        };
+
+        updatedValues = {
+          item: suggestion.name,
+          household_measure: suggestion.household_measure || '',
+          ...nutritionData,
+          'brand of pruduct': ''
+        };
+        setEditValue(suggestion.name);
+      }
+
+      onChange(updatedValues, mealIndex, optionIndex, ingredientIndex);
+      setShowSuggestions(false);
+      setIsEditing(false);
+      setSuggestions([]);
+    } catch (error) {
+      console.error('Error fetching nutrition data:', error);
+    }
+  };
+
+  const startEditing = () => {
+    setOriginalValue(value); // Store the current value as original
+    setEditValue(value);
+    setIsEditing(true);
+    setSuggestions([]);
+    setShowSuggestions(false);
+  };
+
   if (!isEditing) {
     return (
       <span 
-        onClick={() => setIsEditing(true)}
+        onClick={startEditing}
         className="cursor-pointer hover:bg-gray-100 px-1 rounded"
         title="Click to edit ingredient"
       >
@@ -148,28 +247,41 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
         type="text"
         value={editValue}
         onChange={handleInputChange}
-        onBlur={() => {
-          setTimeout(() => {
-            setIsEditing(false);
-            setShowSuggestions(false);
-          }, 200);
-        }}
+        onKeyDown={handleKeyPress}
+        onBlur={handleBlur}
+        onFocus={() => setShowSuggestions(true)}
         className="bg-white border border-gray-300 rounded px-2 py-1 text-sm min-w-[120px]"
         placeholder="Search ingredient..."
+        autoFocus
       />
+
+      {isLoading && (
+        <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+        </div>
+      )}
       
       {showSuggestions && suggestions.length > 0 && (
-        <div className="absolute z-10 w-64 bg-white border border-gray-300 rounded-md shadow-lg mt-1">
+        <div className="absolute z-50 w-64 bg-white border border-gray-300 rounded-md shadow-lg mt-1">
           {suggestions.map((suggestion, idx) => (
             <div
               key={idx}
               className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
               onClick={() => handleSelect(suggestion)}
             >
-              <div className="font-medium">{suggestion.name}</div>
-              <div className="text-xs text-gray-500">
-                {Math.round(suggestion.Energy || 0)} cal, {Math.round(suggestion.Protein || 0)}g protein
-              </div>
+              {suggestion.hebrew && suggestion.english ? (
+                <div className="flex flex-col">
+                  <span className="font-medium">{suggestion.hebrew}</span>
+                  <span className="text-xs text-gray-500">{suggestion.english}</span>
+                </div>
+              ) : (
+                <div className="flex flex-col">
+                  <div className="font-medium">{suggestion.name}</div>
+                  <div className="text-xs text-gray-500">
+                    {Math.round(suggestion.Energy || 0)} cal, {Math.round(suggestion.Protein || 0)}g protein
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>

@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { FloatingLanguageToggle } from '@/components/ui/language-toggle';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter
+} from '@/components/ui/card'
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Utensils, Salad, Soup, ChefHat, Sandwich, Printer, Star, Clock, Users, Target, X, BookOpen, Zap } from 'lucide-react';
@@ -9,7 +15,7 @@ import { Utensils, Salad, Soup, ChefHat, Sandwich, Printer, Star, Clock, Users, 
 const groupedRecipes = [
   {
     group: 'Salads',
-    icon: <Salad className="w-6 h-6" />,
+    icon: Salad,
     color: 'success',
     recipes: [
       {
@@ -101,7 +107,7 @@ const groupedRecipes = [
   },
   {
     group: 'Warm Dishes',
-    icon: <Soup className="w-6 h-6" />,
+    icon: Soup,
     color: 'warning',
     recipes: [
       {
@@ -190,7 +196,7 @@ const groupedRecipes = [
   },
   {
     group: 'Appetizers',
-    icon: <Sandwich className="w-6 h-6" />,
+    icon: Sandwich,
     color: 'info',
     recipes: [
       {
@@ -278,7 +284,7 @@ const groupedRecipes = [
   },
   {
     group: 'More',
-    icon: <ChefHat className="w-6 h-6" />,
+    icon: ChefHat,
     color: 'primary',
     recipes: [
       {
@@ -382,7 +388,13 @@ const translateRecipes = async (recipes, targetLang = 'he') => {
     }
     
     const result = await response.json();
-    return result.recipes || recipes;
+    const translatedRecipes = result.recipes || recipes;
+    
+    // Preserve the original group structure with icons and colors
+    return recipes.map((originalGroup, index) => ({
+      ...originalGroup, // Keep icon, color, and group name
+      recipes: translatedRecipes[index]?.recipes || originalGroup.recipes
+    }));
   } catch (error) {
     console.error('Error translating recipes:', error);
     return recipes;
@@ -668,7 +680,6 @@ export default function RecipesPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 bg-mesh">
-      <FloatingLanguageToggle />
       
       {/* Hero Section */}
       <section className="relative py-20 overflow-hidden">
@@ -720,7 +731,7 @@ export default function RecipesPage() {
             <div key={group.group} className="animate-slide-up">
               <div className="flex items-center gap-4 mb-8">
                 <div className={`w-12 h-12 rounded-xl bg-gradient-to-br from-${group.color} to-${group.color}-lighter flex items-center justify-center text-white shadow-glow-${group.color}`}>
-                  {group.icon}
+                  <group.icon className="w-6 h-6" />
                 </div>
                 <div>
                   <h2 className="text-3xl font-bold text-gradient-primary font-heading">

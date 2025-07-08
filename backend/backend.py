@@ -951,34 +951,93 @@ def api_template():
         preferences = load_user_preferences(user_code)
         logger.info("🔹 Received user preferences for template:\n%s", json.dumps(preferences, indent=2))
 
-        system_prompt = (
-    "You are a professional dietitian AI. "
-    "Given user preferences (daily calories, macros, number of meals), "
-    "generate a meal template: an array of meals. "
-    "For each meal, provide BOTH a main and an alternative option. "
-    "Each option must include: `name`, `calories`, `protein`, `fat`, `carbs`, and `main_protein_source`. "
-    "The nutrition values (calories, protein, fat, carbs) for the alternative should match the main meal as closely as possible (within ±5%). "
-    "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences. "
-    "If user has 'kosher' limitation, you MUST follow kosher dietary laws: "
-    "- NEVER suggest meals that mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) "
-    "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
-    "- Consider appropriate kosher meal combinations "
-    "\n\n"
-    "MACRO DISTRIBUTION RULES:\n"
-    "1. Calculate per-meal averages: daily_calories ÷ number_of_meals, daily_protein ÷ number_of_meals, etc.\n"
-    "2. Distribute macros within ±30% of the per-meal average (e.g., if average is 12g fat per meal, range is 8-16g)\n"
-    "3. Ensure the sum of all meals equals the daily targets (±2%)\n"
-    "4. No single meal should exceed 40% of any daily macro\n"
-    "5. Breakfast/snacks: typically lower calories/protein, moderate fat\n"
-    "6. Lunch/dinner: can be higher in all macros but stay within the ±30% range\n"
-    "\n\n"
-    "Respond ONLY with valid JSON in this format:\n"
-    "{ \"template\": [ "
-    "{\"meal\": \"Breakfast\","
-    "\"main\": {\"name\": \"Omelet & Toast\", \"calories\": 400, ... },"
-    "\"alternative\": {\"name\": \"Greek Yogurt Bowl\", \"calories\": 400, ... }"
-    "}, ... ]} "
-)
+        system_prompt = """
+You are a professional dietitian AI specializing in practical, balanced meal planning.
+Your goal is to produce a meal template that a real person can cook and enjoy, while strictly hitting their daily calorie and macro targets using everyday ingredients.
+
+INPUTS:
+- daily_calories (kcal)
+- daily_protein (g)
+- daily_fat (g)
+- daily_carbs (g)
+- number_of_meals (integer)
+- dietary_restrictions (e.g., kosher, vegetarian, gluten-free)
+- food_allergies (list of foods/ingredients to avoid)
+- client_preferences (likes/dislikes)
+
+FOR EACH MEAL:
+• Provide both a “main” and an “alternative.”  
+• Include exactly these fields:  
+  – name (string)  
+  – calories (integer)  
+  – protein (integer, g)  
+  – fat (integer, g)  
+  – carbs (integer, g)  
+  – main_protein_source (string)
+
+LOGIC & VALIDATION STEPS (iterate until all pass):
+1. **Compute per-meal averages**:  
+     per_cal   = daily_calories ÷ number_of_meals  
+     per_pro   = daily_protein  ÷ number_of_meals  
+     per_fat   = daily_fat      ÷ number_of_meals  
+     per_carbs = daily_carbs    ÷ number_of_meals  
+
+2. **Allergy & Limitation Check**:  
+   - Remove or substitute any ingredient matching food_allergies.  
+   - Enforce dietary_restrictions and any additional client_limitations (e.g., kosher, no pork, no shellfish, vegetarian).
+
+3. **Meal-level check**:  
+   For each meal and each macro (calories, protein, fat, carbs):  
+   - IF value < per_avg × 0.70 OR > per_avg × 1.30  
+       → ADJUST portion size or SWAP ingredient  
+   - ENSURE no meal > 45% of any daily macro  
+
+4. **Alternative match**:  
+   - Alternatives must match mains within ±15% calories & protein, ±25% fat & carbs  
+   - PRIORITIZE protein match first, then tweak fat/carbs  
+
+5. **Daily total check**:  
+   - Sum all meals → must be within ±5% of daily targets  
+   - IF totals out of range  
+       → ADJUST one or more meals (lean ⇒ higher or high ⇒ lean)  
+       → RE-RUN all meal-level checks  
+
+6. **Feasibility constraints**:  
+   - ≤7 common ingredients per dish  
+   - Only standard cooking methods (grill, bake, steam, sauté)  
+   - Avoid powdered isolates unless explicitly allowed  
+
+RESPONSE FORMAT:
+Respond **only** with valid JSON:
+
+{
+  "template": [
+    {
+      "meal": "Breakfast",
+      "main": {
+        "name": "...",
+        "calories": 0,
+        "protein": 0,
+        "fat": 0,
+        "carbs": 0,
+        "main_protein_source": "..."
+      },
+      "alternative": {
+        "name": "...",
+        "calories": 0,
+        "protein": 0,
+        "fat": 0,
+        "carbs": 0,
+        "main_protein_source": "..."
+      }
+    },
+    … repeat for each meal …
+  ]
+}
+"""
+
+
+
 
 
 
@@ -1486,6 +1545,54 @@ def api_validate_template():
         logger.error("❌ Exception in /api/validate-template:\n%s", traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
+def is_israeli_brand(brand):
+    """
+    Check if a brand is Israeli based on a list of known Israeli brands.
+    """
+    if not brand:
+        return False
+    
+    israeli_brands = [
+        "tnuva", "osem", "strauss", "elite", "telma", "bamba", "bissli", "krembo",
+        "lechem eretz", "angel", "bagel bagel", "achla", "taboon", "dan cake",
+        "kibutz galuyot", "shufersals", "machsanei hashuk", "tara", "shamir salads",
+        "meshek tzuriel", "gad", "priniv", "yotvata", "shimrit", "tenuva",
+        "emek", "milko", "para", "shoko", "cottage", "gamadim", "hashachar",
+        "zoglovek", "wilke", "galil mountain", "carmel", "barkan", "golan heights",
+        "dalton", "recanati", "tabor", "tulip", "yarden", "vita", "primor",
+        "meshulam", "golden star", "kfar shaul", "hazirim", "hatzbani",
+        "aviv", "masuah", "shemen", "mizra", "tivall", "achva", "halva kingdom"
+    ]
+    
+    brand_lower = brand.lower().strip()
+    return any(israeli_brand in brand_lower for israeli_brand in israeli_brands)
+
+def prepare_upc_lookup_params(brand, name):
+    """
+    Prepare parameters for UPC lookup based on whether the brand is Israeli or not.
+    """
+    if not brand and not name:
+        return None, None, None
+    
+    is_israeli = is_israeli_brand(brand)
+    
+    if is_israeli:
+        # For Israeli products: combine brand and name but avoid duplication
+        brand_lower = brand.lower() if brand else ""
+        name_lower = name.lower() if name else ""
+        
+        # Check if brand is already in the name to avoid duplication
+        if brand and brand_lower in name_lower:
+            query = name  # Use name as is since it already contains brand
+        else:
+            # Combine brand and name
+            query = f"{brand} {name}".strip()
+        
+        return "hebrew", {"query": query}, is_israeli
+    else:
+        # For non-Israeli products: send brand and name separately
+        return "regular", {"brand": brand, "name": name}, is_israeli
+
 @app.route('/api/enrich-menu-with-upc', methods=['POST'])
 def enrich_menu_with_upc():
     """
@@ -1520,11 +1627,24 @@ def enrich_menu_with_upc():
                         app.logger.info(f"Looking up UPC for brand={brand!r}, name={name!r}")
 
                         try:
-                            resp = requests.get(
-                                "https://dietitian-web.onrender.com/api/ingredient-upc",
-                                params={"brand": brand, "name": name},
-                                timeout=5
-                            )
+                            # Determine endpoint and parameters based on brand
+                            endpoint_type, params, is_israeli = prepare_upc_lookup_params(brand, name)
+                            
+                            if not endpoint_type:
+                                enriched_ing["UPC"] = None
+                                app.logger.warning(f"No valid parameters for UPC lookup: brand={brand!r}, name={name!r}")
+                                enriched_ingredients.append(enriched_ing)
+                                continue
+                            
+                            # Choose the appropriate endpoint
+                            if endpoint_type == "hebrew":
+                                url = "https://dietitian-web.onrender.com/api/ingredient-upc-hebrew"
+                                app.logger.info(f"Using Hebrew UPC endpoint for Israeli brand: {brand}")
+                            else:
+                                url = "https://dietitian-web.onrender.com/api/ingredient-upc"
+                                app.logger.info(f"Using regular UPC endpoint for non-Israeli brand: {brand}")
+                            
+                            resp = requests.get(url, params=params, timeout=5)
                             app.logger.info(f"UPC lookup HTTP {resp.status_code} — URL: {resp.url}")
                             app.logger.info(f"UPC lookup response body: {resp.text}")
 
@@ -1585,12 +1705,28 @@ def batch_upc_lookup():
                 continue
             
             try:
-                # Use the existing UPC lookup service
-                resp = requests.get(
-                    "https://dietitian-web.onrender.com/api/ingredient-upc",
-                    params={"brand": brand, "name": name},
-                    timeout=3  # Shorter timeout for batch processing
-                )
+                # Determine endpoint and parameters based on brand
+                endpoint_type, params, is_israeli = prepare_upc_lookup_params(brand, name)
+                
+                if not endpoint_type:
+                    results.append({
+                        "brand": brand,
+                        "name": name,
+                        "upc": None,
+                        "error": "No valid parameters"
+                    })
+                    continue
+                
+                # Choose the appropriate endpoint
+                if endpoint_type == "hebrew":
+                    url = "https://dietitian-web.onrender.com/api/ingredient-upc-hebrew"
+                    logger.info(f"Using Hebrew UPC endpoint for Israeli brand: {brand}")
+                else:
+                    url = "https://dietitian-web.onrender.com/api/ingredient-upc"
+                    logger.info(f"Using regular UPC endpoint for non-Israeli brand: {brand}")
+                
+                # Use the appropriate UPC lookup service
+                resp = requests.get(url, params=params, timeout=3)  # Shorter timeout for batch processing
                 
                 if resp.status_code == 200:
                     upc_data = resp.json()
