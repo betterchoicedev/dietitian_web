@@ -12,8 +12,20 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfutils
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase import pdfmetrics
 from flask import send_file
 import datetime
+
+# Import libraries for Hebrew text support
+try:
+    from bidi.algorithm import get_display
+    from arabic_reshaper import reshape
+    BIDI_SUPPORT = True
+except ImportError:
+    BIDI_SUPPORT = False
+    logger.warning("Bidirectional text support not available. Install arabic-reshaper and python-bidi for Hebrew support.")
 import requests
 from copy import deepcopy
 import re
@@ -176,7 +188,9 @@ def api_translate_recipes():
         else:
             obj[final_key] = translated
 
-    return jsonify({"recipes": new_recipes})
+    # Clean ingredient names before returning (if recipes contain ingredient data)
+    cleaned_recipes = clean_ingredient_names({"recipes": new_recipes}).get("recipes", new_recipes)
+    return jsonify({"recipes": cleaned_recipes})
 
 @app.route("/api/translate", methods=["POST"])
 def api_translate_menu():
@@ -301,7 +315,9 @@ def api_translate_menu():
             obj = obj[key]
         obj[path[-1]] = translated
 
-    return jsonify(new_menu)
+    # Clean ingredient names before returning
+    cleaned_menu = clean_ingredient_names(new_menu)
+    return jsonify(cleaned_menu)
 
 @app.route('/api/menu-pdf', methods=['POST'])
 def generate_menu_pdf():
@@ -321,6 +337,227 @@ def generate_menu_pdf():
     client_name = "OBI"
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
 
+    # Register Hebrew-compatible font with aggressive downloading
+    hebrew_font = 'Helvetica'
+    hebrew_font_bold = 'Helvetica-Bold'
+    
+    # Force download and embed a Hebrew font
+    try:
+        import urllib.request
+        import tempfile
+        import os
+        
+        temp_dir = tempfile.gettempdir()
+        font_path = os.path.join(temp_dir, 'NotoSansHebrew.ttf')
+        
+        # Always try to get a fresh Hebrew font
+        logger.info("🔄 Ensuring Hebrew font availability...")
+        
+        if not os.path.exists(font_path):
+            logger.info("📥 Downloading Noto Sans Hebrew font...")
+            try:
+                # Use Google's Noto Sans Hebrew (specifically designed for Hebrew)
+                urllib.request.urlretrieve(
+                    'https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansHebrew/NotoSansHebrew-Regular.ttf',
+                    font_path
+                )
+                logger.info("✅ Hebrew font download completed")
+            except Exception as download_err:
+                logger.warning(f"Primary Hebrew font download failed: {download_err}")
+                
+                # Fallback to DejaVu Sans
+                logger.info("📥 Trying DejaVu Sans as fallback...")
+                try:
+                    urllib.request.urlretrieve(
+                        'https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf',
+                        font_path
+                    )
+                    logger.info("✅ Fallback font download completed")
+                except Exception as fallback_err:
+                    logger.error(f"Fallback font download also failed: {fallback_err}")
+                    raise Exception("Could not download any Hebrew-compatible font")
+        
+        # Register the Hebrew font
+        if os.path.exists(font_path):
+            try:
+                pdfmetrics.registerFont(TTFont('HebrewFont', font_path))
+                hebrew_font = 'HebrewFont'
+                hebrew_font_bold = 'HebrewFont'  # Use same font for bold
+                logger.info(f"✅ Successfully registered Hebrew font from: {font_path}")
+                
+                # Verify the font contains Hebrew characters
+                from reportlab.pdfbase._fontdata import standardFonts
+                logger.info(f"📋 Registered fonts: {list(pdfmetrics._fonts.keys())}")
+                
+            except Exception as reg_err:
+                logger.error(f"Font registration failed: {reg_err}")
+                raise
+        else:
+            raise Exception("Hebrew font file not found after download attempt")
+            
+    except Exception as e:
+        logger.error(f"❌ Complete Hebrew font setup failed: {e}")
+        logger.warning("🔄 Trying Windows system fonts as last resort...")
+        
+        # Try Windows system fonts as absolute last resort
+        try:
+            import platform
+            if platform.system() == "Windows":
+                # Try common Windows Hebrew fonts
+                windows_fonts = [
+                    'C:/Windows/Fonts/arial.ttf',
+                    'C:/Windows/Fonts/calibri.ttf',
+                    'C:/Windows/Fonts/tahoma.ttf'
+                ]
+                
+                for font_path in windows_fonts:
+                    try:
+                        if os.path.exists(font_path):
+                            pdfmetrics.registerFont(TTFont('HebrewFont', font_path))
+                            hebrew_font = 'HebrewFont'
+                            hebrew_font_bold = 'HebrewFont'
+                            logger.info(f"✅ Using Windows system font: {font_path}")
+                            break
+                    except:
+                        continue
+        except Exception as windows_err:
+            logger.error(f"Windows font fallback failed: {windows_err}")
+            logger.error("🚨 No Hebrew fonts available - Hebrew text will show as squares")
+    
+    logger.info(f"Final Hebrew font choice: {hebrew_font} (bold: {hebrew_font_bold})")
+    
+    # Test if the Hebrew font actually works
+    if hebrew_font != 'Helvetica':
+        try:
+            test_canvas = canvas.Canvas(BytesIO(), pagesize=letter)
+            test_canvas.setFont(hebrew_font, 12)
+            test_text = "Test שלום"
+            test_canvas.drawString(50, 50, test_text)
+            logger.info("✅ Hebrew font test passed")
+        except Exception as font_test_error:
+            logger.error(f"❌ Hebrew font test failed: {font_test_error}")
+            logger.warning("Falling back to Helvetica")
+            hebrew_font = 'Helvetica'
+            hebrew_font_bold = 'Helvetica-Bold'
+
+    def contains_hebrew(text):
+        """Check if text contains Hebrew characters"""
+        if not text:
+            return False
+        # Hebrew Unicode range: 0x0590-0x05FF
+        hebrew_chars = any(0x0590 <= ord(char) <= 0x05FF for char in str(text))
+        if hebrew_chars:
+            logger.info(f"Hebrew text detected: {text[:50]}...")
+        return hebrew_chars
+
+    def process_hebrew_text(text):
+        """Process Hebrew text for proper display with bidirectional support"""
+        if not text:
+            return text
+        
+        # Convert to string and handle encoding
+        text = str(text)
+        
+        # For RTL text, we need to process for proper display
+        if contains_hebrew(text) and BIDI_SUPPORT:
+            try:
+                # First, reshape Arabic/Hebrew characters if needed
+                reshaped_text = reshape(text)
+                
+                # Then apply bidirectional algorithm for proper RTL display
+                bidi_text = get_display(reshaped_text)
+                
+                logger.debug(f"Processed Hebrew text: '{text}' -> '{bidi_text}'")
+                return bidi_text
+                
+            except Exception as e:
+                logger.warning(f"Error processing Hebrew text '{text}': {e}")
+                # Fallback to original text
+                return text
+        else:
+            # For non-Hebrew text or when BIDI support is not available
+            try:
+                # Ensure text is properly encoded
+                text = text.encode('utf-8').decode('utf-8')
+            except:
+                pass
+                
+        return text
+
+    def get_font(text, size, bold=False):
+        """Get appropriate font based on text content"""
+        processed_text = process_hebrew_text(text)
+        if contains_hebrew(processed_text):
+            font_choice = hebrew_font_bold if bold else hebrew_font
+            logger.debug(f"Using Hebrew font '{font_choice}' for text: {processed_text[:30]}...")
+            return (font_choice, size)
+        else:
+            return (('Helvetica-Bold' if bold else 'Helvetica'), size)
+
+    def draw_text(x, y, text, size=10, bold=False, color=colors.black):
+        """Draw text with appropriate font for Hebrew support"""
+        processed_text = process_hebrew_text(text)
+        font_name, font_size = get_font(processed_text, size, bold)
+        
+        # Enhanced logging for Hebrew text
+        if contains_hebrew(processed_text):
+            logger.info(f"🔤 Drawing Hebrew text: '{processed_text[:50]}...'")
+            logger.info(f"🎨 Using font: {font_name} (size: {font_size})")
+            logger.info(f"📍 Position: ({x}, {y})")
+        
+        try:
+            c.setFont(font_name, font_size)
+            c.setFillColor(color)
+            c.drawString(x, y, processed_text)
+            
+            if contains_hebrew(processed_text):
+                logger.info(f"✅ Successfully drew Hebrew text with {font_name}")
+                
+        except Exception as e:
+            logger.error(f"❌ Error drawing text '{processed_text[:30]}...': {e}")
+            logger.warning(f"🔄 Falling back to Helvetica for: {processed_text[:30]}...")
+            
+            # Fallback to Helvetica
+            try:
+                c.setFont('Helvetica', font_size)
+                c.setFillColor(color)
+                c.drawString(x, y, processed_text)
+                logger.warning("⚠️ Used Helvetica fallback (Hebrew will show as squares)")
+            except Exception as fallback_e:
+                logger.error(f"❌ Even Helvetica fallback failed: {fallback_e}")
+
+    def draw_centered_text(x, y, text, size=10, bold=False, color=colors.black):
+        """Draw centered text with appropriate font for Hebrew support"""
+        processed_text = process_hebrew_text(text)
+        font_name, font_size = get_font(processed_text, size, bold)
+        
+        # Enhanced logging for Hebrew text
+        if contains_hebrew(processed_text):
+            logger.info(f"🔤 Drawing centered Hebrew text: '{processed_text[:50]}...'")
+            logger.info(f"🎨 Using font: {font_name} (size: {font_size})")
+            logger.info(f"📍 Centered at: ({x}, {y})")
+        
+        try:
+            c.setFont(font_name, font_size)
+            c.setFillColor(color)
+            c.drawCentredString(x, y, processed_text)
+            
+            if contains_hebrew(processed_text):
+                logger.info(f"✅ Successfully drew centered Hebrew text with {font_name}")
+                
+        except Exception as e:
+            logger.error(f"❌ Error drawing centered text '{processed_text[:30]}...': {e}")
+            logger.warning(f"🔄 Falling back to Helvetica for centered text: {processed_text[:30]}...")
+            
+            # Fallback to Helvetica
+            try:
+                c.setFont('Helvetica', font_size)
+                c.setFillColor(color)
+                c.drawCentredString(x, y, processed_text)
+                logger.warning("⚠️ Used Helvetica fallback for centered text (Hebrew will show as squares)")
+            except Exception as fallback_e:
+                logger.error(f"❌ Even Helvetica fallback failed for centered text: {fallback_e}")
+
     # --- Colors ---
     green_bg = colors.HexColor("#e6f9f0")
     green_accent = colors.HexColor("#22c55e")
@@ -331,6 +568,7 @@ def generate_menu_pdf():
     border_color = colors.HexColor("#d1fae5")
 
     def draw_logo(y):
+        import os  # Import os within the function to ensure availability
         logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../public/logo-placeholder.png'))
         if os.path.exists(logo_path):
             try:
@@ -344,26 +582,16 @@ def generate_menu_pdf():
         c.setStrokeColor(border_color)
         c.setLineWidth(1)
         c.line(margin, margin+20, width-margin, margin+20)
-        c.setFont("Helvetica", 10)
-        c.setFillColor(colors.grey)
-        c.drawCentredString(width/2, margin+8, "© BetterChoice 2025")
+        draw_centered_text(width/2, margin+8, "© BetterChoice 2025", size=10, color=colors.grey)
 
     def draw_title(y):
-        c.setFont("Helvetica-Bold", 24)
-        c.setFillColor(green_accent)
-        c.drawCentredString(width/2, y, "BetterChoice - Meal Plan")
+        draw_centered_text(width/2, y, "BetterChoice - Meal Plan", size=24, bold=True, color=green_accent)
         y -= 30
-        c.setFont("Helvetica", 14)
-        c.setFillColor(colors.black)
-        c.drawCentredString(width/2, y, "Personalized Nutrition Menu")
+        draw_centered_text(width/2, y, "Personalized Nutrition Menu", size=14, color=colors.black)
         y -= 18
-        c.setFont("Helvetica-Bold", 12)
-        c.setFillColor(green_accent)
-        c.drawCentredString(width/2, y, f"Client: {client_name}")
+        draw_centered_text(width/2, y, f"Client: {client_name}", size=12, bold=True, color=green_accent)
         y -= 14
-        c.setFont("Helvetica", 11)
-        c.setFillColor(colors.grey)
-        c.drawCentredString(width/2, y, f"Date: {today_str}")
+        draw_centered_text(width/2, y, f"Date: {today_str}", size=11, color=colors.grey)
         y -= 12
         c.setStrokeColor(border_color)
         c.setLineWidth(2)
@@ -390,25 +618,18 @@ def generate_menu_pdf():
         c.roundRect((width-card_width)/2, y-70, card_width, 70, 15, fill=0, stroke=1)
         
         # Title with smaller, more elegant font
-        c.setFont("Helvetica-Bold", 12)
-        c.setFillColor(green_accent)
-        c.drawString((width-card_width)/2+card_padding, y-22, "Daily Nutritional Summary")
+        draw_text((width-card_width)/2+card_padding, y-22, "Daily Nutritional Summary", size=12, bold=True, color=green_accent)
         
         # Macro values with smaller, cleaner fonts
-        c.setFont("Helvetica-Bold", 11)
         x0 = (width-card_width)/2+card_padding
         
         # Calories
-        c.setFillColor(green_accent)
-        c.drawString(x0, y-42, f"{totals.get('calories', 0)} kcal")
+        draw_text(x0, y-42, f"{totals.get('calories', 0)} kcal", size=11, bold=True, color=green_accent)
         
         # Macros with better spacing
-        c.setFillColor(orange_accent)
-        c.drawString(x0+110, y-42, f"Carbs: {totals.get('carbs', 0)}g")
-        c.setFillColor(yellow_accent)
-        c.drawString(x0+220, y-42, f"Fat: {totals.get('fat', 0)}g")
-        c.setFillColor(blue_accent)
-        c.drawString(x0+310, y-42, f"Protein: {totals.get('protein', 0)}g")
+        draw_text(x0+110, y-42, f"Carbs: {totals.get('carbs', 0)}g", size=11, bold=True, color=orange_accent)
+        draw_text(x0+220, y-42, f"Fat: {totals.get('fat', 0)}g", size=11, bold=True, color=yellow_accent)
+        draw_text(x0+310, y-42, f"Protein: {totals.get('protein', 0)}g", size=11, bold=True, color=blue_accent)
         
         # Add a subtle separator line
         c.setStrokeColor(colors.HexColor("#d1fae5"))
@@ -507,11 +728,9 @@ def generate_menu_pdf():
             c.roundRect(frame_x, y-meal_header_height, card_width, meal_header_height, 8, fill=0, stroke=1)
             
             # Meal name with better typography
-            c.setFont("Helvetica-Bold", 16)
-            c.setFillColor(colors.HexColor("#1f2937"))  # Dark gray
             # Center the text vertically in the frame
             text_y = y - meal_header_height/2 - 3
-            c.drawString(frame_x + 20, text_y, meal_name)
+            draw_text(frame_x + 20, text_y, meal_name, size=16, bold=True, color=colors.HexColor("#1f2937"))
             
             # Add a small decorative dot
             c.setFillColor(green_accent)
@@ -535,14 +754,10 @@ def generate_menu_pdf():
             y_main_title = y-25
             main_title = main.get('meal_title')
             if main_title:
-                c.setFont("Helvetica-Bold", 11)
-                c.setFillColor(colors.HexColor("#059669"))  # Darker green
-                c.drawString(card_x+card_padding, y_main_title, f"{main_title} - Main Option")
+                draw_text(card_x+card_padding, y_main_title, f"{main_title} - Main Option", size=11, bold=True, color=colors.HexColor("#059669"))
                 y_content = y_main_title - 20
             else:
-                c.setFont("Helvetica-Bold", 11)
-                c.setFillColor(colors.HexColor("#059669"))
-                c.drawString(card_x+card_padding, y_main_title, "Main Option")
+                draw_text(card_x+card_padding, y_main_title, "Main Option", size=11, bold=True, color=colors.HexColor("#059669"))
                 y_content = y_main_title - 20
             
             # Macros on the right side, stacked vertically
@@ -550,28 +765,19 @@ def generate_menu_pdf():
             macro_x = card_x + card_width - 130  # Right side positioning
             macro_start_y = y-30
             
-            c.setFont("Helvetica-Bold", 11)
             # Calories
-            c.setFillColor(green_accent)
-            c.drawString(macro_x, macro_start_y, f"{main_nut.get('calories', 0)} kcal")
+            draw_text(macro_x, macro_start_y, f"{main_nut.get('calories', 0)} kcal", size=11, bold=True, color=green_accent)
             # Protein
-            c.setFillColor(blue_accent)
-            c.drawString(macro_x, macro_start_y - 15, f"Protein: {main_nut.get('protein', 0)}g")
+            draw_text(macro_x, macro_start_y - 15, f"Protein: {main_nut.get('protein', 0)}g", size=11, bold=True, color=blue_accent)
             # Carbs
-            c.setFillColor(orange_accent)
-            c.drawString(macro_x, macro_start_y - 30, f"Carbs: {main_nut.get('carbs', 0)}g")
+            draw_text(macro_x, macro_start_y - 30, f"Carbs: {main_nut.get('carbs', 0)}g", size=11, bold=True, color=orange_accent)
             # Fat
-            c.setFillColor(yellow_accent)
-            c.drawString(macro_x, macro_start_y - 45, f"Fat: {main_nut.get('fat', 0)}g")
+            draw_text(macro_x, macro_start_y - 45, f"Fat: {main_nut.get('fat', 0)}g", size=11, bold=True, color=yellow_accent)
             # Ingredients section with better formatting (left side, constrained width)
             if main_ings:
                 ingredients_y_start = y_content
-                c.setFont("Helvetica-Bold", 10)
-                c.setFillColor(colors.HexColor("#374151"))  # Dark gray
-                c.drawString(card_x+card_padding, ingredients_y_start, "Ingredients:")
+                draw_text(card_x+card_padding, ingredients_y_start, "Ingredients:", size=10, bold=True, color=colors.HexColor("#374151"))
                 
-                c.setFont("Helvetica", 9)
-                c.setFillColor(colors.HexColor("#4b5563"))  # Medium gray
                 ing_y = ingredients_y_start - 15
                 max_text_width = macro_x - card_x - card_padding - 30  # Leave space for macros
                 
@@ -615,12 +821,12 @@ def generate_menu_pdf():
                         
                         # Draw each line
                         for line_idx, line in enumerate(lines):
-                            c.drawString(card_x+card_padding+12, ing_y - (line_idx * line_height), line)
+                            draw_text(card_x+card_padding+12, ing_y - (line_idx * line_height), line, size=9, color=colors.HexColor("#4b5563"))
                         
                         # Adjust y position for multiple lines
                         ing_y -= (len(lines) - 1) * line_height
                     else:
-                        c.drawString(card_x+card_padding+12, ing_y, ingredient_text)
+                        draw_text(card_x+card_padding+12, ing_y, ingredient_text, size=9, color=colors.HexColor("#4b5563"))
                     ing_y -= line_height
             y -= main_card_height + 18
             # Alternative Option Card with consistent design
@@ -639,14 +845,10 @@ def generate_menu_pdf():
             y_alt_title = y-25
             alt_title = alt_opt.get('meal_title')
             if alt_title:
-                c.setFont("Helvetica-Bold", 11)
-                c.setFillColor(colors.HexColor("#0369a1"))  # Darker blue
-                c.drawString(card_x+card_padding, y_alt_title, f"{alt_title} - Alternative 1")
+                draw_text(card_x+card_padding, y_alt_title, f"{alt_title} - Alternative 1", size=11, bold=True, color=colors.HexColor("#0369a1"))
                 y_alt_content = y_alt_title - 20
             else:
-                c.setFont("Helvetica-Bold", 11)
-                c.setFillColor(colors.HexColor("#0369a1"))
-                c.drawString(card_x+card_padding, y_alt_title, "Alternative 1")
+                draw_text(card_x+card_padding, y_alt_title, "Alternative 1", size=11, bold=True, color=colors.HexColor("#0369a1"))
                 y_alt_content = y_alt_title - 20
             
             # Macros on the right side, stacked vertically
@@ -654,28 +856,19 @@ def generate_menu_pdf():
             alt_macro_x = card_x + card_width - 130
             alt_macro_start_y = y-30
             
-            c.setFont("Helvetica-Bold", 11)
             # Calories
-            c.setFillColor(green_accent)
-            c.drawString(alt_macro_x, alt_macro_start_y, f"{alt_nut.get('calories', 0)} kcal")
+            draw_text(alt_macro_x, alt_macro_start_y, f"{alt_nut.get('calories', 0)} kcal", size=11, bold=True, color=green_accent)
             # Protein
-            c.setFillColor(blue_accent)
-            c.drawString(alt_macro_x, alt_macro_start_y - 15, f"Protein: {alt_nut.get('protein', 0)}g")
+            draw_text(alt_macro_x, alt_macro_start_y - 15, f"Protein: {alt_nut.get('protein', 0)}g", size=11, bold=True, color=blue_accent)
             # Carbs
-            c.setFillColor(orange_accent)
-            c.drawString(alt_macro_x, alt_macro_start_y - 30, f"Carbs: {alt_nut.get('carbs', 0)}g")
+            draw_text(alt_macro_x, alt_macro_start_y - 30, f"Carbs: {alt_nut.get('carbs', 0)}g", size=11, bold=True, color=orange_accent)
             # Fat
-            c.setFillColor(yellow_accent)
-            c.drawString(alt_macro_x, alt_macro_start_y - 45, f"Fat: {alt_nut.get('fat', 0)}g")
+            draw_text(alt_macro_x, alt_macro_start_y - 45, f"Fat: {alt_nut.get('fat', 0)}g", size=11, bold=True, color=yellow_accent)
             # Alternative ingredients section with better formatting
             if alt_ings:
                 alt_ingredients_y_start = y_alt_content
-                c.setFont("Helvetica-Bold", 10)
-                c.setFillColor(colors.HexColor("#374151"))  # Dark gray
-                c.drawString(card_x+card_padding, alt_ingredients_y_start, "Ingredients:")
+                draw_text(card_x+card_padding, alt_ingredients_y_start, "Ingredients:", size=10, bold=True, color=colors.HexColor("#374151"))
                 
-                c.setFont("Helvetica", 9)
-                c.setFillColor(colors.HexColor("#4b5563"))  # Medium gray
                 ing_y = alt_ingredients_y_start - 15
                 
                 for ing in alt_ings:
@@ -718,12 +911,12 @@ def generate_menu_pdf():
                         
                         # Draw each line
                         for line_idx, line in enumerate(lines):
-                            c.drawString(card_x+card_padding+12, ing_y - (line_idx * line_height), line)
+                            draw_text(card_x+card_padding+12, ing_y - (line_idx * line_height), line, size=9, color=colors.HexColor("#4b5563"))
                         
                         # Adjust y position for multiple lines
                         ing_y -= (len(lines) - 1) * line_height
                     else:
-                        c.drawString(card_x+card_padding+12, ing_y, ingredient_text)
+                        draw_text(card_x+card_padding+12, ing_y, ingredient_text, size=9, color=colors.HexColor("#4b5563"))
                     ing_y -= line_height
             y -= alt_card_height + 24
             # Render all other alternatives with improved styling
@@ -736,9 +929,7 @@ def generate_menu_pdf():
                 c.setLineWidth(1.5)
                 c.roundRect(frame_x, y-section_height, card_width, section_height, 10, fill=0, stroke=1)
                 
-                c.setFont("Helvetica-Bold", 15)
-                c.setFillColor(blue_accent)
-                c.drawString(frame_x + 20, y-20, "Additional Alternatives")
+                draw_text(frame_x + 20, y-20, "Additional Alternatives", size=15, bold=True, color=blue_accent)
                 y -= section_height + 15
                 
                 for alt_idx, alt in enumerate(other_alts):
@@ -758,14 +949,10 @@ def generate_menu_pdf():
                     y_add_alt_title = y-25
                     alt_title = alt.get('meal_title')
                     if alt_title:
-                        c.setFont("Helvetica-Bold", 11)
-                        c.setFillColor(colors.HexColor("#0369a1"))
-                        c.drawString(card_x+card_padding, y_add_alt_title, f"{alt_title} - Alternative {alt_idx+2}")
+                        draw_text(card_x+card_padding, y_add_alt_title, f"{alt_title} - Alternative {alt_idx+2}", size=11, bold=True, color=colors.HexColor("#0369a1"))
                         y_add_alt_content = y_add_alt_title - 20
                     else:
-                        c.setFont("Helvetica-Bold", 11)
-                        c.setFillColor(colors.HexColor("#0369a1"))
-                        c.drawString(card_x+card_padding, y_add_alt_title, f"Alternative {alt_idx+2}")
+                        draw_text(card_x+card_padding, y_add_alt_title, f"Alternative {alt_idx+2}", size=11, bold=True, color=colors.HexColor("#0369a1"))
                         y_add_alt_content = y_add_alt_title - 20
                     
                     # Macros on the right side, stacked vertically
@@ -773,28 +960,19 @@ def generate_menu_pdf():
                     add_alt_macro_x = card_x + card_width - 130
                     add_alt_macro_start_y = y-30
                     
-                    c.setFont("Helvetica-Bold", 11)
                     # Calories
-                    c.setFillColor(green_accent)
-                    c.drawString(add_alt_macro_x, add_alt_macro_start_y, f"{alt_nut.get('calories', 0)} kcal")
+                    draw_text(add_alt_macro_x, add_alt_macro_start_y, f"{alt_nut.get('calories', 0)} kcal", size=11, bold=True, color=green_accent)
                     # Protein
-                    c.setFillColor(blue_accent)
-                    c.drawString(add_alt_macro_x, add_alt_macro_start_y - 15, f"Protein: {alt_nut.get('protein', 0)}g")
+                    draw_text(add_alt_macro_x, add_alt_macro_start_y - 15, f"Protein: {alt_nut.get('protein', 0)}g", size=11, bold=True, color=blue_accent)
                     # Carbs
-                    c.setFillColor(orange_accent)
-                    c.drawString(add_alt_macro_x, add_alt_macro_start_y - 30, f"Carbs: {alt_nut.get('carbs', 0)}g")
+                    draw_text(add_alt_macro_x, add_alt_macro_start_y - 30, f"Carbs: {alt_nut.get('carbs', 0)}g", size=11, bold=True, color=orange_accent)
                     # Fat
-                    c.setFillColor(yellow_accent)
-                    c.drawString(add_alt_macro_x, add_alt_macro_start_y - 45, f"Fat: {alt_nut.get('fat', 0)}g")
+                    draw_text(add_alt_macro_x, add_alt_macro_start_y - 45, f"Fat: {alt_nut.get('fat', 0)}g", size=11, bold=True, color=yellow_accent)
                     # Additional alternative ingredients with better formatting
                     if alt_ings:
                         additional_ingredients_y_start = y_add_alt_content
-                        c.setFont("Helvetica-Bold", 10)
-                        c.setFillColor(colors.HexColor("#374151"))  # Dark gray
-                        c.drawString(card_x+card_padding, additional_ingredients_y_start, "Ingredients:")
+                        draw_text(card_x+card_padding, additional_ingredients_y_start, "Ingredients:", size=10, bold=True, color=colors.HexColor("#374151"))
                         
-                        c.setFont("Helvetica", 9)
-                        c.setFillColor(colors.HexColor("#4b5563"))  # Medium gray
                         ing_y = additional_ingredients_y_start - 15
                         for ing in alt_ings:
                             # Add bullet point
@@ -836,12 +1014,12 @@ def generate_menu_pdf():
                                 
                                 # Draw each line
                                 for line_idx, line in enumerate(lines):
-                                    c.drawString(card_x+card_padding+12, ing_y - (line_idx * line_height), line)
+                                    draw_text(card_x+card_padding+12, ing_y - (line_idx * line_height), line, size=9, color=colors.HexColor("#4b5563"))
                                 
                                 # Adjust y position for multiple lines
                                 ing_y -= (len(lines) - 1) * line_height
                             else:
-                                c.drawString(card_x+card_padding+12, ing_y, ingredient_text)
+                                draw_text(card_x+card_padding+12, ing_y, ingredient_text, size=9, color=colors.HexColor("#4b5563"))
                             ing_y -= line_height
                     y -= alt_card_height + 18
             # --- End of meal box ---
@@ -871,7 +1049,7 @@ def load_user_preferences(user_code=None):
         logger.info(f"Supabase Key exists: {bool(supabase_key)}")
         
         # Define the specific fields we need to reduce data transfer
-        selected_fields = 'user_code,food_allergies,dailyTotalCalories,recommendations,food_limitations,goal,number_of_meals,client_preference,macros'
+        selected_fields = 'user_code,food_allergies,dailyTotalCalories,recommendations,food_limitations,goal,number_of_meals,client_preference,macros,region'
         
         if user_code:
             # Fetch specific user by user_code
@@ -901,7 +1079,8 @@ def load_user_preferences(user_code=None):
                     "limitations": [],
                     "diet_type": "personalized",
                     "meal_count": 5,
-                    "client_preference": {}
+                    "client_preference": {},
+                    "region": "israel"  # Default region
                 }
 
         # Debug: Log the raw user data
@@ -966,7 +1145,8 @@ def load_user_preferences(user_code=None):
             "limitations": limitations,
             "diet_type": "personalized",
             "meal_count": meal_count,
-            "client_preference": client_preference
+            "client_preference": client_preference,
+            "region": user_data.get("region", "israel")  # Default to israel if not specified
         }
 
         logger.info(f"✅ Loaded user preferences for user_code: {user_data.get('user_code')}")
@@ -1004,8 +1184,21 @@ def require_api_key(f):
 
 def generate_menu_with_azure(user_preferences):
     try:
+        region = user_preferences.get('region', 'israel').lower()
+        
+        # Region-specific ingredient instructions
+        region_instructions = {
+            'israel': "Use Israeli products and brands (e.g., Tnuva, Osem, Strauss, Elite, Telma, Bamba, Bissli). Include local Israeli foods like hummus, falafel, tahini, pita bread, sabich, shakshuka when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 150g-200g containers, hummus in 400g containers, pita bread is typically 60-80g per piece, Israeli cheese slices are 20-25g each, Bamba comes in 80g bags, Bissli in 100g bags. Use realistic Israeli portion sizes.",
+            'us': "Use American products and brands (e.g., Kraft, General Mills, Kellogg's, Pepsi, Coca-Cola, Walmart Great Value). Include typical American foods like bagels, cereals, sandwiches, burgers when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 16oz (454g) containers, yogurt in 6-8oz (170-227g) containers, cream cheese in 8oz (227g) packages, American cheese slices are 21g each, bagels are 95-105g each.",
+            'uk': "Use British products and brands (e.g., Tesco, Sainsbury's, ASDA, Heinz UK, Cadbury, McVitie's). Include typical British foods like beans on toast, tea, fish and chips elements when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 300g containers, yogurt in 150-170g pots, British cheese slices are 25g each, bread slices are 35-40g each.",
+            'canada': "Use Canadian products and brands (e.g., Loblaws, Metro, Sobeys, President's Choice, No Name). Include typical Canadian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 500g containers, yogurt in 175g containers, Canadian cheese slices are 22g each.",
+            'australia': "Use Australian products and brands (e.g., Woolworths, Coles, Arnott's, Vegemite). Include typical Australian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 170g tubs, Australian cheese slices are 25g each."
+        }
+        
+        region_instruction = region_instructions.get(region, region_instructions['israel'])
+        
         system_prompt = (
-    "You are a professional dietitian AI. Generate a 1-day meal plan with  meals: Breakfast, Morning Snack, Lunch, Afternoon Snack, Dinner.\n\n"
+    f"You are a professional dietitian AI. Generate a 1-day meal plan with meals: Breakfast, Morning Snack, Lunch, Afternoon Snack, Dinner.\n\n"
     "Requirements:\n"
     "- Total daily calories must be within ±5% of the user's target.\n"
     "- Total protein, fat, and carbs must each be within ±5% of target.\n"
@@ -1016,6 +1209,11 @@ def generate_menu_with_azure(user_preferences):
     "       - `item`, `quantity`, `unit`, AND:\n"
     "       - `calories`, `protein`, `fat`, and `carbs` — specific to that ingredient.\n"
     "   - `nutrition`: total for the meal, automatically calculated by summing the ingredients' values.\n"
+    f"REGION-SPECIFIC REQUIREMENTS: {region_instruction}\n"
+    "PREFERENCE LOGIC:\n"
+    "- If user 'likes' or 'loves' any food (pasta, chicken, etc.), include it in EXACTLY ONE MEAL ONLY, never more.\n"
+    "- Prioritize VARIETY over preferences. Each meal should have different main ingredients.\n"
+    "- Never repeat the same main ingredient/protein across multiple meals.\n"
     "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences.\n"
     "If user has 'kosher' limitation, you MUST follow kosher dietary laws:\n"
     "- NEVER mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) in the same meal\n"
@@ -1027,6 +1225,7 @@ def generate_menu_with_azure(user_preferences):
     "- `meal_plan`: 5 meals with full details.\n"
     "- `totals`: {calories, protein, fat, carbs} — summed across the day.\n"
     "- `note`: general advice or note to the user.\n"
+    "- `recommendations`: include any dietary recommendations based on the user's profile.\n"
 )
 
 
@@ -1080,6 +1279,55 @@ def get_generated_menu():
         print("user_preferences:\n", user_preferences)
         result = generate_menu_with_azure(user_preferences)
         print("Azure response:\n", result)  # 👈 for debugging
+        
+        # Try to parse and clean the result if it's a JSON string containing menu data
+        try:
+            parsed_result = json.loads(result) if isinstance(result, str) else result
+            if isinstance(parsed_result, dict) and any(key in parsed_result for key in ["meals", "menu", "meal_plan"]):
+                cleaned_result = clean_ingredient_names(parsed_result)
+                
+                # Add recommendations from Supabase if user_code is provided
+                if user_code:
+                    try:
+                        # Fetch recommendations from Supabase
+                        response = supabase.table('chat_users').select('recommendations').eq('user_code', user_code).execute()
+                        if response.data:
+                            user_data = response.data[0]
+                            supabase_recommendations = user_data.get('recommendations', {})
+                            
+                            # Handle different recommendation formats
+                            if isinstance(supabase_recommendations, str):
+                                try:
+                                    supabase_recommendations = json.loads(supabase_recommendations)
+                                except:
+                                    supabase_recommendations = {"general": supabase_recommendations}
+                            
+                            # Merge with AI-generated recommendations
+                            if 'recommendations' not in cleaned_result:
+                                cleaned_result['recommendations'] = {}
+                            
+                            # Convert to array format if needed
+                            if isinstance(supabase_recommendations, dict):
+                                recommendations_array = []
+                                for key, value in supabase_recommendations.items():
+                                    if value:  # Only add non-empty recommendations
+                                        recommendations_array.append({
+                                            "recommendation_key": key,
+                                            "recommendation_value": value
+                                        })
+                                cleaned_result['recommendations'] = recommendations_array
+                            else:
+                                cleaned_result['recommendations'] = supabase_recommendations
+                            
+                            logger.info(f"✅ Added Supabase recommendations to menu: {cleaned_result['recommendations']}")
+                    except Exception as rec_error:
+                        logger.warning(f"Failed to fetch recommendations from Supabase: {rec_error}")
+                
+                return jsonify({"generated_menu": json.dumps(cleaned_result) if isinstance(result, str) else cleaned_result})
+        except:
+            # If parsing fails, return original result
+            pass
+            
         return jsonify({"generated_menu": result})
     except Exception as e:
         logger.error(f"Error in /api/menu endpoint: {str(e)}")
@@ -1094,93 +1342,195 @@ def api_template():
         preferences = load_user_preferences(user_code)
         logger.info("🔹 Received user preferences for template:\n%s", json.dumps(preferences, indent=2))
 
-        system_prompt = """
+        region = preferences.get('region', 'israel').lower()
+        
+        # Region-specific ingredient instructions
+        region_instructions = {
+            'israel': "Focus on Israeli cuisine and products. Use Israeli brands (Tnuva, Osem, Strauss, Elite, Telma) and local foods (hummus, falafel, tahini, pita, sabich, shakshuka, jachnun). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 150g-200g containers, hummus in 400g containers, pita bread is typically 60-80g per piece, Israeli cheese slices are 20-25g each, Bamba comes in 80g bags, Bissli in 100g bags. Use realistic Israeli portion sizes.",
+            'us': "Focus on American cuisine and products. Use American brands (Kraft, General Mills, Kellogg's, Pepsi) and typical American foods (bagels, cereals, sandwiches, burgers, mac and cheese). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 16oz (454g) containers, yogurt in 6-8oz (170-227g) containers, cream cheese in 8oz (227g) packages, American cheese slices are 21g each, bagels are 95-105g each.",
+            'uk': "Focus on British cuisine and products. Use British brands (Tesco, Sainsbury's, Heinz UK, Cadbury) and typical British foods (beans on toast, fish and chips, bangers and mash). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 300g containers, yogurt in 150-170g pots, British cheese slices are 25g each, bread slices are 35-40g each.",
+            'canada': "Focus on Canadian cuisine and products. Use Canadian brands (Loblaws, President's Choice, Tim Hortons) and typical Canadian foods (maple syrup dishes, poutine elements). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 500g containers, yogurt in 175g containers, Canadian cheese slices are 22g each.",
+            'australia': "Focus on Australian cuisine and products. Use Australian brands (Woolworths, Coles, Arnott's, Vegemite) and typical Australian foods. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 170g tubs, Australian cheese slices are 25g each."
+        }
+        
+        region_instruction = region_instructions.get(region, region_instructions['israel'])
+
+        system_prompt = f"""
 You are a professional dietitian AI specializing in personalized, practical meal planning.
-Your mission: generate a realistic meal template that a real person can cook and enjoy, while strictly hitting their daily calorie & macro targets, honoring every user’s unique preferences, allergies, and dietary rules.
+Your mission: generate a realistic meal template that a real person can cook and enjoy, while strictly hitting their daily calorie & macro targets and honoring every user's unique preferences, allergies, and dietary rules.
 
-INPUTS:
-- daily_calories (kcal)
-- daily_protein (g)
-- daily_fat (g)
-- daily_carbs (g)
-- number_of_meals (integer)
-- dietary_restrictions (e.g., kosher, vegetarian, gluten-free)
-- food_allergies (list of foods/ingredients to avoid)
-- client_preferences (free-form list, e.g. “loves pasta”, “hates mushrooms”, “prefers spicy”)
+CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fat)
 
-FOR EACH MEAL:
-• Output a “main” and an “alternative.”  
-• Each must include exactly:
-  – name (string)
-  – calories (integer)
-  – protein (integer, g)
-  – fat (integer, g)
-  – carbs (integer, g)
-  – main_protein_source (string)
+────────────────────────────────────────  REGION-SPECIFIC REQUIREMENTS  ───────────────────────────────────────
+{region_instruction}
 
-PREFERENCE LOGIC:
-1. **Exclusions:** Exclude any ingredient/dish matching food_allergies or “dislikes…” in client_preferences.
-2. **Inclusions:** Aim to feature each “likes…” item at least once, if macros & restrictions allow.
-3. **Neutral items:** Neither forced nor forbidden.
-4. **Balance likes:** Don’t overuse one liked item—distribute favorites evenly.
+────────────────────────────────────────────  MEAL STRUCTURE  ────────────────────────────────────────────────
+• The user can request 3–5 meals.  
+• **When number_of_meals = 5 you MUST use these exact names, in this exact order**  
+  1 Breakfast 2 Morning Snack 3 Lunch 4 Afternoon Snack 5 Dinner  
+• Never omit, rename, reorder, or merge a meal.  
+• If number_of_meals < 5, remove from the **end** of the list (Dinner is dropped last).
 
-MACRO DISTRIBUTION & VALIDATION (loop until all pass):
-1. Compute per-meal averages:
-   per_cal   = daily_calories ÷ number_of_meals
-   per_pro   = daily_protein   ÷ number_of_meals
-   per_fat   = daily_fat       ÷ number_of_meals
-   per_carbs = daily_carbs     ÷ number_of_meals
-2. **Meal check:** For each meal & macro,
-   - If < per_avg × 0.70 OR > per_avg × 1.30 → adjust portions or swap ingredients.
-   - Ensure no meal > 45% of any daily macro.
-3. **Alternative match:** 
-   - Main vs alternative within ±15% calories & protein, ±25% fat & carbs.
-   - Prioritize protein match, then tweak fat/carbs.
-4. **Daily totals:** Sum all meals → must be within ±5% of each daily target.
-   - If out of range → rebalance meals (lean ⇄ higher-fat) and re-run checks.
+─────────────────────────────────────────────  DINNER RULES  ────────────────────────────────────────────────
+1. **Mandatory** – Dinner must appear if number_of_meals ≥ 5.  
+2. **Macro share** – Dinner supplies **25–35 %** of daily calories *and* of each macro (protein, fat, carbs).  
+3. **Protein** – Serve a cooked, whole-food protein (e.g., chicken breast, grilled fish, baked tofu, lentils) — never a snack bar.  
+4. **Vegetables** – Include ≥ 1 cooked vegetable or salad component.  
+5. **No snacks** – Exclude convenience items like Bissli, Bamba, or candy at Dinner.  
+6. **Portions** – Use realistic region-specific serving sizes (see portion guidelines above).  
+7. **Alt matching** – Alternative Dinner must honour the same macro window and rules.
 
-FEASIBILITY CONSTRAINTS:
-- ≤7 common ingredients per dish.
-- Only standard cooking methods (grill, bake, steam, sauté).
-- No specialty powders unless explicitly allowed.
+────────────────────────────────────────────  INPUTS  ────────────────────────────────────────────────────────
+- daily_calories (kcal)  
+- daily_protein (g)  
+- daily_fat (g)  
+- daily_carbs (g)  
+- number_of_meals (integer 3–5)  
+- dietary_restrictions (e.g., kosher, vegetarian, gluten-free)  
+- food_allergies (list of ingredients to avoid)  
+- client_preferences (free-form list, e.g. "loves pasta", "hates mushrooms")  
+- region (string)
 
-VARIETY & TASTINESS:
-- Use at least three different main_protein_sources across the day.
-- Include two distinct global flavor profiles (e.g., Mediterranean, Asian, Mexican) unless user specifies otherwise.
+────────────────────────────────────────────  PREFERENCE LOGIC  ──────────────────────────────────────────────
+1. **Exclusions:** Omit any ingredient/dish matching food_allergies or "dislikes…" in client_preferences.  
+2. **Inclusions:** Feature each "likes/loves…" item in **exactly one** meal only.  
+3. **Neutral items:** Neither forced nor forbidden.  
+4. **Variety first:** Never repeat the same main ingredient across meals.
 
-RESPONSE FORMAT:
-Respond **only** with valid JSON, exactly like this:
+────────────────────────────────────────  MACRO DISTRIBUTION & VALIDATION  ───────────────────────────────────
+1. Compute per-meal averages:  
+   per_cal  = daily_calories ÷ number_of_meals  
+   per_pro  = daily_protein  ÷ number_of_meals  
+   per_fat  = daily_fat      ÷ number_of_meals  
+   per_carb = daily_carbs    ÷ number_of_meals  
+2. **Meal check:** Each meal must be within **70–130 %** of its per-meal averages **AND** Dinner must also satisfy its 25–35 % rule.  
+3. **Alternative match:** Main vs alternative within **±20 % calories & protein, ±30 % fat & carbs**.  
+4. **Daily totals:** Sum of all meals must be within **±5 %** of every daily target; otherwise rebalance and retry.
 
-{
+────────────────────────────────────────────  FEASIBILITY  ──────────────────────────────────────────────────
+• ≤ 7 common ingredients per dish.  
+• Only standard cooking methods (grill, bake, steam, sauté).  
+• No specialty powders unless explicitly allowed.
+
+───────────────────────────────────────────  VARIETY & TASTINESS  ──────────────────────────────────────────
+• Use at least three different main_protein_sources across the day.  
+• Breakfast, Lunch, and Dinner must each have distinct proteins.  
+• Include two distinct global flavor profiles (e.g., Mediterranean, Asian, Mexican) unless user specifies otherwise.
+
+────────────────────────────────────────────  RESPONSE FORMAT  ─────────────────────────────────────────────
+Respond **only** with valid JSON in this exact shape.  
+If any meal is missing or fails a rule, silently self-correct and regenerate before sending.
+
+{{
   "template": [
-    {
+    {{
       "meal": "Breakfast",
-      "main": {
-        "name": "...",
-        "calories": 0,
-        "protein": 0,
-        "fat": 0,
-        "carbs": 0,
-        "main_protein_source": "..."
-      },
-      "alternative": {
-        "name": "...",
-        "calories": 0,
-        "protein": 0,
-        "fat": 0,
-        "carbs": 0,
-        "main_protein_source": "..."
-      }
-    },
-    … repeat for each meal …
+      "main": {{
+        "name": "Scrambled Eggs with Toast",
+        "calories": 400,
+        "protein": 25,
+        "fat": 15,
+        "carbs": 45,
+        "main_protein_source": "eggs"
+      }},
+      "alternative": {{
+        "name": "Greek Yogurt with Berries",
+        "calories": 380,
+        "protein": 22,
+        "fat": 18,
+        "carbs": 42,
+        "main_protein_source": "yogurt"
+      }}
+    }}
   ]
-}
+}}
 """
 
+#   system_prompt = f"""
+# You are a professional dietitian AI specializing in personalized, practical meal planning.
+# Your mission: generate a realistic meal template that a real person can cook and enjoy, while strictly hitting their daily calorie & macro targets, honoring every user's unique preferences, allergies, and dietary rules.
 
+# REGION-SPECIFIC REQUIREMENTS: {region_instruction}
 
+# INPUTS:
+# - daily_calories (kcal)
+# - daily_protein (g)
+# - daily_fat (g)
+# - daily_carbs (g)
+# - number_of_meals (integer)
+# - dietary_restrictions (e.g., kosher, vegetarian, gluten-free)
+# - food_allergies (list of foods/ingredients to avoid)
+# - client_preferences (free-form list, e.g. "loves pasta", "hates mushrooms", "prefers spicy")
+# - region (string, determines which products and cuisine style to use)
 
+# FOR EACH MEAL:
+# • Output a "main" and an "alternative."  
+# • Each must include exactly:
+#   – name (string)
+#   – calories (integer)
+#   – protein (integer, g)
+#   – fat (integer, g)
+#   – carbs (integer, g)
+#   – main_protein_source (string)
 
+# PREFERENCE LOGIC:
+# 1. **Exclusions:** Exclude any ingredient/dish matching food_allergies or "dislikes…" in client_preferences.
+# 2. **Inclusions:** Feature each "likes/loves…" item in EXACTLY ONE MEAL ONLY, never more. If user loves pasta, include it in only 1 meal maximum.
+# 3. **Neutral items:** Neither forced nor forbidden.
+# 4. **Variety First:** Prioritize diverse ingredients and meal types. Never repeat the same main ingredient across multiple meals, even if user likes it.
+
+# MACRO DISTRIBUTION & VALIDATION (loop until all pass):
+# 1. Compute per-meal averages:
+#    per_cal   = daily_calories ÷ number_of_meals
+#    per_pro   = daily_protein   ÷ number_of_meals
+#    per_fat   = daily_fat       ÷ number_of_meals
+#    per_carbs = daily_carbs     ÷ number_of_meals
+# 2. **Meal check:** For each meal & macro,
+#    - If < per_avg × 0.70 OR > per_avg × 1.30 → adjust portions or swap ingredients.
+#    - Ensure no meal > 45% of any daily macro.
+# 3. **Alternative match:** 
+#    - Main vs alternative within ±15% calories & protein, ±25% fat & carbs.
+#    - Prioritize protein match, then tweak fat/carbs.
+# 4. **Daily totals:** Sum all meals → must be within ±5% of each daily target.
+#    - If out of range → rebalance meals (lean ⇄ higher-fat) and re-run checks.
+
+# FEASIBILITY CONSTRAINTS:
+# - ≤7 common ingredients per dish.
+# - Only standard cooking methods (grill, bake, steam, sauté).
+# - No specialty powders unless explicitly allowed.
+
+# VARIETY & TASTINESS:
+# - Use at least three different main_protein_sources across the day.
+# - Include two distinct global flavor profiles (e.g., Mediterranean, Asian, Mexican) unless user specifies otherwise.
+
+# RESPONSE FORMAT:
+# Respond **only** with valid JSON, exactly like this:
+
+# {{
+#   "template": [
+#     {{
+#       "meal": "Breakfast",
+#       "main": {{
+#         "name": "...",
+#         "calories": 0,
+#         "protein": 0,
+#         "fat": 0,
+#         "carbs": 0,
+#         "main_protein_source": "..."
+#       }},
+#       "alternative": {{
+#         "name": "...",
+#         "calories": 0,
+#         "protein": 0,
+#         "fat": 0,
+#         "carbs": 0,
+#         "main_protein_source": "..."
+#       }}
+#     }},
+#     … repeat for each meal …
+#   ]
+# }}
+# """
 
         user_prompt = {
             "role": "user",
@@ -1252,20 +1602,36 @@ def api_build_menu():
             main_protein_source = main_macros.get("main_protein_source")
             for attempt in range(6):
                 logger.info(f"🧠 Building MAIN for meal '{meal_name}', attempt {attempt + 1}")
+                # Get region-specific instructions
+                region = preferences.get('region', 'israel').lower()
+                region_instructions = {
+                    'israel': "Use Israeli products and brands (e.g., Tnuva, Osem, Strauss, Elite, Telma). Include local Israeli foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 150g-200g containers, hummus in 400g containers, pita bread is typically 60-80g per piece, Israeli cheese slices are 20-25g each, Bamba comes in 80g bags, Bissli in 100g bags. Use realistic Israeli portion sizes.",
+                    'us': "Use American products and brands (e.g., Kraft, General Mills, Kellogg's, Pepsi). Include typical American foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 16oz (454g) containers, yogurt in 6-8oz (170-227g) containers, cream cheese in 8oz (227g) packages, American cheese slices are 21g each, bagels are 95-105g each.",
+                    'uk': "Use British products and brands (e.g., Tesco, Sainsbury's, Heinz UK, Cadbury). Include typical British foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 300g containers, yogurt in 150-170g pots, British cheese slices are 25g each, bread slices are 35-40g each.",
+                    'canada': "Use Canadian products and brands (e.g., Loblaws, President's Choice, Tim Hortons). Include typical Canadian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 500g containers, yogurt in 175g containers, Canadian cheese slices are 22g each.",
+                    'australia': "Use Australian products and brands (e.g., Woolworths, Coles, Arnott's, Vegemite). Include typical Australian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 170g tubs, Australian cheese slices are 25g each."
+                }
+                region_instruction = region_instructions.get(region, region_instructions['israel'])
+                
                 main_prompt = (
                     "You are a professional dietitian AI. "
                     "Given a meal template for one meal and user preferences, build the **main option only** for this meal. "
                     "The meal you generate MUST have the EXACT name as provided in 'meal_name'. "
+                    f"REGION-SPECIFIC REQUIREMENTS: {region_instruction} "
+                    "PREFERENCE LOGIC: If user 'likes' or 'loves' any food, consider it but DON'T overuse it. "
+                    "Ensure variety across all meals - avoid repeating main ingredients multiple times. "
                     "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences. "
                     "If user has 'kosher' limitation, you MUST follow kosher dietary laws: "
                     "- NEVER mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) in the same meal "
                     "- Use only kosher-certified ingredients and brands "
                     "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
                     "Provide: `meal_name`, `meal_title`, `ingredients` (list of objects with keys "
-                    "`item`, ,`household_measure`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
+                    "`item`, `household_measure`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
                     "and `nutrition` (sum of ingredients). "
                     "IMPORTANT: For 'brand of pruduct', you MUST use real, specific brand names "
-                    "NEVER use 'Generic' or 'generic' as a brand name."
+                    "NEVER use 'Generic' or 'generic' as a brand name. "
+                    "CRITICAL: For 'household_measure', use realistic portion sizes that match the region's packaging standards. "
+                    "For Israeli products: cottage cheese 250g containers, yogurt 150-200g containers, hummus 400g containers, etc. "
                     "Macros must match the template within ±40%. Respond only with valid JSON."
                 )
                 main_content = {
@@ -1338,16 +1704,21 @@ def api_build_menu():
                     "You are a professional dietitian AI. "
                     "Given a meal template for one meal and user preferences, build the **alternative option only** for this meal. "
                     "The meal you generate MUST have the EXACT name as provided in 'meal_name'. "
+                    f"REGION-SPECIFIC REQUIREMENTS: {region_instruction} "
+                    "PREFERENCE LOGIC: If user 'likes' or 'loves' any food, consider it but DON'T overuse it. "
+                    "Ensure variety across all meals - avoid repeating main ingredients multiple times. "
                     "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences. "
                     "If user has 'kosher' limitation, you MUST follow kosher dietary laws: "
                     "- NEVER mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) in the same meal "
                     "- Use only kosher-certified ingredients and brands "
                     "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
                     "Provide: `meal_name`, `meal_title`, `ingredients` (list of objects with keys "
-                    "`item`, ,`household_measure`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
+                    "`item`, `household_measure`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
                     "and `nutrition` (sum of ingredients). "
                     "IMPORTANT: For 'brand of pruduct', you MUST use real, specific brand names "
-                    "NEVER use 'Generic' or 'generic' as a brand name."
+                    "NEVER use 'Generic' or 'generic' as a brand name. "
+                    "CRITICAL: For 'household_measure', use realistic portion sizes that match the region's packaging standards. "
+                    "For Israeli products: cottage cheese 250g containers, yogurt 150-200g containers, hummus 400g containers, etc. "
                     "Macros must match the template within ±40%. Respond only with valid JSON."
                 )
                 alt_content = {
@@ -1420,9 +1791,12 @@ def api_build_menu():
         logger.info("✅ Finished building full menu.")
         totals = calculate_totals(full_menu)
         
+        # Clean ingredient names before returning
+        cleaned_menu = clean_ingredient_names(full_menu)
+        
         # Return menu immediately without UPC codes
-        logger.info("Full menu built: %s", json.dumps({"menu": full_menu, "totals": totals}, ensure_ascii=False, indent=2))
-        return jsonify({"menu": full_menu, "totals": totals})
+        logger.info("Full menu built: %s", json.dumps({"menu": cleaned_menu, "totals": totals}, ensure_ascii=False, indent=2))
+        return jsonify({"menu": cleaned_menu, "totals": totals})
 
     except Exception as e:
         logger.error("❌ Exception in /api/build-menu:\n%s", traceback.format_exc())
@@ -1708,17 +2082,20 @@ def is_israeli_brand(brand):
     brand_lower = brand.lower().strip()
     return any(israeli_brand in brand_lower for israeli_brand in israeli_brands)
 
-def prepare_upc_lookup_params(brand, name):
+def prepare_upc_lookup_params(brand, name, region="israel"):
     """
-    Prepare parameters for UPC lookup based on whether the brand is Israeli or not.
+    Prepare parameters for UPC lookup based on the user's region.
     """
     if not brand and not name:
         return None, None, None
     
-    is_israeli = is_israeli_brand(brand)
+    # Normalize region to handle different variations
+    region_normalized = region.lower().strip() if region else "israel"
+    israeli_variations = ["israel", "il", "isr", "israeli"]
+    is_israeli = region_normalized in israeli_variations
     
     if is_israeli:
-        # For Israeli products: combine brand and name but avoid duplication
+        # For Israeli region: combine brand and name but avoid duplication
         brand_lower = brand.lower() if brand else ""
         name_lower = name.lower() if name else ""
         
@@ -1731,7 +2108,7 @@ def prepare_upc_lookup_params(brand, name):
         
         return "hebrew", {"query": query}, is_israeli
     else:
-        # For non-Israeli products: send brand and name separately
+        # For non-Israeli regions: send brand and name separately
         return "regular", {"brand": brand, "name": name}, is_israeli
 
 @app.route('/api/enrich-menu-with-upc', methods=['POST'])
@@ -1743,11 +2120,20 @@ def enrich_menu_with_upc():
     try:
         data = request.json
         menu = data.get("menu")
+        user_code = data.get("user_code")
         
         if not menu:
             return jsonify({"error": "Missing menu data"}), 400
         
-        logger.info("🔍 Starting UPC enrichment for menu...")
+        # Load user preferences to get region
+        try:
+            preferences = load_user_preferences(user_code)
+            region = preferences.get('region', 'israel')
+        except Exception as e:
+            logger.warning(f"Failed to load user preferences, using default region: {e}")
+            region = 'israel'
+        
+        logger.info(f"🔍 Starting UPC enrichment for menu with region: {region}")
         
         # Process each meal and add UPC codes
         enriched_menu = []
@@ -1768,8 +2154,8 @@ def enrich_menu_with_upc():
                         app.logger.info(f"Looking up UPC for brand={brand!r}, name={name!r}")
 
                         try:
-                            # Determine endpoint and parameters based on brand
-                            endpoint_type, params, is_israeli = prepare_upc_lookup_params(brand, name)
+                            # Determine endpoint and parameters based on region
+                            endpoint_type, params, is_israeli = prepare_upc_lookup_params(brand, name, region)
                             
                             if not endpoint_type:
                                 enriched_ing["UPC"] = None
@@ -1779,13 +2165,13 @@ def enrich_menu_with_upc():
                             
                             # Choose the appropriate endpoint
                             if endpoint_type == "hebrew":
-                                url = "https://dietitian-web.onrender.com/api/ingredient-upc-hebrew"
-                                app.logger.info(f"Using Hebrew UPC endpoint for Israeli brand: {brand}")
+                                url = "http://localhost:3001/api/ingredient-upc-hebrew"
+                                app.logger.info(f"Using Hebrew UPC endpoint for region: {region}")
                             else:
-                                url = "https://dietitian-web.onrender.com/api/ingredient-upc"
-                                app.logger.info(f"Using regular UPC endpoint for non-Israeli brand: {brand}")
+                                url = "http://localhost:3001/api/ingredient-upc"
+                                app.logger.info(f"Using regular UPC endpoint for region: {region}")
                             
-                            resp = requests.get(url, params=params, timeout=5)
+                            resp = requests.get(url, params=params, timeout=30)
                             app.logger.info(f"UPC lookup HTTP {resp.status_code} — URL: {resp.url}")
                             app.logger.info(f"UPC lookup response body: {resp.text}")
 
@@ -1805,8 +2191,11 @@ def enrich_menu_with_upc():
             
             enriched_menu.append(enriched_meal)
         
+        # Clean ingredient names before returning
+        cleaned_menu = clean_ingredient_names(enriched_menu)
+        
         logger.info("✅ UPC enrichment completed.")
-        return jsonify({"menu": enriched_menu})
+        return jsonify({"menu": cleaned_menu})
         
     except Exception as e:
         logger.error("❌ Exception in /api/enrich-menu-with-upc:\n%s", traceback.format_exc())
@@ -1823,11 +2212,20 @@ def batch_upc_lookup():
     try:
         data = request.json
         ingredients = data.get("ingredients", [])
+        user_code = data.get("user_code")
         
         if not ingredients:
             return jsonify({"error": "Missing ingredients data"}), 400
         
-        logger.info(f"🔍 Starting batch UPC lookup for {len(ingredients)} ingredients...")
+        # Load user preferences to get region
+        try:
+            preferences = load_user_preferences(user_code)
+            region = preferences.get('region', 'israel')
+        except Exception as e:
+            logger.warning(f"Failed to load user preferences, using default region: {e}")
+            region = 'israel'
+        
+        logger.info(f"🔍 Starting batch UPC lookup for {len(ingredients)} ingredients with region: {region}")
         
         results = []
         
@@ -1846,8 +2244,8 @@ def batch_upc_lookup():
                 continue
             
             try:
-                # Determine endpoint and parameters based on brand
-                endpoint_type, params, is_israeli = prepare_upc_lookup_params(brand, name)
+                # Determine endpoint and parameters based on region
+                endpoint_type, params, is_israeli = prepare_upc_lookup_params(brand, name, region)
                 
                 if not endpoint_type:
                     results.append({
@@ -1860,14 +2258,14 @@ def batch_upc_lookup():
                 
                 # Choose the appropriate endpoint
                 if endpoint_type == "hebrew":
-                    url = "https://dietitian-web.onrender.com/api/ingredient-upc-hebrew"
-                    logger.info(f"Using Hebrew UPC endpoint for Israeli brand: {brand}")
+                    url = "http://localhost:3001/api/ingredient-upc-hebrew"
+                    logger.info(f"Using Hebrew UPC endpoint for region: {region}")
                 else:
-                    url = "https://dietitian-web.onrender.com/api/ingredient-upc"
-                    logger.info(f"Using regular UPC endpoint for non-Israeli brand: {brand}")
+                    url = "http://localhost:3001/api/ingredient-upc"
+                    logger.info(f"Using regular UPC endpoint for region: {region}")
                 
                 # Use the appropriate UPC lookup service
-                resp = requests.get(url, params=params, timeout=3)  # Shorter timeout for batch processing
+                resp = requests.get(url, params=params, timeout=30)  # Increased timeout for complex Hebrew searches
                 
                 if resp.status_code == 200:
                     upc_data = resp.json()
@@ -1939,17 +2337,31 @@ def generate_alternative_meal():
     except Exception as e:
         return jsonify({'error': f'Failed to load user preferences: {str(e)}'}), 500
 
+    # Get region-specific instructions
+    region = preferences.get('region', 'israel').lower()
+    region_instructions = {
+        'israel': "Use Israeli products and brands (e.g., Tnuva, Osem, Strauss, Elite, Telma). Include local Israeli foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 150g-200g containers, hummus in 400g containers, pita bread is typically 60-80g per piece, Israeli cheese slices are 20-25g each, Bamba comes in 80g bags, Bissli in 100g bags. Use realistic Israeli portion sizes.",
+        'us': "Use American products and brands (e.g., Kraft, General Mills, Kellogg's, Pepsi). Include typical American foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 16oz (454g) containers, yogurt in 6-8oz (170-227g) containers, cream cheese in 8oz (227g) packages, American cheese slices are 21g each, bagels are 95-105g each.",
+        'uk': "Use British products and brands (e.g., Tesco, Sainsbury's, Heinz UK, Cadbury). Include typical British foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 300g containers, yogurt in 150-170g pots, British cheese slices are 25g each, bread slices are 35-40g each.",
+        'canada': "Use Canadian products and brands (e.g., Loblaws, President's Choice, Tim Hortons). Include typical Canadian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 500g containers, yogurt in 175g containers, Canadian cheese slices are 22g each.",
+        'australia': "Use Australian products and brands (e.g., Woolworths, Coles, Arnott's, Vegemite). Include typical Australian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 170g tubs, Australian cheese slices are 25g each."
+    }
+    region_instruction = region_instructions.get(region, region_instructions['israel'])
+    
     # Compose prompt for OpenAI
     system_prompt = (
         "You are a professional dietitian AI. Given a main meal, an existing alternative, and user preferences, generate a new, distinct alternative meal option. "
         "The new alternative should have similar calories and macros, but use different main ingredients than both the main and the current alternative. "
+        f"REGION-SPECIFIC REQUIREMENTS: {region_instruction} "
+        "PREFERENCE LOGIC: If user 'likes' or 'loves' any food, consider it but DON'T overuse it. "
+        "Ensure variety - avoid repeating main ingredients that already appear in other meals. "
         "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences. "
         "If user has 'kosher' limitation, you MUST follow kosher dietary laws: "
         "- NEVER mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) in the same meal "
         "- Use only kosher-certified ingredients and brands "
         "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
-        "IMPORTANT: For any brand names in ingredients, you MUST use real, specific brand names (e.g., 'Tnuva', 'Osem', 'Strauss', 'Elite'). "
-        "NEVER use 'Generic' or 'generic' as a brand name. Always specify actual commercial brands available in Israel. "
+        "IMPORTANT: For any brand names in ingredients, you MUST use real, specific brand names based on the user's region. "
+        "NEVER use 'Generic' or 'generic' as a brand name. Always specify actual commercial brands available in the user's region. "
         "Return ONLY the new alternative meal as valid JSON with: meal_title, ingredients (list of {item, brand of pruduct, household_measure, calories, protein, fat, carbs}), and nutrition (sum of ingredients)."
     )
     user_prompt = {
@@ -1972,13 +2384,256 @@ def generate_alternative_meal():
         raw = response["choices"][0]["message"]["content"]
         try:
             parsed = json.loads(raw)
-            return jsonify(parsed)
+            # Clean ingredient names in the generated alternative meal
+            cleaned_alternative = clean_ingredient_names({"alternative": parsed}).get("alternative", parsed)
+            return jsonify(cleaned_alternative)
         except Exception:
             logger.error(f"❌ JSON parse error for new alternative meal:\n{raw}")
             return jsonify({"error": "Invalid JSON from OpenAI", "raw": raw}), 500
     except Exception as e:
         logger.error(f"Error generating alternative meal: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/test-hebrew-pdf', methods=['GET'])
+def test_hebrew_pdf():
+    """Test endpoint to verify Hebrew font support in PDF generation"""
+    try:
+        from io import BytesIO
+        buffer = BytesIO()
+        c = canvas.Canvas(buffer, pagesize=letter)
+        width, height = letter
+        
+        # Test Hebrew text
+        hebrew_text = "שלום עולם - בדיקת גופן עברי"
+        english_text = "Hello World - Hebrew Font Test"
+        
+        # Register fonts (simplified version of the main function)
+        hebrew_font = 'Helvetica'
+        try:
+            # Try to register DejaVu Sans
+            pdfmetrics.registerFont(TTFont('TestHebrewFont', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
+            hebrew_font = 'TestHebrewFont'
+            logger.info("✅ Successfully registered DejaVu Sans for test")
+        except:
+            try:
+                # Try downloading font for test
+                import urllib.request
+                import tempfile
+                import os
+                temp_dir = tempfile.gettempdir()
+                font_path = os.path.join(temp_dir, 'TestDejaVuSans.ttf')
+                
+                if not os.path.exists(font_path):
+                    urllib.request.urlretrieve(
+                        'https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf',
+                        font_path
+                    )
+                
+                pdfmetrics.registerFont(TTFont('TestHebrewFont', font_path))
+                hebrew_font = 'TestHebrewFont'
+                logger.info("✅ Successfully downloaded DejaVu Sans for test")
+            except Exception as e:
+                logger.warning(f"Could not register Hebrew font for test: {e}")
+        
+        # Process Hebrew text
+        if BIDI_SUPPORT:
+            try:
+                processed_hebrew = get_display(reshape(hebrew_text))
+            except:
+                processed_hebrew = hebrew_text
+        else:
+            processed_hebrew = hebrew_text
+        
+        # Draw test text
+        c.setFont(hebrew_font, 16)
+        c.drawString(50, height - 100, english_text)
+        c.drawString(50, height - 130, f"Hebrew font: {hebrew_font}")
+        c.drawString(50, height - 160, f"BIDI support: {BIDI_SUPPORT}")
+        c.drawString(50, height - 190, f"Original: {hebrew_text}")
+        c.drawString(50, height - 220, f"Processed: {processed_hebrew}")
+        
+        # Try to draw Hebrew text
+        try:
+            c.drawString(50, height - 250, processed_hebrew)
+            result = "SUCCESS"
+        except Exception as e:
+            c.setFont('Helvetica', 12)
+            c.drawString(50, height - 250, f"ERROR: {str(e)}")
+            result = f"ERROR: {str(e)}"
+        
+        c.save()
+        buffer.seek(0)
+        
+        return send_file(
+            buffer,
+            as_attachment=True,
+            download_name="hebrew_test.pdf",
+            mimetype="application/pdf"
+        )
+        
+    except Exception as e:
+        logger.error(f"Hebrew test failed: {e}")
+        return jsonify({"error": str(e), "hebrew_support": BIDI_SUPPORT}), 500
+
+def clean_ingredient_names(menu):
+    """
+    Remove brand names from ingredient item names if the brand appears in the item name.
+    
+    Args:
+        menu: List of meals or complete menu structure
+        
+    Returns:
+        Cleaned menu with brand names removed from item names
+    """
+    def clean_ingredient(ingredient):
+        """Clean a single ingredient by removing brand name from item name"""
+        if not isinstance(ingredient, dict):
+            return ingredient
+            
+        item = ingredient.get("item", "")
+        brand = ingredient.get("brand of pruduct", "")  # Note: keeping the typo as it matches the existing code
+        
+        if not item or not brand:
+            return ingredient
+            
+        # Create a copy to avoid modifying the original
+        cleaned_ingredient = ingredient.copy()
+        
+        # Case-insensitive brand removal
+        item_lower = item.lower().strip()
+        brand_lower = brand.lower().strip()
+        
+        if brand_lower in item_lower:
+            # Remove brand name from item, handling various positions
+            # Try different patterns: "Brand Item", "Item Brand", "Brand - Item", etc.
+            patterns_to_try = [
+                f"{brand_lower} ",      # "Brand Item"
+                f" {brand_lower}",      # "Item Brand" 
+                f"{brand_lower}-",      # "Brand-Item"
+                f"-{brand_lower}",      # "Item-Brand"
+                f"{brand_lower} - ",    # "Brand - Item"
+                f" - {brand_lower}",    # "Item - Brand"
+                brand_lower             # Just the brand name itself
+            ]
+            
+            cleaned_item = item
+            for pattern in patterns_to_try:
+                if pattern in item_lower:
+                    # Find the actual case-preserved version to remove
+                    start_idx = item_lower.find(pattern)
+                    if start_idx != -1:
+                        # Remove the pattern and clean up extra spaces/dashes
+                        cleaned_item = item[:start_idx] + item[start_idx + len(pattern):]
+                        cleaned_item = cleaned_item.strip().strip('-').strip()
+                        break
+            
+            # If we removed something, update the item name
+            if cleaned_item and cleaned_item != item:
+                cleaned_ingredient["item"] = cleaned_item
+                logger.info(f"🧹 Cleaned ingredient: '{item}' -> '{cleaned_item}' (removed brand: {brand})")
+
+                    # 2) Remove any parenthesized content, e.g. "(tnuva) hummus" → "hummus"
+            #    \([^)]*\)  matches a '(' plus any non-')' chars up to ')'
+            #    Surrounding \s* eats any extra whitespace left behind
+            cleaned_item = re.sub(r'\s*\([^)]*\)\s*', ' ', cleaned_item).strip()
+
+            # Update only if it actually changed
+            if cleaned_item and cleaned_item != cleaned_ingredient.get("item"):
+                cleaned_ingredient["item"] = cleaned_item
+                logger.info(f"🧹 Stripped parentheses: '{item}' -> '{cleaned_item}'")
+        
+        return cleaned_ingredient
+    
+    def clean_meal_section(section):
+        """Clean all ingredients in a meal section (main/alternative)"""
+        if not isinstance(section, dict):
+            return section
+            
+        cleaned_section = section.copy()
+        ingredients = section.get("ingredients", [])
+        
+        if ingredients:
+            cleaned_ingredients = [clean_ingredient(ing) for ing in ingredients]
+            cleaned_section["ingredients"] = cleaned_ingredients
+            
+        return cleaned_section
+    
+    def clean_meal(meal):
+        """Clean all sections of a meal"""
+        if not isinstance(meal, dict):
+            return meal
+            
+        cleaned_meal = meal.copy()
+        
+        # Clean main and alternative options
+        for section_key in ["main", "alternative"]:
+            if section_key in meal:
+                cleaned_meal[section_key] = clean_meal_section(meal[section_key])
+        
+        # Clean alternatives array if it exists
+        if "alternatives" in meal and isinstance(meal["alternatives"], list):
+            cleaned_alternatives = [clean_meal_section(alt) for alt in meal["alternatives"]]
+            cleaned_meal["alternatives"] = cleaned_alternatives
+            
+        return cleaned_meal
+    
+    # Handle different menu structures
+    if isinstance(menu, list):
+        # Direct list of meals
+        return [clean_meal(meal) for meal in menu]
+    elif isinstance(menu, dict) and "meals" in menu:
+        # Complete menu structure with meals key
+        cleaned_menu = menu.copy()
+        cleaned_menu["meals"] = [clean_meal(meal) for meal in menu["meals"]]
+        return cleaned_menu
+    elif isinstance(menu, dict) and "menu" in menu:
+        # Nested menu structure
+        cleaned_menu = menu.copy()
+        if isinstance(menu["menu"], list):
+            cleaned_menu["menu"] = [clean_meal(meal) for meal in menu["menu"]]
+        elif isinstance(menu["menu"], dict) and "meals" in menu["menu"]:
+            cleaned_menu["menu"] = menu["menu"].copy()
+            cleaned_menu["menu"]["meals"] = [clean_meal(meal) for meal in menu["menu"]["meals"]]
+        return cleaned_menu
+    else:
+        # Return as-is if structure is not recognized
+        return menu
+
+@app.route("/api/recommendations", methods=["GET"])
+def get_user_recommendations():
+    """Fetch user recommendations from Supabase"""
+    try:
+        user_code = request.args.get("user_code")
+        if not user_code:
+            return jsonify({"error": "user_code is required"}), 400
+        
+        logger.info(f"🔍 Fetching recommendations for user_code: {user_code}")
+        
+        # Fetch user data including recommendations
+        response = supabase.table('chat_users').select('recommendations').eq('user_code', user_code).execute()
+        
+        if not response.data:
+            logger.warning(f"No user found with user_code: {user_code}")
+            return jsonify({"error": "User not found"}), 404
+        
+        user_data = response.data[0]
+        recommendations = user_data.get('recommendations', {})
+        
+        # Handle different recommendation formats
+        if isinstance(recommendations, str):
+            try:
+                recommendations = json.loads(recommendations)
+            except:
+                recommendations = {"general": recommendations}
+        elif not recommendations:
+            recommendations = {}
+        
+        logger.info(f"✅ Retrieved recommendations: {recommendations}")
+        return jsonify({"recommendations": recommendations})
+        
+    except Exception as e:
+        logger.error(f"Error fetching recommendations: {str(e)}")
+        return jsonify({"error": "Failed to fetch recommendations"}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

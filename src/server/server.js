@@ -149,7 +149,7 @@ app.get('/api/ingredient-upc', async (req, res) => {
     const request = pool.request();
 
     // Set request timeout
-    request.timeout = 25000; // 25 seconds
+    request.timeout = 60000; // 60 seconds - increased for complex searches
 
     // Bind brand parameter
     request.input('brand', sql.NVarChar, brand);
@@ -199,41 +199,219 @@ app.get('/api/ingredient-upc-hebrew', async (req, res) => {
 
   console.log(`🔍 Hebrew UPC lookup: query="${query}"`);
 
-  // Split on spaces, drop any empties
+  // Split on spaces, drop any empties, and normalize
   const terms = query
     .trim()
+    .toLowerCase()
     .split(/\s+/)
-    .filter(Boolean);
+    .filter(Boolean)
+    .map(term => term.replace(/[^\w\s]/g, '')); // Remove special characters
+
+  if (terms.length === 0) {
+    return res.status(400).json({ error: 'No valid search terms found' });
+  }
+
+  // Smart brand and product separation
+  let brandName = '';
+  let productName = '';
+  
+  // Common Israeli brands (we'll use this to identify brands in the query)
+  const knownBrands = ['tnuva', 'tara', 'strauss', 'yotvata', 'harduf', 'gad', 'danone', 'nestle', 'feldman', 'osem', 'telma', 'angel', 'elite', 'shufersal', 'ramilevy', 'coop', 'victory'];
+  
+  // Find brand in the query
+  const foundBrand = terms.find(term => knownBrands.includes(term));
+  if (foundBrand) {
+    brandName = foundBrand;
+    // Remove brand from terms to get product name
+    const productTerms = terms.filter(term => term !== foundBrand);
+    productName = productTerms.join(' ');
+  } else {
+    // If no known brand found, assume first word might be brand
+    brandName = terms[0];
+    productName = terms.slice(1).join(' ');
+  }
+
+  console.log(`🔍 Separated query: Brand="${brandName}", Product="${productName}"`);
+
+  // Create search terms for product (limit to most important terms)
+  const productTerms = productName
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(term => term.replace(/[^\w\s]/g, ''))
+    .slice(0, 3); // Limit to first 3 terms to speed up search
+
+  // Extract numeric terms from product
+  const numericTerms = productTerms.filter(term => 
+    /^\d+%?$/.test(term) || /^\d+\.\d+%?$/.test(term)
+  );
+
+  // Debug logging
+  console.log(`📋 Search breakdown:`, {
+    originalQuery: query,
+    brandName,
+    productName,
+    productTerms,
+    numericTerms
+  });
 
   try {
     const pool = await getConnection();
     const request = pool.request();
 
     // Set request timeout
-    request.timeout = 25000; // 25 seconds
+    request.timeout = 60000; // 60 seconds - increased for complex searches
 
-    // Build dynamic WHERE clause
-    const clauses = terms.map((term, i) => {
-      const key = `term${i}`;
-      request.input(key, sql.NVarChar, term);
-      return `english_name LIKE N'%' + @${key} + '%'`;
-    });
+    // Create optimized search strategies (reduced from 7 to 3)
+    const searchStrategies = [];
 
-    const sqlText = `
-      SELECT TOP 1 gtinUpc AS upc
-      FROM foods_storage WITH (NOLOCK)
-      WHERE ${clauses.join(' AND ')}
-      ORDER BY LEN(english_name)
-    `;
+    // Strategy 1: Israeli Brand + Product Priority (highest weight)
+    if (brandName && productTerms.length > 0) {
+      request.input('brand', sql.NVarChar, brandName);
+      
+      const productClauses = productTerms.map((term, i) => {
+        const key = `product${i}`;
+        request.input(key, sql.NVarChar, term);
+        return `LOWER(english_name) LIKE N'%' + @${key} + '%'`;
+      });
+      
+      // Israeli brands filter
+      const israeliBrands = ['tnuva', 'tara', 'strauss', 'yotvata', 'harduf', 'gad', 'danone', 'nestle', 'feldman', 'osem', 'telma', 'angel', 'elite', 'shufersal', 'ramilevy', 'coop', 'victory', 'bamba', 'bissli', 'krembo', 'lechem eretz', 'achla', 'taboon', 'dan cake', 'kibutz galuyot', 'machsanei hashuk', 'shamir salads', 'meshek tzuriel', 'priniv', 'shimrit', 'tenuva', 'emek', 'milko', 'para', 'shoko', 'cottage', 'gamadim', 'hashachar', 'zoglovek', 'wilke', 'galil mountain', 'carmel', 'barkan', 'golan heights', 'dalton', 'recanati', 'tabor', 'tulip', 'yarden', 'vita', 'primor', 'meshulam', 'golden star', 'kfar shaul', 'hazirim', 'hatzbani', 'aviv', 'masuah', 'shemen', 'mizra', 'tivall', 'achva', 'halva kingdom'];
+      
+      const israeliBrandClause = israeliBrands.map(brand => `LOWER(english_name) LIKE N'%${brand}%'`).join(' OR ');
+      
+      searchStrategies.push({
+        name: 'israeli_brand_product_priority',
+        sql: `SELECT TOP 10 gtinUpc AS upc, english_name,
+               CASE WHEN LOWER(english_name) LIKE N'%' + @brand + '%' THEN 10 ELSE 0 END +
+               (${productClauses.map((_, i) => `CASE WHEN LOWER(english_name) LIKE N'%' + @product${i} + '%' THEN 3 ELSE 0 END`).join(' + ')}) +
+               CASE WHEN (${israeliBrandClause}) THEN 5 ELSE 0 END as total_score
+               FROM foods_storage WITH (NOLOCK)
+               WHERE LOWER(english_name) LIKE N'%' + @brand + '%' AND (${productClauses.join(' OR ')})
+               ORDER BY total_score DESC`,
+        weight: 100
+      });
+    }
 
-    console.log(`📊 Executing Hebrew UPC query for: ${query}`);
-    const result = await request.query(sqlText);
-    const upc = result.recordset[0]?.upc ?? null;
+    // Strategy 2: Israeli Products with Product Terms (high weight)
+    if (productTerms.length > 0) {
+      const productClauses = productTerms.map((term, i) => {
+        const key = `product2${i}`;
+        request.input(key, sql.NVarChar, term);
+        return `LOWER(english_name) LIKE N'%' + @${key} + '%'`;
+      });
+      
+      // Israeli brands filter
+      const israeliBrands = ['tnuva', 'tara', 'strauss', 'yotvata', 'harduf', 'gad', 'danone', 'nestle', 'feldman', 'osem', 'telma', 'angel', 'elite', 'shufersal', 'ramilevy', 'coop', 'victory', 'bamba', 'bissli', 'krembo', 'lechem eretz', 'achla', 'taboon', 'dan cake', 'kibutz galuyot', 'machsanei hashuk', 'shamir salads', 'meshek tzuriel', 'priniv', 'shimrit', 'tenuva', 'emek', 'milko', 'para', 'shoko', 'cottage', 'gamadim', 'hashachar', 'zoglovek', 'wilke', 'galil mountain', 'carmel', 'barkan', 'golan heights', 'dalton', 'recanati', 'tabor', 'tulip', 'yarden', 'vita', 'primor', 'meshulam', 'golden star', 'kfar shaul', 'hazirim', 'hatzbani', 'aviv', 'masuah', 'shemen', 'mizra', 'tivall', 'achva', 'halva kingdom'];
+      
+      const israeliBrandClause = israeliBrands.map(brand => `LOWER(english_name) LIKE N'%${brand}%'`).join(' OR ');
+      
+      searchStrategies.push({
+        name: 'israeli_products_with_terms',
+        sql: `SELECT TOP 10 gtinUpc AS upc, english_name,
+               (${productClauses.map((_, i) => `CASE WHEN LOWER(english_name) LIKE N'%' + @product2${i} + '%' THEN 3 ELSE 0 END`).join(' + ')}) +
+               CASE WHEN (${israeliBrandClause}) THEN 8 ELSE 0 END as total_score
+               FROM foods_storage WITH (NOLOCK)
+               WHERE (${productClauses.join(' OR ')})
+               ORDER BY total_score DESC`,
+        weight: 90
+      });
+    }
+
+    // Strategy 3: Simple fallback - any term match
+    const allTerms = [brandName, ...productTerms].filter(Boolean);
+    if (allTerms.length > 0) {
+      const fallbackClauses = allTerms.map((term, i) => {
+        const key = `fallback${i}`;
+        request.input(key, sql.NVarChar, term);
+        return `LOWER(english_name) LIKE N'%' + @${key} + '%'`;
+      });
+      
+      searchStrategies.push({
+        name: 'fallback_match',
+        sql: `SELECT TOP 10 gtinUpc AS upc, english_name,
+               (${fallbackClauses.map((_, i) => `CASE WHEN LOWER(english_name) LIKE N'%' + @fallback${i} + '%' THEN 1 ELSE 0 END`).join(' + ')}) as matched_terms
+               FROM foods_storage WITH (NOLOCK)
+               WHERE (${fallbackClauses.join(' OR ')})
+               ORDER BY matched_terms DESC`,
+        weight: 50
+      });
+    }
+
+    // Execute strategies and combine results (optimized)
+    const allResults = [];
     
-    console.log(`✅ Hebrew UPC result: ${upc || 'not found'}`);
-    res.json({ upc });
+    for (const strategy of searchStrategies) {
+      try {
+        console.log(`📊 Executing ${strategy.name} strategy for: ${query}`);
+        const result = await request.query(strategy.sql);
+        
+        console.log(`📋 Strategy ${strategy.name} returned ${result.recordset.length} results`);
+        
+        result.recordset.forEach(row => {
+          const existingIndex = allResults.findIndex(r => r.upc === row.upc);
+          const currentScore = row.total_score || row.matched_terms || 0;
+          
+          // Calculate final score
+          const finalScore = currentScore * strategy.weight / 100;
+          
+          if (existingIndex >= 0) {
+            // Update existing result with higher score
+            const existing = allResults[existingIndex];
+            const newScore = Math.max(existing.score, finalScore);
+            allResults[existingIndex] = { ...existing, score: newScore };
+          } else {
+            // Add new result
+            allResults.push({
+              upc: row.upc,
+              english_name: row.english_name,
+              score: finalScore,
+              brandMatch: brandName && row.english_name?.toLowerCase().includes(brandName.toLowerCase())
+            });
+          }
+        });
+        
+        console.log(`📊 Total results so far: ${allResults.length}`);
+        
+        // Early exit if we found good results from high-priority strategy
+        if (strategy.weight >= 80 && allResults.length >= 5) {
+          console.log(`✅ Found ${allResults.length} results from high-priority strategy, stopping early`);
+          break;
+        }
+      } catch (strategyErr) {
+        console.error(`❌ Strategy ${strategy.name} failed:`, strategyErr.message);
+        console.error(`❌ Full error:`, strategyErr);
+        // Continue with other strategies
+      }
+    }
+    
+    console.log(`📊 Created ${searchStrategies.length} strategies:`, searchStrategies.map(s => s.name));
+    console.log(`📊 Executed ${searchStrategies.length} strategies, found ${allResults.length} total results`);
+
+    // Sort by score and return best match
+    allResults.sort((a, b) => b.score - a.score);
+    
+    const bestMatch = allResults[0];
+    const upc = bestMatch?.upc ?? null;
+    
+    console.log(`✅ Hebrew UPC result: ${upc || 'not found'} (score: ${bestMatch?.score || 0})`);
+    console.log(`📋 Found ${allResults.length} potential matches`);
+    
+    if (allResults.length > 0) {
+      console.log(`🏆 Top 3 matches:`);
+      allResults.slice(0, 3).forEach((match, i) => {
+        const brandInfo = match.brandMatch ? ' [BRAND MATCH]' : '';
+        console.log(`  ${i + 1}. ${match.english_name} (UPC: ${match.upc}, Score: ${match.score})${brandInfo}`);
+      });
+    }
+    
+    res.json({ 
+      upc,
+      total_matches: allResults.length,
+      top_matches: allResults.slice(0, 3).map(m => ({ upc: m.upc, name: m.english_name, score: m.score }))
+    });
     
   } catch (err) {
+    console.error(`❌ Search failed for query "${query}":`, err.message);
     handleDatabaseError(err, res, 'ingredient-upc-hebrew');
   }
 });

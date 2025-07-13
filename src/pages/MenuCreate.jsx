@@ -54,7 +54,7 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
 
   if (!isEditing) {
     return (
-      <h4 
+      <h4
         onClick={() => setIsEditing(true)}
         className="font-medium text-gray-900 cursor-pointer hover:bg-gray-100 px-2 py-1 rounded"
         title="Click to edit meal name"
@@ -84,6 +84,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [suggestionSelected, setSuggestionSelected] = useState(false);
   const inputRef = React.useRef(null);
   const searchTimeoutRef = React.useRef(null);
 
@@ -108,12 +109,23 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
     setIsLoading(true);
     try {
-      const response = await fetch(`https://dietitian-web.onrender.com/api/suggestions?query=${encodeURIComponent(query)}`);
-      if (!response.ok) throw new Error('Network response was not ok');
+      const url = `http://localhost:3001/api/suggestions?query=${encodeURIComponent(query)}`;
+      console.log('🔍 Fetching suggestions from:', url);
+      
+      const response = await fetch(url);
+      console.log('📡 Suggestions response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Suggestions response not OK:', errorText);
+        throw new Error(`Failed to fetch suggestions: ${response.status} ${errorText}`);
+      }
+      
       const data = await response.json();
+      console.log('📋 Suggestions received:', data);
       setSuggestions(data);
     } catch (error) {
-      console.error('Error fetching suggestions:', error);
+      console.error('❌ Error fetching suggestions:', error);
       setSuggestions([]);
     } finally {
       setIsLoading(false);
@@ -122,6 +134,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
   const handleInputChange = (e) => {
     const newValue = e.target.value;
+    console.log('📝 Input changed to:', newValue);
     setEditValue(newValue);
     setShowSuggestions(true);
 
@@ -130,12 +143,14 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
     }
 
     searchTimeoutRef.current = setTimeout(() => {
+      console.log('⏰ Timeout triggered, fetching suggestions for:', newValue);
       fetchSuggestions(newValue);
     }, 300);
   };
 
   const handleKeyPress = (e) => {
     if (e.key === 'Escape') {
+      console.log('🚪 Escape pressed, canceling edit');
       // Cancel editing and revert to original value
       setEditValue(originalValue);
       setIsEditing(false);
@@ -145,6 +160,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
   };
 
   const handleBlur = () => {
+    console.log('👋 Input blurred, reverting to original value:', originalValue);
     // Always revert to original value - only database suggestions should trigger changes
     setEditValue(originalValue);
     setIsEditing(false);
@@ -153,31 +169,47 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
   };
 
   const handleSelect = async (suggestion) => {
+    console.log('🔍 handleSelect called with suggestion:', suggestion);
     try {
-      const response = await fetch(`https://dietitian-web.onrender.com/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`);
-      if (!response.ok) throw new Error('Failed to fetch nutrition data');
+      const url = `http://localhost:3001/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`;
+      console.log('🌐 Fetching from URL:', url);
+      
+      const response = await fetch(url);
+      console.log('📡 Response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Response not OK:', errorText);
+        throw new Error(`Failed to fetch nutrition data: ${response.status} ${errorText}`);
+      }
+      
       const nutritionData = await response.json();
+      console.log('📊 Nutrition data received:', nutritionData);
 
       const updatedValues = {
         item: suggestion.hebrew || suggestion.english,
         household_measure: suggestion.household_measure || '',
-          calories: nutritionData.Energy || 0,
+        calories: nutritionData.Energy || 0,
         protein: nutritionData.Protein || 0,
         fat: nutritionData.Total_lipid__fat_ || 0,
         carbs: nutritionData.Carbohydrate || 0,
         'brand of pruduct': nutritionData.brand || ''
       };
+      
+      console.log('✅ Updated values:', updatedValues);
 
       onChange(updatedValues, mealIndex, optionIndex, ingredientIndex);
       setEditValue(suggestion.hebrew || suggestion.english);
       setShowSuggestions(false);
       setIsEditing(false);
     } catch (error) {
-      console.error('Error fetching nutrition data:', error);
+      console.error('❌ Error in handleSelect:', error);
+      console.error('❌ Error stack:', error.stack);
     }
   };
 
   const startEditing = () => {
+    console.log('✏️ Starting edit mode for value:', value);
     setOriginalValue(value); // Store the current value as original
     setEditValue(value);
     setIsEditing(true);
@@ -189,8 +221,9 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
     return (
       <div
         onClick={startEditing}
-        className="cursor-pointer hover:bg-gray-50 px-2 py-1 rounded text-right"
+        className="cursor-pointer hover:bg-gray-50 px-2 py-1 rounded text-right border border-transparent hover:border-gray-300"
         dir="rtl"
+        title="Click to edit ingredient"
       >
         {value}
       </div>
@@ -206,7 +239,10 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
         onChange={handleInputChange}
         onKeyDown={handleKeyPress}
         onBlur={handleBlur}
-        onFocus={() => setShowSuggestions(true)}
+        onFocus={() => {
+          console.log('🎯 Input focused, showing suggestions');
+          setShowSuggestions(true);
+        }}
         className="w-full px-2 py-1 border border-gray-300 rounded text-right"
         dir="rtl"
         autoFocus
@@ -218,22 +254,47 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
         </div>
       )}
 
-      {showSuggestions && suggestions.length > 0 && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg">
-          <ul className="py-1 max-h-60 overflow-auto">
-            {suggestions.map((suggestion, index) => (
-              <li
-                key={index}
-                onClick={() => handleSelect(suggestion)}
-                className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-right"
-              >
-                <div className="flex flex-col">
-                  <span className="font-medium">{suggestion.hebrew}</span>
-                  <span className="text-sm text-gray-500">{suggestion.english}</span>
-                </div>
-              </li>
-            ))}
-          </ul>
+            {console.log('🔍 Rendering suggestions:', { showSuggestions, suggestionsCount: suggestions.length, suggestions, isLoading })}
+      {showSuggestions && (
+        <div className="absolute z-50 mt-1 bg-white border border-gray-300 rounded-xl shadow-2xl overflow-hidden animate-fade-in min-w-max max-w-[420px] w-auto" style={{minWidth: 220}}>
+          {isLoading ? (
+            <div className="px-4 py-3 text-gray-500 text-center">Loading...</div>
+          ) : suggestions.length > 0 ? (
+            <ul className="py-1 max-h-72 overflow-auto divide-y divide-gray-100">
+              {suggestions.map((suggestion, index) => (
+                <li
+                  key={index}
+                  onMouseDown={e => {
+                    e.preventDefault();
+                    console.log('🖱️ Suggestion clicked:', suggestion);
+                    handleSelect(suggestion);
+                  }}
+                  className="flex items-center gap-3 px-4 py-2 cursor-pointer transition-colors duration-150 hover:bg-blue-50 group"
+                  style={{ userSelect: 'none' }}
+                >
+                  {/* Icon or bullet */}
+                  <span className="inline-block w-2 h-2 rounded-full bg-blue-400 group-hover:bg-blue-600 transition-colors"></span>
+                  <div className="flex flex-col flex-1 min-w-0">
+                    <span className="font-semibold text-gray-900 whitespace-normal leading-snug">{suggestion.hebrew || suggestion.english}</span>
+                    <span className="text-xs text-gray-500 whitespace-normal leading-snug flex flex-row gap-2 mt-0.5">
+                      <span>{(suggestion.protein ?? suggestion.Protein ?? 0)}g protein</span>
+                      <span className="text-gray-300">·</span>
+                      <span>{(suggestion.calories ?? suggestion.Energy ?? 0)} kcal</span>
+                      <span className="text-gray-300">·</span>
+                      <span>{(suggestion.fat ?? suggestion.Total_lipid__fat_ ?? 0)}g fat</span>
+                      <span className="text-gray-300">·</span>
+                      <span>{(suggestion.carbs ?? suggestion.Carbohydrate ?? 0)}g carbs</span>
+                    </span>
+                  </div>
+                  {suggestion.household_measure && (
+                    <span className="ml-2 text-xs text-gray-400 bg-gray-100 rounded px-2 py-0.5 whitespace-nowrap">{suggestion.household_measure}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="px-4 py-3 text-gray-400 text-center">No suggestions found</div>
+          )}
         </div>
       )}
     </div>
@@ -244,7 +305,7 @@ const MenuCreate = () => {
   const pdfRef = React.useRef();
   const [showShoppingList, setShowShoppingList] = useState(false);
   const [shoppingList, setShoppingList] = useState([]);
-  
+
   // Load menu state from localStorage on initialization
   const [menu, setMenu] = useState(() => {
     try {
@@ -255,7 +316,7 @@ const MenuCreate = () => {
       return null;
     }
   });
-  
+
   const [originalMenu, setOriginalMenu] = useState(() => {
     try {
       const saved = localStorage.getItem('menuCreate_originalMenu');
@@ -265,7 +326,7 @@ const MenuCreate = () => {
       return null;
     }
   });
-  
+
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -273,7 +334,7 @@ const MenuCreate = () => {
   const [progressStep, setProgressStep] = useState('');
   const [enrichingUPC, setEnrichingUPC] = useState(false);
   const [users, setUsers] = useState([]);
-  
+
   const [selectedUser, setSelectedUser] = useState(() => {
     try {
       const saved = localStorage.getItem('menuCreate_selectedUser');
@@ -283,8 +344,10 @@ const MenuCreate = () => {
       return null;
     }
   });
-  
+
   const [loadingUsers, setLoadingUsers] = useState(true);
+  const [userTargets, setUserTargets] = useState(null);
+  const [loadingUserTargets, setLoadingUserTargets] = useState(false);
   const navigate = useNavigate();
   const { language, translations } = useLanguage();
   const [generatingAlt, setGeneratingAlt] = useState({});
@@ -356,7 +419,7 @@ const MenuCreate = () => {
 
 
   async function downloadPdf(menu) {
-    const response = await fetch('https://dietitian-web-backend.onrender.com/api/menu-pdf', {
+    const response = await fetch('http://127.0.0.1:5000/api/menu-pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ menu })
@@ -378,24 +441,24 @@ const MenuCreate = () => {
     let totalProtein = 0;
     let totalFat = 0;
     let totalCarbs = 0;
-  
+
     if (!menu.meals) return { calories: 0, protein: 0, fat: 0, carbs: 0 };
-  
+
     menu.meals.forEach(meal => {
       const nutrition = meal?.main?.nutrition || {};
       totalCalories += Number(nutrition.calories) || 0;
       // Handle both string (like "25g") and number formats
-      totalProtein += typeof nutrition.protein === 'string' 
-        ? parseFloat(nutrition.protein) || 0 
+      totalProtein += typeof nutrition.protein === 'string'
+        ? parseFloat(nutrition.protein) || 0
         : Number(nutrition.protein) || 0;
-      totalFat += typeof nutrition.fat === 'string' 
-        ? parseFloat(nutrition.fat) || 0 
+      totalFat += typeof nutrition.fat === 'string'
+        ? parseFloat(nutrition.fat) || 0
         : Number(nutrition.fat) || 0;
-      totalCarbs += typeof nutrition.carbs === 'string' 
-        ? parseFloat(nutrition.carbs) || 0 
+      totalCarbs += typeof nutrition.carbs === 'string'
+        ? parseFloat(nutrition.carbs) || 0
         : Number(nutrition.carbs) || 0;
     });
-  
+
     return {
       calories: Math.round(totalCalories),
       protein: Math.round(totalProtein),
@@ -403,32 +466,32 @@ const MenuCreate = () => {
       carbs: Math.round(totalCarbs),
     };
   }
-  
+
   const handleTitleChange = (newTitle, mealIndex, optionIndex) => {
     setMenu(prevMenu => {
       const updatedMenu = JSON.parse(JSON.stringify(prevMenu));
       const meal = updatedMenu.meals[mealIndex];
       const option = optionIndex === 'main' ? meal.main : meal.alternative;
-      
+
       option.meal_title = newTitle;
-      
+
       return updatedMenu;
     });
 
     // Also update the original menu for consistency
     setOriginalMenu(prevOriginal => {
       if (!prevOriginal) return prevOriginal;
-      
+
       const updatedOriginal = JSON.parse(JSON.stringify(prevOriginal));
       const meal = updatedOriginal.meals[mealIndex];
       const option = optionIndex === 'main' ? meal.main : meal.alternative;
-      
+
       option.meal_title = newTitle;
-      
+
       return updatedOriginal;
     });
   };
-  
+
   const handleIngredientChange = (newValues, mealIndex, optionIndex, ingredientIndex) => {
     setMenu(prevMenu => {
       const updatedMenu = JSON.parse(JSON.stringify(prevMenu));
@@ -454,7 +517,7 @@ const MenuCreate = () => {
         },
         { calories: 0, protein: 0, fat: 0, carbs: 0 }
       );
-      
+
       // Update option nutrition
       option.nutrition = {
         calories: Math.round(newNutrition.calories),
@@ -465,14 +528,14 @@ const MenuCreate = () => {
 
       // Recalculate daily totals
       updatedMenu.totals = calculateMainTotals(updatedMenu);
-      
+
       return updatedMenu;
     });
 
     // Also update the original menu for consistency
     setOriginalMenu(prevOriginal => {
       if (!prevOriginal) return prevOriginal;
-      
+
       const updatedOriginal = JSON.parse(JSON.stringify(prevOriginal));
       const meal = updatedOriginal.meals[mealIndex];
       const option = optionIndex === 'main' ? meal.main : meal.alternative;
@@ -492,7 +555,7 @@ const MenuCreate = () => {
         },
         { calories: 0, protein: 0, fat: 0, carbs: 0 }
       );
-      
+
       option.nutrition = {
         calories: Math.round(newNutrition.calories),
         protein: Math.round(newNutrition.protein),
@@ -501,7 +564,7 @@ const MenuCreate = () => {
       };
 
       updatedOriginal.totals = calculateMainTotals(updatedOriginal);
-      
+
       return updatedOriginal;
     });
   };
@@ -510,26 +573,89 @@ const MenuCreate = () => {
     try {
       setLoadingUsers(true);
       console.log('🔍 Fetching users from chat_users table...');
-      
+
       const { data, error } = await supabase
         .from('chat_users')
         .select('user_code, full_name')
         .order('full_name');
-      
+
       if (error) {
         console.error('❌ Error fetching users:', error);
         setError('Failed to load users: ' + error.message);
         return;
       }
-      
+
       console.log('✅ Fetched users:', data);
       setUsers(data || []);
-      
+
     } catch (err) {
       console.error('❌ Error in fetchUsers:', err);
       setError('Failed to load users');
     } finally {
       setLoadingUsers(false);
+    }
+  };
+
+  const fetchUserTargets = async (userCode) => {
+    try {
+      setLoadingUserTargets(true);
+      console.log('🎯 Fetching nutritional targets for user:', userCode);
+
+      const { data, error } = await supabase
+        .from('chat_users')
+        .select('dailyTotalCalories, macros, region, food_allergies, food_limitations')
+        .eq('user_code', userCode)
+        .single();
+
+      if (error) {
+        console.error('❌ Error fetching user targets:', error);
+        setError('Failed to load user targets: ' + error.message);
+        return;
+      }
+
+      console.log('✅ Fetched user targets:', data);
+
+      // Parse macros if it's a string
+      let parsedMacros = data.macros;
+      if (typeof parsedMacros === 'string') {
+        try {
+          parsedMacros = JSON.parse(parsedMacros);
+        } catch (e) {
+          console.warn('Failed to parse macros JSON:', e);
+          parsedMacros = { protein: "150g", fat: "80g", carbs: "250g" };
+        }
+      }
+
+      // Parse arrays if they're strings
+      const parseArrayField = (field) => {
+        if (Array.isArray(field)) return field;
+        if (typeof field === 'string') {
+          try {
+            return JSON.parse(field);
+          } catch (e) {
+            return field.split(',').map(item => item.trim()).filter(Boolean);
+          }
+        }
+        return [];
+      };
+
+      setUserTargets({
+        calories: data.dailyTotalCalories || 2000,
+        macros: {
+          protein: parseFloat(parsedMacros?.protein?.replace('g', '') || '150'),
+          fat: parseFloat(parsedMacros?.fat?.replace('g', '') || '80'),
+          carbs: parseFloat(parsedMacros?.carbs?.replace('g', '') || '250')
+        },
+        region: data.region || 'israel',
+        allergies: parseArrayField(data.food_allergies),
+        limitations: parseArrayField(data.food_limitations)
+      });
+
+    } catch (err) {
+      console.error('❌ Error in fetchUserTargets:', err);
+      setError('Failed to load user targets');
+    } finally {
+      setLoadingUserTargets(false);
     }
   };
 
@@ -553,7 +679,7 @@ const MenuCreate = () => {
               const name = ingredient.item || '';
               const key = `${brand}|${name}`.toLowerCase();
               totalIngredients++;
-              
+
               // Check cache first
               if (upcCache.has(key)) {
                 ingredient.UPC = upcCache.get(key);
@@ -564,7 +690,7 @@ const MenuCreate = () => {
               if (!allIngredients.has(key)) {
                 allIngredients.set(key, { brand, name, upc: null });
               }
-              
+
               // Track position for later update
               ingredientPositions.push({
                 key,
@@ -580,7 +706,7 @@ const MenuCreate = () => {
 
       const uniqueIngredients = Array.from(allIngredients.values());
       const cacheHitRate = totalIngredients > 0 ? Math.round((cacheHits / totalIngredients) * 100) : 0;
-      
+
       if (uniqueIngredients.length === 0) {
         setProgress(100);
         setProgressStep(`✅ All ${totalIngredients} ingredients found in cache (${cacheHitRate}% cache hit rate)`);
@@ -591,10 +717,13 @@ const MenuCreate = () => {
       setProgressStep(`🔍 Looking up ${uniqueIngredients.length} new ingredients (${cacheHits} found in cache, ${cacheHitRate}% hit rate)...`);
 
       // Step 2: Batch UPC lookup for all ingredients
-      const batchResponse = await fetch("https://dietitian-web.onrender.com/api/batch-upc-lookup", {
+      const batchResponse = await fetch("http://127.0.0.1:5000/api/batch-upc-lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ingredients: uniqueIngredients }),
+        body: JSON.stringify({ 
+          ingredients: uniqueIngredients,
+          user_code: selectedUser.user_code 
+        }),
       });
 
       if (!batchResponse.ok) {
@@ -604,7 +733,7 @@ const MenuCreate = () => {
       }
 
       const batchData = await batchResponse.json();
-      
+
       setProgress(96);
       setProgressStep('📋 Updating menu with product codes...');
 
@@ -625,7 +754,7 @@ const MenuCreate = () => {
 
       const finalCacheHitRate = totalIngredients > 0 ? Math.round((cacheHits / totalIngredients) * 100) : 0;
       const successfulLookups = batchData.summary?.successful || 0;
-      
+
       setProgress(99);
       setProgressStep(`✅ Product codes added! ${successfulLookups} new codes found, ${finalCacheHitRate}% cache efficiency`);
 
@@ -644,19 +773,22 @@ const MenuCreate = () => {
   const enrichMenuWithUPCFallback = async (menuToEnrich) => {
     try {
       setProgressStep('🔄 Using fallback UPC lookup...');
-      
-      const enrichRes = await fetch("https://dietitian-web.onrender.com/api/enrich-menu-with-upc", {
+
+      const enrichRes = await fetch("http://127.0.0.1:5000/api/enrich-menu-with-upc", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ menu: menuToEnrich.meals }),
+        body: JSON.stringify({ 
+          menu: menuToEnrich.meals,
+          user_code: selectedUser.user_code 
+        }),
       });
-      
+
       const enrichData = await enrichRes.json();
       if (enrichData.error) {
         console.error("UPC enrichment failed:", enrichData.error);
         return menuToEnrich;
       }
-      
+
       return {
         ...menuToEnrich,
         meals: enrichData.menu
@@ -688,7 +820,7 @@ const MenuCreate = () => {
     try {
       // Clear previous menu data when generating new menu
       clearSavedMenuState();
-      
+
       setLoading(true);
       setError(null);
       setProgress(0);
@@ -699,8 +831,8 @@ const MenuCreate = () => {
       // Step 1: Get meal template (25% progress)
       setProgress(5);
       setProgressStep('🎯 Analyzing client preferences...');
-      
-      const templateRes = await fetch("https://dietitian-web-backend.onrender.com/api/template", { 
+
+      const templateRes = await fetch("http://127.0.0.1:5000/api/template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_code: selectedUser.user_code })
@@ -715,8 +847,8 @@ const MenuCreate = () => {
       // Step 2: Build menu (50% progress)
       setProgress(30);
       setProgressStep('🍽️ Creating personalized meals...');
-      
-      const buildRes = await fetch("https://dietitian-web-backend.onrender.com/api/build-menu", {
+
+      const buildRes = await fetch("http://127.0.0.1:5000/api/build-menu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template, user_code: selectedUser.user_code }),
@@ -756,16 +888,16 @@ const MenuCreate = () => {
       setProgressStep('🛒 Adding product codes...');
 
       const enrichedMenu = await enrichMenuWithUPC(menuData);
-        setOriginalMenu(enrichedMenu);
-        
-        // Update displayed menu as well
-        if (language === 'he') {
+      setOriginalMenu(enrichedMenu);
+
+      // Update displayed menu as well
+      if (language === 'he') {
         setProgressStep('🌐 Finalizing Hebrew translation...');
         const translatedEnriched = await translateMenu(enrichedMenu, 'he');
-            setMenu(translatedEnriched);
-        } else {
-          setMenu(enrichedMenu);
-        }
+        setMenu(translatedEnriched);
+      } else {
+        setMenu(enrichedMenu);
+      }
 
       setProgress(100);
       setProgressStep('🎉 Menu ready!');
@@ -789,7 +921,7 @@ const MenuCreate = () => {
   const handleSave = async () => {
     console.log('🔥 SAVE BUTTON CLICKED!');
     console.log('📋 Original Menu:', originalMenu);
-    
+
     // Save both schema and meal plan from the same menu
     if (!originalMenu) {
       console.error('❌ No originalMenu found!');
@@ -800,31 +932,31 @@ const MenuCreate = () => {
       console.log('⏳ Starting save process...');
       setSaving(true);
       setError(null);
-      
+
       // Get the current authenticated user
       const { data: { user }, error: authError } = await supabase.auth.getUser();
-      
+
       if (authError || !user) {
         console.error('❌ Authentication error:', authError);
         setError('You must be logged in to save menus');
         return;
       }
-      
+
       console.log('👤 Authenticated user:', user.id);
-      
+
       console.log('📊 Original Menu structure:', {
         meals: originalMenu.meals?.length,
         totals: originalMenu.totals,
         hasNote: !!originalMenu.note
       });
-      
+
       // Create schema template (like your example format)
       const schemaTemplate = {
         template: originalMenu.meals?.map(meal => {
           console.log('🍽️ Processing meal:', meal.meal);
           console.log('Main nutrition:', meal.main?.nutrition);
           console.log('Alt nutrition:', meal.alternative?.nutrition);
-          
+
           return {
             meal: meal.meal,
             main: {
@@ -863,25 +995,25 @@ const MenuCreate = () => {
           carbs: originalMenu.totals?.carbs || 250,
           fat: originalMenu.totals?.fat || 80,
         },
-        recommendations: {},
+        recommendations: originalMenu.recommendations || {},
         dietary_restrictions: {},
         user_code: selectedUser?.user_code || null, // Use selected user's code
         dietitian_id: user.id
       };
-      
+
       console.log('📤 Combined payload:', JSON.stringify(combinedPayload, null, 2));
-      
+
       const result = await Menu.create(combinedPayload);
       console.log('✅ Combined schema + menu saved successfully:', result);
-      
+
       // Show success message
       setError(null);
       console.log('🎉 Schema and menu plan saved in single record!');
       alert('Schema and menu plan saved successfully!');
-      
+
       // Clear saved state since it's now permanently saved
       clearSavedMenuState();
-      
+
     } catch (err) {
       console.error('❌ Error during save process:', err);
       console.error('❌ Error stack:', err.stack);
@@ -899,7 +1031,7 @@ const MenuCreate = () => {
     return (
       <div className={`p-4 rounded-lg ${isAlternative ? 'bg-blue-50' : 'bg-green-50'}`}>
         <div className="flex justify-between items-start mb-3">
-          <EditableTitle 
+          <EditableTitle
             value={option.meal_title}
             onChange={handleTitleChange}
             mealIndex={option.mealIndex}
@@ -936,23 +1068,29 @@ const MenuCreate = () => {
                   <span className="w-1.5 h-1.5 rounded-full bg-gray-400 mt-2" />
                   <div className="flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                  <EditableIngredient
-                    value={ingredient.item}
-                    onChange={handleIngredientChange}
-                    mealIndex={option.mealIndex}
-                    optionIndex={isAlternative ? 'alternative' : 'main'}
-                    ingredientIndex={idx}
-                  />
-                  <span className="text-gray-600">
-                    {ingredient.household_measure}
-                  </span>
+                      <EditableIngredient
+                        value={ingredient.item}
+                        onChange={handleIngredientChange}
+                        mealIndex={option.mealIndex}
+                        optionIndex={isAlternative ? 'alternative' : 'main'}
+                        ingredientIndex={idx}
+                      />
+                      <span className="text-gray-600">
+                        {ingredient.household_measure}
+                      </span>
                       {(ingredient.calories || ingredient.protein) && (
                         <>
-                          <span className="text-orange-600 font-medium">
-                            {Math.round(ingredient.calories || 0)} c
+                          <span className="font-bold text-green-700">
+                            {Math.round(ingredient.calories || 0)} k
                           </span>
                           <span className="text-blue-600 font-medium">
-                            {Math.round(ingredient.protein || 0)}g p
+                            {Math.round(ingredient.protein || 0)}g protein
+                          </span>
+                          <span className="font-bold text-amber-700">
+                            {Math.round(ingredient.carbs || 0)}g carbs
+                          </span>
+                          <span className="font-bold text-orange-700">
+                            {Math.round(ingredient.fat || 0)}g fat
                           </span>
                         </>
                       )}
@@ -1001,16 +1139,16 @@ const MenuCreate = () => {
       }
     };
   }, [handleLanguageChange]);
-  
+
 
   async function generateAlternativeMeal(main, alternative) {
     const response = await fetch('https://dietitian-web-backend.onrender.com/api/generate-alternative-meal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        main, 
+      body: JSON.stringify({
+        main,
         alternative,
-        user_code: selectedUser?.user_code 
+        user_code: selectedUser?.user_code
       })
     });
     if (!response.ok) {
@@ -1065,33 +1203,55 @@ const MenuCreate = () => {
     return notes;
   }
 
+  // Helper for ingredient normalization (for deduplication)
+  function normalizeIngredientName(name) {
+    let str = name || '';
+    str = str.toLowerCase().trim();
+    // Remove plural 's' at the end (simple heuristic)
+    str = str.replace(/\b(tomatoes|breasts)\b/g, m => m.slice(0, -1));
+    str = str.replace(/\b(ies)\b/g, 'y'); // e.g., berries -> berry
+    str = str.replace(/\s+/g, ' ');
+    return str;
+  }
+
   function generateShoppingList(menu) {
     if (!menu || !menu.meals) return [];
     const itemsMap = {};
+    const prettyNames = {};
     menu.meals.forEach(meal => {
       const options = [meal.main, meal.alternative, ...(meal.alternatives || [])];
       options.forEach(option => {
         if (option && option.ingredients) {
           option.ingredients.forEach(ing => {
-            const base = extractBaseIngredient(ing.item).toLowerCase();
+            const base = extractBaseIngredient(ing.item);
+            const normalized = normalizeIngredientName(base);
             const prep = extractPreparation(ing.item);
-            const key = `${base}__${ing.household_measure}`;
-            if (!itemsMap[key]) {
-              itemsMap[key] = {
-                base: extractBaseIngredient(ing.item),
-                household_measure: ing.household_measure || '',
-                preparations: prep.length ? [...new Set(prep)] : [],
-              };
-            } else {
-              // Merge preparations if duplicate
-              itemsMap[key].preparations = Array.from(new Set([...itemsMap[key].preparations, ...prep]));
+            const measure = ing.household_measure || '';
+            // Save the prettiest name (first occurrence, capitalized)
+            if (!prettyNames[normalized]) {
+              prettyNames[normalized] = base.charAt(0).toUpperCase() + base.slice(1);
             }
+            if (!itemsMap[normalized]) {
+              itemsMap[normalized] = {
+                base: prettyNames[normalized],
+                household_measures: new Set(),
+                preparations: new Set(),
+              };
+            }
+            if (measure) itemsMap[normalized].household_measures.add(measure);
+            prep.forEach(p => itemsMap[normalized].preparations.add(p));
           });
         }
       });
     });
-    // Sort alphabetically for a clean look
-    return Object.values(itemsMap).sort((a, b) => a.base.localeCompare(b.base));
+    // Convert sets to arrays and join for display
+    return Object.values(itemsMap)
+      .map(item => ({
+        base: item.base,
+        household_measure: Array.from(item.household_measures).join(' / '),
+        preparations: Array.from(item.preparations),
+      }))
+      .sort((a, b) => a.base.localeCompare(b.base));
   }
 
   // Fetch users when component loads
@@ -1155,10 +1315,10 @@ const MenuCreate = () => {
               {Math.round(progress)}% Complete
             </p>
           </div>
-          
+
           <div className="relative w-full h-16 bg-blue-100 rounded-lg overflow-hidden border-2 border-blue-200">
             {/* Water fill based on actual progress */}
-            <div 
+            <div
               className="absolute bottom-0 left-0 h-full bg-gradient-to-r from-blue-400 via-blue-500 to-blue-600 transition-all duration-500 ease-out"
               style={{
                 width: `${progress}%`
@@ -1166,14 +1326,14 @@ const MenuCreate = () => {
             >
               {/* Water waves only on top of filled area */}
               <div className="absolute top-0 left-0 w-full h-2 overflow-hidden">
-                <div 
+                <div
                   className="absolute top-0 w-full h-4 bg-blue-300 opacity-50"
                   style={{
                     borderRadius: '50%',
                     animation: 'waterWave1 3s ease-in-out infinite'
                   }}
                 />
-                <div 
+                <div
                   className="absolute top-0 w-full h-4 bg-blue-200 opacity-30"
                   style={{
                     borderRadius: '50%',
@@ -1181,11 +1341,11 @@ const MenuCreate = () => {
                   }}
                 />
               </div>
-              
+
               {/* Floating bubbles only in filled area */}
               {progress > 20 && (
                 <div className="absolute inset-0">
-                  <div 
+                  <div
                     className="absolute w-2 h-2 bg-white rounded-full opacity-60"
                     style={{
                       left: '20%',
@@ -1193,7 +1353,7 @@ const MenuCreate = () => {
                     }}
                   />
                   {progress > 50 && (
-                    <div 
+                    <div
                       className="absolute w-1.5 h-1.5 bg-white rounded-full opacity-40"
                       style={{
                         left: '60%',
@@ -1202,7 +1362,7 @@ const MenuCreate = () => {
                     />
                   )}
                   {progress > 80 && (
-                    <div 
+                    <div
                       className="absolute w-1 h-1 bg-white rounded-full opacity-50"
                       style={{
                         left: '80%',
@@ -1212,9 +1372,9 @@ const MenuCreate = () => {
                   )}
                 </div>
               )}
-              
+
               {/* Shimmer effect on water surface */}
-              <div 
+              <div
                 className="absolute top-0 left-0 w-full h-full opacity-40"
                 style={{
                   background: `linear-gradient(90deg, 
@@ -1225,7 +1385,7 @@ const MenuCreate = () => {
                 }}
               />
             </div>
-            
+
             {/* Percentage text overlay */}
             <div className="absolute inset-0 flex items-center justify-center">
               <span className="text-blue-700 font-bold text-lg drop-shadow-lg">
@@ -1233,7 +1393,7 @@ const MenuCreate = () => {
               </span>
             </div>
           </div>
-          
+
           {/* Progress step indicator */}
           <div className="mt-4 flex justify-center">
             <div className="text-xs text-gray-600 text-center">
@@ -1263,7 +1423,7 @@ const MenuCreate = () => {
             </h1>
           </div>
         </div>
-        
+
         {/* Clear menu button when menu exists */}
         {menu && (
           <Button
@@ -1297,13 +1457,13 @@ const MenuCreate = () => {
           const parsed = JSON.parse(savedMenu);
           const savedAt = parsed._savedAt ? new Date(parsed._savedAt).toLocaleString() : 'Unknown time';
           const savedUser = parsed._selectedUser?.full_name || 'Unknown client';
-          
+
           return (
             <Alert className="border-blue-200 bg-blue-50">
               <Clock className="h-4 w-4" />
               <AlertTitle className="text-blue-800">Previous Menu Found</AlertTitle>
               <AlertDescription className="text-blue-700">
-                We found a previously generated menu for <strong>{savedUser}</strong> from <strong>{savedAt}</strong>. 
+                We found a previously generated menu for <strong>{savedUser}</strong> from <strong>{savedAt}</strong>.
                 Would you like to continue working on it or start fresh?
                 <div className="flex gap-3 mt-3">
                   <Button
@@ -1362,6 +1522,13 @@ const MenuCreate = () => {
                   const userCode = e.target.value;
                   const user = users.find(u => u.user_code === userCode);
                   setSelectedUser(user);
+
+                  // Fetch user targets when a user is selected
+                  if (userCode) {
+                    fetchUserTargets(userCode);
+                  } else {
+                    setUserTargets(null);
+                  }
                 }}
                 className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
@@ -1374,17 +1541,267 @@ const MenuCreate = () => {
               </select>
               {selectedUser && (
                 <div className="p-3 bg-green-50 border border-green-200 rounded-md">
-                                     <div className="flex items-center gap-2 text-sm text-green-700">
-                     <span>✓</span>
-                     <span className="font-medium">Selected: {selectedUser.full_name}</span>
-                     <span className="text-green-600">({selectedUser.user_code})</span>
-                   </div>
+                  <div className="flex items-center gap-2 text-sm text-green-700">
+                    <span>✓</span>
+                    <span className="font-medium">Selected: {selectedUser.full_name}</span>
+                    <span className="text-green-600">({selectedUser.user_code})</span>
+                  </div>
                 </div>
               )}
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* User Targets Display */}
+      {selectedUser && (
+        <Card className="border-blue-200 bg-blue-50/30">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-blue-800">
+              <span>🎯</span>
+              Client Nutritional Targets
+            </CardTitle>
+            <CardDescription className="text-blue-600">
+              {selectedUser.full_name}'s daily nutrition goals from database
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loadingUserTargets ? (
+              <div className="flex items-center gap-2 text-sm text-blue-600">
+                <Loader className="animate-spin h-4 w-4" />
+                Loading client targets...
+              </div>
+            ) : userTargets ? (
+              <div className="space-y-4">
+                {/* Target Macros */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200">
+                    <p className="text-sm text-blue-600 font-medium">Target Calories</p>
+                    <p className="text-2xl font-bold text-blue-700">
+                      {userTargets.calories}
+                      <span className="text-sm font-normal text-blue-600 ml-1">kcal</span>
+                    </p>
+                  </div>
+                  <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200">
+                    <p className="text-sm text-blue-600 font-medium">Target Protein</p>
+                    <p className="text-2xl font-bold text-blue-700">
+                      {userTargets.macros.protein}
+                      <span className="text-sm font-normal text-blue-600 ml-1">g</span>
+                    </p>
+                  </div>
+                  <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200">
+                    <p className="text-sm text-blue-600 font-medium">Target Fat</p>
+                    <p className="text-2xl font-bold text-blue-700">
+                      {userTargets.macros.fat}
+                      <span className="text-sm font-normal text-blue-600 ml-1">g</span>
+                    </p>
+                  </div>
+                  <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200">
+                    <p className="text-sm text-blue-600 font-medium">Target Carbs</p>
+                    <p className="text-2xl font-bold text-blue-700">
+                      {userTargets.macros.carbs}
+                      <span className="text-sm font-normal text-blue-600 ml-1">g</span>
+                    </p>
+                  </div>
+                </div>
+
+                {/* Additional Info */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-blue-200">
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-blue-700">Region</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">🌍</span>
+                      <span className="capitalize text-blue-600">{userTargets.region}</span>
+                    </div>
+                  </div>
+
+                  {userTargets.allergies.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium text-red-700">Food Allergies</p>
+                      <div className="flex flex-wrap gap-1">
+                        {userTargets.allergies.map((allergy, idx) => (
+                          <Badge key={idx} variant="outline" className="bg-red-50 border-red-200 text-red-700 text-xs">
+                            {allergy}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {userTargets.limitations.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium text-orange-700">Dietary Limitations</p>
+                      <div className="flex flex-wrap gap-1">
+                        {userTargets.limitations.map((limitation, idx) => (
+                          <Badge key={idx} variant="outline" className="bg-orange-50 border-orange-200 text-orange-700 text-xs">
+                            {limitation}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Comparison with Generated Menu */}
+                {menu && menu.totals && (
+                  <div className="pt-4 border-t border-blue-200">
+                    <h4 className="text-lg font-semibold text-blue-800 mb-3 flex items-center gap-2">
+                      <span>📊</span>
+                      Target vs Generated Menu Comparison
+                    </h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {/* Calories Comparison */}
+                      <div className="p-3 bg-white rounded-lg border">
+                        <p className="text-xs text-gray-500 mb-1">Calories</p>
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-blue-600">Target:</span>
+                            <span className="font-bold text-blue-700">{userTargets.calories}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-green-600">Generated:</span>
+                            <span className="font-bold text-green-700">{menu.totals.calories}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs text-gray-500">Difference:</span>
+                            <span className={`text-xs font-medium ${Math.abs(menu.totals.calories - userTargets.calories) <= userTargets.calories * 0.05
+                                ? 'text-green-600'
+                                : 'text-red-600'
+                              }`}>
+                              {`${menu.totals.calories - userTargets.calories > 0 ? '+' : ''}${((menu.totals.calories - userTargets.calories) / userTargets.calories * 100)
+                                  .toFixed(2)
+                                }%`}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Protein Comparison */}
+                      <div className="p-3 bg-white rounded-lg border">
+                        <p className="text-xs text-gray-500 mb-1">Protein (g)</p>
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-blue-600">Target:</span>
+                            <span className="font-bold text-blue-700">{userTargets.macros.protein}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-green-600">Generated:</span>
+                            <span className="font-bold text-green-700">{menu.totals.protein}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs text-gray-500">Difference:</span>
+                            <span className={`text-xs font-medium ${Math.abs(menu.totals.protein - userTargets.macros.protein) <= userTargets.macros.protein * 0.05
+                                ? 'text-green-600'
+                                : 'text-red-600'
+                              }`}>
+                              {`${menu.totals.protein - userTargets.macros.protein > 0 ? '+' : ''}${((menu.totals.protein - userTargets.macros.protein)
+                                  / userTargets.macros.protein
+                                  * 100
+                                ).toFixed(2)
+                                }%`}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Fat Comparison */}
+                      <div className="p-3 bg-white rounded-lg border">
+                        <p className="text-xs text-gray-500 mb-1">Fat (g)</p>
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-blue-600">Target:</span>
+                            <span className="font-bold text-blue-700">{userTargets.macros.fat}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-green-600">Generated:</span>
+                            <span className="font-bold text-green-700">{menu.totals.fat}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs text-gray-500">Difference:</span>
+                            <span className={`text-xs font-medium ${Math.abs(menu.totals.fat - userTargets.macros.fat) <= userTargets.macros.fat * 0.05
+                                ? 'text-green-600'
+                                : 'text-red-600'
+                              }`}>
+                              {`${menu.totals.fat - userTargets.macros.fat > 0 ? '+' : ''}${((menu.totals.fat - userTargets.macros.fat)
+                                  / userTargets.macros.fat
+                                  * 100
+                                ).toFixed(2)
+                                }%`}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Carbs Comparison */}
+                      <div className="p-3 bg-white rounded-lg border">
+                        <p className="text-xs text-gray-500 mb-1">Carbs (g)</p>
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-blue-600">Target:</span>
+                            <span className="font-bold text-blue-700">{userTargets.macros.carbs}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-green-600">Generated:</span>
+                            <span className="font-bold text-green-700">{menu.totals.carbs}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs text-gray-500">Difference:</span>
+                            <span className={`text-xs font-medium ${Math.abs(menu.totals.carbs - userTargets.macros.carbs) <= userTargets.macros.carbs * 0.05
+                                ? 'text-green-600'
+                                : 'text-red-600'
+                              }`}>
+                              {`${menu.totals.carbs - userTargets.macros.carbs > 0 ? '+' : ''}${(
+                                  (menu.totals.carbs - userTargets.macros.carbs)
+                                  / userTargets.macros.carbs
+                                  * 100
+                                ).toFixed(2)
+                                }%`}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Overall Accuracy Indicator */}
+                    <div className="mt-4 p-3 rounded-lg bg-gradient-to-r from-blue-50 to-green-50 border border-blue-200">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-700">Menu Accuracy:</span>
+                        <div className="flex items-center gap-2">
+                          {(() => {
+                            const caloriesAccurate = Math.abs(menu.totals.calories - userTargets.calories) <= userTargets.calories * 0.05;
+                            const proteinAccurate = Math.abs(menu.totals.protein - userTargets.macros.protein) <= userTargets.macros.protein * 0.05;
+                            const fatAccurate = Math.abs(menu.totals.fat - userTargets.macros.fat) <= userTargets.macros.fat * 0.05;
+                            const carbsAccurate = Math.abs(menu.totals.carbs - userTargets.macros.carbs) <= userTargets.macros.carbs * 0.05;
+
+                            const accurateCount = [caloriesAccurate, proteinAccurate, fatAccurate, carbsAccurate].filter(Boolean).length;
+                            const accuracy = (accurateCount / 4) * 100;
+
+                            return (
+                              <>
+                                <div className={`px-3 py-1 rounded-full text-sm font-medium ${accuracy >= 75 ? 'bg-green-100 text-green-700 border border-green-200' :
+                                    accuracy >= 50 ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
+                                      'bg-red-100 text-red-700 border border-red-200'
+                                  }`}>
+                                  {Math.round(accuracy)}% Accurate
+                                </div>
+                                <span className="text-xs text-gray-500">
+                                  ({accurateCount}/4 within ±5%)
+                                </span>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-blue-600">No target data found for this client.</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -1401,7 +1818,7 @@ const MenuCreate = () => {
           >
             {loading ? (translations.generating || 'Generating...') : (translations.generateMenu || 'Generate Menu')}
           </Button>
-          
+
           {/* Water Bar Loading Animation */}
           {loading && <WaterBarLoading />}
         </CardContent>
@@ -1419,7 +1836,7 @@ const MenuCreate = () => {
               </CardContent>
             </Card>
           )}
-          
+
           {menu.totals && (
             <Card className="bg-green-50/30">
               <CardHeader>
@@ -1458,6 +1875,51 @@ const MenuCreate = () => {
                       <span className="text-sm font-normal text-orange-600 ml-1">g</span>
                     </p>
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Recommendations Section */}
+          {menu.recommendations && menu.recommendations.length > 0 && (
+            <Card className="bg-purple-50/30 border-purple-200">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-purple-800">
+                  <span>💡</span>
+                  {translations.recommendations || 'Recommendations'}
+                </CardTitle>
+                <CardDescription className="text-purple-600">
+                  Personalized recommendations for {selectedUser?.full_name}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {menu.recommendations.map((rec, idx) => (
+                    <div key={idx} className="p-4 bg-white rounded-lg shadow-sm border border-purple-200">
+                      <div className="flex items-start gap-3">
+                        <div className="flex-shrink-0 w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
+                          <span className="text-purple-600 font-semibold text-sm">
+                            {rec.recommendation_key === 'generalComments' ? '💬' :
+                             rec.recommendation_key === 'supplements' ? '💊' :
+                             rec.recommendation_key === 'hydration' ? '💧' :
+                             rec.recommendation_key === 'sleep' ? '😴' : '📝'}
+                          </span>
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-medium text-purple-800 mb-1">
+                            {rec.recommendation_key === 'generalComments' ? 'General Comments' :
+                             rec.recommendation_key === 'supplements' ? 'Supplements' :
+                             rec.recommendation_key === 'hydration' ? 'Hydration' :
+                             rec.recommendation_key === 'sleep' ? 'Sleep' :
+                             rec.recommendation_key.charAt(0).toUpperCase() + rec.recommendation_key.slice(1)}
+                          </h4>
+                          <p className="text-purple-700 text-sm leading-relaxed">
+                            {rec.recommendation_value}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
@@ -1531,7 +1993,7 @@ const MenuCreate = () => {
           </div>
         </>
       )}
-  <Button onClick={() => downloadPdf(menu)}>Download as PDF</Button>
+      <Button onClick={() => downloadPdf(menu)}>Download as PDF</Button>
 
       {/* Save Button and Cache Management (not in PDF) */}
       {menu && menu.meals && menu.meals.length > 0 && (
@@ -1560,7 +2022,7 @@ const MenuCreate = () => {
               <span className="text-xs text-green-600">Menu auto-saved locally</span>
             </div>
           </div>
-          
+
           {/* Save Button */}
           <Button
             onClick={() => {

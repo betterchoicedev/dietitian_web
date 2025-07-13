@@ -33,6 +33,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { Slider } from '@/components/ui/slider';
 
 const generateUniqueCode = () => {
   const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -80,9 +81,75 @@ export default function Clients() {
     client_preference: ''
   });
 
+  // Add macro slider state
+  const [macroSliders, setMacroSliders] = useState({ protein: 0, carbs: 0, fat: 0 });
+
   useEffect(() => {
     loadClients();
   }, []);
+
+  // Helper to recalculate macros so that 4*protein + 4*carbs + 9*fat = calories
+  const recalculateMacros = (changed, value, calories, prevMacros) => {
+    // Clamp value to min/max
+    const min = { protein: 0, carbs: 0, fat: 0 };
+    const max = { protein: 300, carbs: 400, fat: 150 };
+    value = Math.max(min[changed], Math.min(max[changed], value));
+    let macros = { ...prevMacros, [changed]: value };
+    // Calculate remaining calories
+    let calUsed = 0;
+    if (changed === 'protein') calUsed = 4 * value;
+    if (changed === 'carbs') calUsed = 4 * value;
+    if (changed === 'fat') calUsed = 9 * value;
+    let otherMacros = Object.keys(macros).filter(m => m !== changed);
+    let otherCal = calories - (changed === 'fat' ? 9 : 4) * value;
+    // Distribute remaining calories proportionally to the other two macros
+    let totalPrev = otherMacros.reduce((sum, m) => sum + (prevMacros[m] || 0), 0) || 1;
+    let newMacros = { ...macros };
+    otherMacros.forEach(m => {
+      let factor = (prevMacros[m] || 0) / totalPrev;
+      let calPerGram = m === 'fat' ? 9 : 4;
+      let grams = Math.max(min[m], Math.min(max[m], Math.round((otherCal * factor) / calPerGram)));
+      newMacros[m] = grams;
+    });
+    // Final adjustment to ensure total calories match
+    let totalCals = 4 * newMacros.protein + 4 * newMacros.carbs + 9 * newMacros.fat;
+    if (totalCals !== calories) {
+      // Adjust the last macro to fix rounding
+      let last = otherMacros[1];
+      let calPerGram = last === 'fat' ? 9 : 4;
+      newMacros[last] += Math.round((calories - totalCals) / calPerGram);
+      newMacros[last] = Math.max(min[last], Math.min(max[last], newMacros[last]));
+    }
+    return newMacros;
+  };
+
+  // Sync macro sliders with formData and calories
+  useEffect(() => {
+    let cals = parseInt(formData.dailyTotalCalories) || 0;
+    if (cals > 0) {
+      // If all macros are empty, initialize to 30% protein, 40% carbs, 30% fat
+      if (!macroSliders.protein && !macroSliders.carbs && !macroSliders.fat) {
+        let p = Math.round((0.3 * cals) / 4);
+        let c = Math.round((0.4 * cals) / 4);
+        let f = Math.round((0.3 * cals) / 9);
+        setMacroSliders({ protein: p, carbs: c, fat: f });
+        setFormData(fd => ({ ...fd, macros: { protein: p, carbs: c, fat: f } }));
+      } else {
+        // Recalculate macros to match calories
+        let totalCals = 4 * macroSliders.protein + 4 * macroSliders.carbs + 9 * macroSliders.fat;
+        if (totalCals !== cals) {
+          let newMacros = recalculateMacros('protein', macroSliders.protein, cals, macroSliders);
+          setMacroSliders(newMacros);
+          setFormData(fd => ({ ...fd, macros: newMacros }));
+        }
+      }
+    }
+  }, [formData.dailyTotalCalories]);
+
+  // When macroSliders change, update formData.macros
+  useEffect(() => {
+    setFormData(fd => ({ ...fd, macros: macroSliders }));
+  }, [macroSliders]);
 
   const loadClients = async () => {
     setLoading(true);
@@ -686,6 +753,7 @@ export default function Clients() {
                         <SelectItem value="moderate">Moderate Activity</SelectItem>
                         <SelectItem value="very">Very Active</SelectItem>
                         <SelectItem value="extra">Extra Active</SelectItem>
+                        <SelectItem value="extra">Toning</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -720,61 +788,38 @@ export default function Clients() {
                       id="dailyTotalCalories"
                       type="number"
                       value={formData.dailyTotalCalories}
-                      onChange={(e) => setFormData({...formData, dailyTotalCalories: e.target.value})}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="number_of_meals">Number of Meals</Label>
-                    <Input
-                      id="number_of_meals"
-                      type="number"
-                      min="1"
-                      max="10"
-                      value={formData.number_of_meals}
-                      onChange={(e) => setFormData({...formData, number_of_meals: e.target.value})}
+                      onChange={e => {
+                        setFormData({ ...formData, dailyTotalCalories: e.target.value });
+                        setMacroSliders({ protein: 0, carbs: 0, fat: 0 }); // Reset macros on calorie change
+                      }}
                     />
                   </div>
                 </div>
-                
                 <div className="space-y-2">
                   <Label>Macros (grams)</Label>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div>
-                      <Label htmlFor="macros_protein" className="text-sm">Protein</Label>
-                      <Input
-                        id="macros_protein"
-                        type="number"
-                        step="0.1"
-                        value={formData.macros.protein}
-                        onChange={(e) => setFormData({...formData, macros: {...formData.macros, protein: e.target.value}})}
-                        placeholder="160"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="macros_carbs" className="text-sm">Carbs</Label>
-                      <Input
-                        id="macros_carbs"
-                        type="number"
-                        step="0.1"
-                        value={formData.macros.carbs}
-                        onChange={(e) => setFormData({...formData, macros: {...formData.macros, carbs: e.target.value}})}
-                        placeholder="180"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="macros_fat" className="text-sm">Fat</Label>
-                      <Input
-                        id="macros_fat"
-                        type="number"
-                        step="0.1"
-                        value={formData.macros.fat}
-                        onChange={(e) => setFormData({...formData, macros: {...formData.macros, fat: e.target.value}})}
-                        placeholder="65"
-                      />
-                    </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {['protein', 'carbs', 'fat'].map(macro => (
+                      <div key={macro}>
+                        <Label className="text-sm capitalize">{macro.charAt(0).toUpperCase() + macro.slice(1)}</Label>
+                        <Slider
+                          min={macro === 'fat' ? 0 : 0}
+                          max={macro === 'protein' ? 300 : macro === 'carbs' ? 400 : 150}
+                          step={1}
+                          value={[macroSliders[macro]]}
+                          onValueChange={([val]) => {
+                            let cals = parseInt(formData.dailyTotalCalories) || 0;
+                            if (cals > 0) {
+                              setMacroSliders(prev => recalculateMacros(macro, val, cals, prev));
+                            }
+                          }}
+                        />
+                        <div className="text-xs text-gray-600 mt-1">{macroSliders[macro]}g</div>
+                      </div>
+                    ))}
                   </div>
-                  <p className="text-xs text-gray-500">
-                    ✨ Just enter numbers - "g" will be automatically added (e.g., 160 → 160g)
+                  <p className="text-xs text-gray-500 mt-1">
+                    The sum of macros always matches calories: <br />
+                    <span className="font-mono">calories = (4 × protein) + (4 × carbs) + (9 × fat)</span>
                   </p>
                 </div>
               </div>

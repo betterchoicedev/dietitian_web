@@ -104,7 +104,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
     setIsLoading(true);
     try {
       // Try MenuCreate API first, fallback to original API
-      let response = await fetch(`https://dietitian-web.onrender.com/api/suggestions?query=${encodeURIComponent(query)}`);
+      let response = await fetch(`http://127.0.0.1:5000/api/suggestions?query=${encodeURIComponent(query)}`);
       
       if (response.ok) {
         const data = await response.json();
@@ -168,7 +168,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
       
       // Check if this is from the enhanced API (MenuCreate style)
       if (suggestion.hebrew && suggestion.english) {
-        const response = await fetch(`https://dietitian-web.onrender.com/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`);
+        const response = await fetch(`http://127.0.0.1:5000/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`);
         if (response.ok) {
           const nutritionData = await response.json();
           updatedValues = {

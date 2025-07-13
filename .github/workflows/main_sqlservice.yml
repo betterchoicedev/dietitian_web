@@ -1,62 +1,60 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# More GitHub Actions for Azure: https://github.com/Azure/actions
-
-name: Build and deploy Node.js app to Azure Web App - sqlservice
+# .github/workflows/azure-sqlservice.yml
+# Build & deploy Node.js app to Azure Web App  ──>  sqlservice.azurewebsites.net
+name: Build & deploy (sqlservice)
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]          # mirrors Render’s auto-deploy-on-commit
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read #This is required for actions/checkout
+      contents: read          # required for actions/checkout
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js version
+      # 1 ▪ Node 22 is GA on App Service (Feb 2025)  :contentReference[oaicite:0]{index=0}
+      - name: Set up Node
         uses: actions/setup-node@v3
         with:
-          node-version: '22.x'
+          node-version: '22'  # stick to major; Azure hosts 22-lts images
 
-      - name: npm install, build, and test
+      # 2 ▪ Install / build / (optional) test
+      - name: npm ci, build, test
         run: |
-          npm install
+          npm ci
           npm run build --if-present
-          npm run test --if-present
+          npm test --if-present
 
-      - name: Zip artifact for deployment
-        run: zip release.zip ./* -r
+      # 3 ▪ Create deployment package (excludes .git and the workflow cache)
+      - name: Create deployment zip
+        run: |
+          zip -r sqlservice.zip . -x '*.git*'
 
-      - name: Upload artifact for deployment job
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: node-app
-          path: release.zip
+          name: sqlservice-artifact
+          path: sqlservice.zip
 
   deploy:
     runs-on: ubuntu-latest
     needs: build
-    
-    
+
     steps:
-      - name: Download artifact from build job
+      - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: node-app
+          name: sqlservice-artifact
 
-      - name: Unzip artifact for deployment
-        run: unzip release.zip
-      
-      - name: 'Deploy to Azure Web App'
-        id: deploy-to-webapp
+      - name: Deploy to Azure Web App
+        id: deploy
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'sqlservice'
-          slot-name: 'Production'
-          package: .
+          app-name: sqlservice
+          slot-name: Production
+          package: sqlservice.zip          # tell the action which file to push
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_18CFA1C06D394D91BEAE24B68EC054C6 }}

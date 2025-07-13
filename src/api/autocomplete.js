@@ -107,10 +107,16 @@ export async function getIngredientSuggestions(query) {
     const result = await request
       .input('search', sql.NVarChar, query)
       .query(`
-        SELECT TOP 10 english_name, hebrew_name
+        SELECT TOP 10
+          english_name,
+          hebrew_name,
+          Energy,
+          Protein,
+          Total_lipid__fat_,
+          Carbohydrate__by_difference
         FROM foods_storage WITH (NOLOCK)
         WHERE english_name LIKE N'%' + @search + '%'
-        OR hebrew_name LIKE N'%' + @search + '%'
+           OR hebrew_name LIKE N'%' + @search + '%'
         ORDER BY 
           CASE 
             WHEN hebrew_name LIKE N'%' + @search + '%' THEN 0
@@ -125,7 +131,11 @@ export async function getIngredientSuggestions(query) {
     return result.recordset.map(row => ({
       english: row.english_name,
       hebrew: row.hebrew_name,
-      household_measure: '' // Add empty household_measure for compatibility
+      household_measure: '',
+      Energy: row.Energy,
+      Protein: row.Protein,
+      Total_lipid__fat_: row.Total_lipid__fat_,
+      Carbohydrate: row.Carbohydrate__by_difference
     }));
   } catch (err) {
     const endTime = Date.now();
@@ -155,7 +165,7 @@ export async function getIngredientNutrition(englishName) {
           Energy,
           Protein,
           Total_lipid__fat_,
-          Carbohydrate,
+          Carbohydrate__by_difference,
           english_name,
           hebrew_name
         FROM foods_storage WITH (NOLOCK)
