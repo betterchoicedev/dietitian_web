@@ -1,46 +1,45 @@
-# .github/workflows/azure-backend.yml
-# Deploy the backend folder to Azure App Service "dietitian-be"
-
 name: Build & deploy backend → Azure Web App (dietitian-be)
 
 on:
   push:
-    branches: [main]          # mirrors Render's auto-deploy-on-commit
+    branches: [main]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read          # required for actions/checkout
+      contents: read
 
+    # All subsequent `run:` commands happen inside ./backend
     defaults:
       run:
-        working-directory: backend   # <<< all commands run from ./backend
+        working-directory: backend
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python (Azure supports up to 3.12; 3.11 is safest)
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'     # 3.13 isn’t GA on Azure yet
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # (Optional) run tests here
+      # (Optional) pytest or other tests here
 
-      - name: Create deployment archive
-        run: zip -r ../backend.zip .  # zip lives one level up
+      - name: Create deployment zip
+        # .. -> zip one level up so the deploy job can pick it up
+        run: zip -r ../backend.zip .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: backend-artifact
-          path: ../backend.zip        # upload the archive we just made
+          path: ../backend.zip
 
   deploy:
     runs-on: ubuntu-latest
@@ -52,13 +51,10 @@ jobs:
         with:
           name: backend-artifact
 
-      - name: Unzip archive (for logging/debug only)
-        run: unzip -l backend.zip
-
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
           app-name: dietitian-be
           slot-name: Production
-          package: backend.zip        # <-- the same file we zipped
+          package: backend.zip              # <── tell the action what to push
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_E89ED6E4A48748E299AEA7F7A5E3AD42 }}
