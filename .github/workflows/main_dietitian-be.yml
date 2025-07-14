@@ -1,4 +1,4 @@
-name: Build & deploy backend → Azure Web App (dietitian-be)
+name: Build & deploy backend → Azure (dietitian-be)
 
 on:
   push:
@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: read
 
-    # All commands run inside ./backend
+    # work inside ./backend
     defaults:
       run:
         working-directory: backend
@@ -19,27 +19,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+        with: { python-version: '3.11' }
 
-      - name: Install dependencies (for tests only)
-        run: |
+      # ── optional local tests ──
+      - run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      # ──────────────────────────
 
-      # ─── Package the *contents* of backend/ ───
-      - name: Create deployment zip (flattened)
+      # 1️⃣  copy requirements.txt one level up
+      - name: Stage deployment zip
         run: |
-          cd ..                     # go to repo root
-          zip -r backend.zip . -i "backend/*" -x "backend/__pycache__/*"
+          cp requirements.txt ..            # now exists at repo root
+          cd ..                             # repo root
+          zip -r backend.zip backend        # keep folder prefix
+          zip -u backend.zip requirements.txt
 
-      - name: Show zip contents (debug)
+      - name: Debug – show zip contents
         run: unzip -l backend.zip | head
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: backend-artifact
           path: backend.zip
@@ -47,20 +48,15 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: build
-
     steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: backend-artifact
+      - uses: actions/download-artifact@v4
+        with: { name: backend-artifact }
 
-      - name: Verify zip presence (debug)
-        run: ls -l backend.zip
+      - run: ls -l backend.zip              # sanity check
 
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
+      - uses: azure/webapps-deploy@v3
         with:
           app-name: dietitian-be
           slot-name: Production
-          package: backend.zip                 # same file we just verified
+          package: backend.zip
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_E89ED6E4A48748E299AEA7F7A5E3AD42 }}
