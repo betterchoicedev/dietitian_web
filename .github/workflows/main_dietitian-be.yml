@@ -1,42 +1,39 @@
-# .github/workflows/main_dietitian-be.yml
+# .github/workflows/main_dietitian-be.yml  (patched)
 name: Deploy backend → Azure (dietitian-be)
 
 on:
   push:
-    branches: [main]          # or whatever
+    branches: [main]
   workflow_dispatch:
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
-    # everything we do happens *inside* ./dietitian_web/backend
+    # ✅ repo-root is already .../dietitian_web
     defaults:
       run:
-        working-directory: dietitian_web/backend
+        working-directory: backend       # <-- just backend
 
     steps:
-      # 1️⃣  get the code
       - uses: actions/checkout@v4
 
-      # 2️⃣  (optional) run unit tests or linters
+      # (optional) local tests
       - name: Install deps for local checks
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # pytest -q             # ← your tests here, if any
 
-      # 3️⃣  create a ZIP whose *root* is the backend folder itself
+      # package only the backend folder
       - name: Zip backend for Azure
         run: |
           zip -r ${{ github.workspace }}/backend.zip . \
                  -x "venv/**" "__pycache__/**"
 
-      # 4️⃣  deploy straight from that ZIP
       - name: Deploy to App Service
         uses: azure/webapps-deploy@v3
         with:
           app-name: dietitian-be
           slot-name: Production
-          package: ${{ github.workspace }}/backend.zip   # <- points at the zip
+          package: ${{ github.workspace }}/backend.zip
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_E89ED6E4A48748E299AEA7F7A5E3AD42 }}
