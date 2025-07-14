@@ -1,4 +1,4 @@
-name: Build & deploy backend → Azure Web App (dietitian-be)
+name: Build & deploy backend → Azure (dietitian-be)
 
 on:
   push:
@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: read
 
-    # All subsequent `run:` commands happen inside ./backend
+    # build runs inside ./backend
     defaults:
       run:
         working-directory: backend
@@ -19,27 +19,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python (Azure supports up to 3.12; 3.11 is safest)
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # (Optional) pytest or other tests here
+      - name: Package **backend/** folder
+        run: |
+          cd ..                       # repo root
+          zip -r backend.zip backend  # includes folder prefix
 
-      - name: Create deployment zip
-        # .. -> zip one level up so the deploy job can pick it up
-        run: zip -r ../backend.zip .
+      - name: Show zip content (debug)
+        run: unzip -l backend.zip | head
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: backend-artifact
-          path: ../backend.zip
+          path: backend.zip           # exact filename
 
   deploy:
     runs-on: ubuntu-latest
@@ -51,10 +53,13 @@ jobs:
         with:
           name: backend-artifact
 
+      - name: Verify zip presence (debug)
+        run: ls -l backend.zip
+
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
           app-name: dietitian-be
           slot-name: Production
-          package: backend.zip              # <── tell the action what to push
+          package: backend.zip        # ← must match filename above
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_E89ED6E4A48748E299AEA7F7A5E3AD42 }}
