@@ -1,4 +1,4 @@
-name: Build & deploy backend → Azure (dietitian-be)
+name: Build & deploy backend → Azure Web App (dietitian-be)
 
 on:
   push:
@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: read
 
-    # build runs inside ./backend
+    # All commands run inside ./backend
     defaults:
       run:
         working-directory: backend
@@ -19,29 +19,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install deps
+      - name: Install dependencies (for tests only)
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Package **backend/** folder
+      # ─── Package the *contents* of backend/ ───
+      - name: Create deployment zip (flattened)
         run: |
-          cd ..                       # repo root
-          zip -r backend.zip backend  # includes folder prefix
+          cd ..                     # go to repo root
+          zip -r backend.zip . -i "backend/*" -x "backend/__pycache__/*"
 
-      - name: Show zip content (debug)
+      - name: Show zip contents (debug)
         run: unzip -l backend.zip | head
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: backend-artifact
-          path: backend.zip           # exact filename
+          path: backend.zip
 
   deploy:
     runs-on: ubuntu-latest
@@ -61,5 +62,5 @@ jobs:
         with:
           app-name: dietitian-be
           slot-name: Production
-          package: backend.zip        # ← must match filename above
+          package: backend.zip                 # same file we just verified
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_E89ED6E4A48748E299AEA7F7A5E3AD42 }}
