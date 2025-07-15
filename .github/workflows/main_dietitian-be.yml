@@ -38,7 +38,7 @@ jobs:
           package: ${{ github.workspace }}/backend.zip
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_E89ED6E4A48748E299AEA7F7A5E3AD42 }}
 
-      - name: Configure startup command
+      - name: Configure App Service settings
         uses: azure/appservice-settings@v1
         with:
           app-name: dietitian-be
@@ -51,9 +51,12 @@ jobs:
               {
                 "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
                 "value": "0"
+              },
+              {
+                "name": "WEBSITES_CONTAINER_START_TIME_LIMIT",
+                "value": "1800"
               }
             ]
-          startup-command: "cd /home/site/wwwroot && python -m pip install --upgrade pip && pip install -r requirements.txt && gunicorn --bind 0.0.0.0:8000 backend:app"
 
 # Note: Make sure to configure these environment variables in Azure App Service:
 # - supabaseUrl
