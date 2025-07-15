@@ -612,5 +612,5 @@ initializeDatabase().catch(err => {
 
 app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
-  console.log(`🔗 Health check: http://localhost:${port}/health`);
+  console.log(`🔗 Health check: sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net:${port}/health`);
 });

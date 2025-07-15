@@ -109,7 +109,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
     setIsLoading(true);
     try {
-      const url = `http://localhost:3001/api/suggestions?query=${encodeURIComponent(query)}`;
+      const url = `sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/suggestions?query=${encodeURIComponent(query)}`;
       console.log('🔍 Fetching suggestions from:', url);
       
       const response = await fetch(url);
@@ -171,7 +171,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
   const handleSelect = async (suggestion) => {
     console.log('🔍 handleSelect called with suggestion:', suggestion);
     try {
-      const url = `http://localhost:3001/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`;
+      const url = `sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`;
       console.log('🌐 Fetching from URL:', url);
       
       const response = await fetch(url);
@@ -875,7 +875,7 @@ const MenuCreate = () => {
       setProgress(5);
       setProgressStep('🎯 Analyzing client preferences...');
 
-      const templateRes = await fetch("http://127.0.0.1:5000/api/template", {
+      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_code: selectedUser.user_code })
@@ -891,7 +891,7 @@ const MenuCreate = () => {
       setProgress(30);
       setProgressStep('🍽️ Creating personalized meals...');
 
-      const buildRes = await fetch("http://127.0.0.1:5000/api/build-menu", {
+      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template, user_code: selectedUser.user_code }),
