@@ -10,17 +10,13 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
-    # ✅ repo-root is already .../dietitian_web
-    defaults:
-      run:
-        working-directory: backend       # <-- just backend
-
     steps:
       - uses: actions/checkout@v4
 
       # (optional) local tests
       - name: Install deps for local checks
         run: |
+          cd backend
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
@@ -28,7 +24,7 @@ jobs:
       - name: Zip backend for Azure
         run: |
           cd backend
-          zip -r ${{ github.workspace }}/backend.zip . \
+          zip -r ../backend.zip . \
                  -x "venv/**" "__pycache__/**"
 
       - name: Deploy to App Service
