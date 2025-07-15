@@ -26,8 +26,10 @@ Configure these environment variables in your Azure App Service:
 ### Startup Command
 Set the startup command in Azure App Service to:
 ```bash
-pip install -r requirements.txt && python backend.py
+python backend.py
 ```
+
+**Note:** Azure App Service will automatically install dependencies from requirements.txt during deployment.
 
 ### Application Settings
 Configure these app settings in Azure:

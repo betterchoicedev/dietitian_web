@@ -1,2 +1,1 @@
-[config]
-command = pip install -r requirements.txt && python backend.py 
+# Remove this file to let Azure App Service handle deployment automatically 
