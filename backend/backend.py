@@ -327,709 +327,263 @@ def generate_menu_pdf():
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     width, height = letter
-    y = height - 40
-    margin = 40
-    card_width = width - 2*margin - 20  # Make all frames the same width
-    card_padding = 20
-    card_height = 90
-    line_height = 12
-    first_page = True
-    client_name = "OBI"
-    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    y = height - 50
+    margin = 50
+    line_height = 14
 
-    # Register Hebrew-compatible font with aggressive downloading
+    # Simple color scheme
+    title_color = colors.HexColor("#1f2937")
+    subtitle_color = colors.HexColor("#6b7280")
+    accent_color = colors.HexColor("#059669")
+    macro_colors = {
+        'protein': colors.HexColor("#2563eb"),
+        'carbs': colors.HexColor("#fb923c"),
+        'fat': colors.HexColor("#facc15"),
+        'calories': accent_color
+    }
+
+    # Register Hebrew font
     hebrew_font = 'Helvetica'
-    hebrew_font_bold = 'Helvetica-Bold'
-    
-    # Force download and embed a Hebrew font
     try:
         import urllib.request
         import tempfile
         import os
-        
         temp_dir = tempfile.gettempdir()
-        font_path = os.path.join(temp_dir, 'NotoSansHebrew.ttf')
-        
-        # Always try to get a fresh Hebrew font
-        logger.info("🔄 Ensuring Hebrew font availability...")
-        
+        font_path = os.path.join(temp_dir, 'NotoSansHebrew-Regular.ttf')
         if not os.path.exists(font_path):
-            logger.info("📥 Downloading Noto Sans Hebrew font...")
-            try:
-                # Use Google's Noto Sans Hebrew (specifically designed for Hebrew)
                 urllib.request.urlretrieve(
                     'https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansHebrew/NotoSansHebrew-Regular.ttf',
                     font_path
                 )
-                logger.info("✅ Hebrew font download completed")
-            except Exception as download_err:
-                logger.warning(f"Primary Hebrew font download failed: {download_err}")
-                
-                # Fallback to DejaVu Sans
-                logger.info("📥 Trying DejaVu Sans as fallback...")
-                try:
-                    urllib.request.urlretrieve(
-                        'https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf',
-                        font_path
-                    )
-                    logger.info("✅ Fallback font download completed")
-                except Exception as fallback_err:
-                    logger.error(f"Fallback font download also failed: {fallback_err}")
-                    raise Exception("Could not download any Hebrew-compatible font")
-        
-        # Register the Hebrew font
-        if os.path.exists(font_path):
-            try:
-                pdfmetrics.registerFont(TTFont('HebrewFont', font_path))
-                hebrew_font = 'HebrewFont'
-                hebrew_font_bold = 'HebrewFont'  # Use same font for bold
-                logger.info(f"✅ Successfully registered Hebrew font from: {font_path}")
-                
-                # Verify the font contains Hebrew characters
-                from reportlab.pdfbase._fontdata import standardFonts
-                logger.info(f"📋 Registered fonts: {list(pdfmetrics._fonts.keys())}")
-                
-            except Exception as reg_err:
-                logger.error(f"Font registration failed: {reg_err}")
-                raise
-        else:
-            raise Exception("Hebrew font file not found after download attempt")
-            
-    except Exception as e:
-        logger.error(f"❌ Complete Hebrew font setup failed: {e}")
-        logger.warning("🔄 Trying Windows system fonts as last resort...")
-        
-        # Try Windows system fonts as absolute last resort
+        pdfmetrics.registerFont(TTFont('NotoSansHebrew', font_path))
+        hebrew_font = 'NotoSansHebrew'
+    except Exception:
+        # Fallback to Arial if on Windows
         try:
             import platform
             if platform.system() == "Windows":
-                # Try common Windows Hebrew fonts
-                windows_fonts = [
-                    'C:/Windows/Fonts/arial.ttf',
-                    'C:/Windows/Fonts/calibri.ttf',
-                    'C:/Windows/Fonts/tahoma.ttf'
-                ]
-                
-                for font_path in windows_fonts:
-                    try:
-                        if os.path.exists(font_path):
-                            pdfmetrics.registerFont(TTFont('HebrewFont', font_path))
-                            hebrew_font = 'HebrewFont'
-                            hebrew_font_bold = 'HebrewFont'
-                            logger.info(f"✅ Using Windows system font: {font_path}")
-                            break
-                    except:
-                        continue
-        except Exception as windows_err:
-            logger.error(f"Windows font fallback failed: {windows_err}")
-            logger.error("🚨 No Hebrew fonts available - Hebrew text will show as squares")
-    
-    logger.info(f"Final Hebrew font choice: {hebrew_font} (bold: {hebrew_font_bold})")
-    
-    # Test if the Hebrew font actually works
-    if hebrew_font != 'Helvetica':
-        try:
-            test_canvas = canvas.Canvas(BytesIO(), pagesize=letter)
-            test_canvas.setFont(hebrew_font, 12)
-            test_text = "Test שלום"
-            test_canvas.drawString(50, 50, test_text)
-            logger.info("✅ Hebrew font test passed")
-        except Exception as font_test_error:
-            logger.error(f"❌ Hebrew font test failed: {font_test_error}")
-            logger.warning("Falling back to Helvetica")
-            hebrew_font = 'Helvetica'
-            hebrew_font_bold = 'Helvetica-Bold'
+                arial_path = 'C:/Windows/Fonts/arial.ttf'
+                if os.path.exists(arial_path):
+                    pdfmetrics.registerFont(TTFont('Arial', arial_path))
+                    hebrew_font = 'Arial'
+        except Exception:
+            pass
 
     def contains_hebrew(text):
-        """Check if text contains Hebrew characters"""
         if not text:
             return False
-        # Hebrew Unicode range: 0x0590-0x05FF
-        hebrew_chars = any(0x0590 <= ord(char) <= 0x05FF for char in str(text))
-        if hebrew_chars:
-            logger.info(f"Hebrew text detected: {text[:50]}...")
-        return hebrew_chars
+        return any(0x0590 <= ord(ch) <= 0x05FF for ch in str(text))
 
-    def process_hebrew_text(text):
-        """Process Hebrew text for proper display with bidirectional support"""
+    def process_hebrew(text):
         if not text:
             return text
-        
-        # Convert to string and handle encoding
-        text = str(text)
-        
-        # For RTL text, we need to process for proper display
-        if contains_hebrew(text) and BIDI_SUPPORT:
-            try:
-                # First, reshape Arabic/Hebrew characters if needed
-                reshaped_text = reshape(text)
-                
-                # Then apply bidirectional algorithm for proper RTL display
-                bidi_text = get_display(reshaped_text)
-                
-                logger.debug(f"Processed Hebrew text: '{text}' -> '{bidi_text}'")
-                return bidi_text
-                
-            except Exception as e:
-                logger.warning(f"Error processing Hebrew text '{text}': {e}")
-                # Fallback to original text
+        try:
+            reshaped = reshape(text)
+            return get_display(reshaped)
+        except Exception:
                 return text
-        else:
-            # For non-Hebrew text or when BIDI support is not available
-            try:
-                # Ensure text is properly encoded
-                text = text.encode('utf-8').decode('utf-8')
-            except:
-                pass
-                
-        return text
 
-    def get_font(text, size, bold=False):
-        """Get appropriate font based on text content"""
-        processed_text = process_hebrew_text(text)
-        if contains_hebrew(processed_text):
-            font_choice = hebrew_font_bold if bold else hebrew_font
-            logger.debug(f"Using Hebrew font '{font_choice}' for text: {processed_text[:30]}...")
-            return (font_choice, size)
-        else:
-            return (('Helvetica-Bold' if bold else 'Helvetica'), size)
-
-    def draw_text(x, y, text, size=10, bold=False, color=colors.black):
-        """Draw text with appropriate font for Hebrew support"""
-        processed_text = process_hebrew_text(text)
-        font_name, font_size = get_font(processed_text, size, bold)
-        
-        # Enhanced logging for Hebrew text
-        if contains_hebrew(processed_text):
-            logger.info(f"🔤 Drawing Hebrew text: '{processed_text[:50]}...'")
-            logger.info(f"🎨 Using font: {font_name} (size: {font_size})")
-            logger.info(f"📍 Position: ({x}, {y})")
-        
-        try:
-            c.setFont(font_name, font_size)
+    def draw_text(x, y, text, size=10, bold=False, color=colors.black, rtl=False):
+        if contains_hebrew(text):
+            text = process_hebrew(text)
+            font = hebrew_font
+            if rtl:
+                c.setFont(font, size)
             c.setFillColor(color)
-            c.drawString(x, y, processed_text)
-            
-            if contains_hebrew(processed_text):
-                logger.info(f"✅ Successfully drew Hebrew text with {font_name}")
-                
-        except Exception as e:
-            logger.error(f"❌ Error drawing text '{processed_text[:30]}...': {e}")
-            logger.warning(f"🔄 Falling back to Helvetica for: {processed_text[:30]}...")
-            
-            # Fallback to Helvetica
-            try:
-                c.setFont('Helvetica', font_size)
-                c.setFillColor(color)
-                c.drawString(x, y, processed_text)
-                logger.warning("⚠️ Used Helvetica fallback (Hebrew will show as squares)")
-            except Exception as fallback_e:
-                logger.error(f"❌ Even Helvetica fallback failed: {fallback_e}")
+            c.drawRightString(x, y, str(text))
+            return
+        font = 'Helvetica-Bold' if bold else 'Helvetica'
+        c.setFont(font, size)
+        c.setFillColor(color)
+        c.drawString(x, y, str(text))
 
-    def draw_centered_text(x, y, text, size=10, bold=False, color=colors.black):
-        """Draw centered text with appropriate font for Hebrew support"""
-        processed_text = process_hebrew_text(text)
-        font_name, font_size = get_font(processed_text, size, bold)
-        
-        # Enhanced logging for Hebrew text
-        if contains_hebrew(processed_text):
-            logger.info(f"🔤 Drawing centered Hebrew text: '{processed_text[:50]}...'")
-            logger.info(f"🎨 Using font: {font_name} (size: {font_size})")
-            logger.info(f"📍 Centered at: ({x}, {y})")
-        
-        try:
-            c.setFont(font_name, font_size)
+    def draw_centered_text(x, y, text, size=10, bold=False, color=colors.black, rtl=False):
+        if contains_hebrew(text):
+            text = process_hebrew(text)
+            font = hebrew_font
+            c.setFont(font, size)
             c.setFillColor(color)
-            c.drawCentredString(x, y, processed_text)
-            
-            if contains_hebrew(processed_text):
-                logger.info(f"✅ Successfully drew centered Hebrew text with {font_name}")
-                
-        except Exception as e:
-            logger.error(f"❌ Error drawing centered text '{processed_text[:30]}...': {e}")
-            logger.warning(f"🔄 Falling back to Helvetica for centered text: {processed_text[:30]}...")
-            
-            # Fallback to Helvetica
-            try:
-                c.setFont('Helvetica', font_size)
-                c.setFillColor(color)
-                c.drawCentredString(x, y, processed_text)
-                logger.warning("⚠️ Used Helvetica fallback for centered text (Hebrew will show as squares)")
-            except Exception as fallback_e:
-                logger.error(f"❌ Even Helvetica fallback failed for centered text: {fallback_e}")
+            c.drawCentredString(x, y, str(text))
+            return
+        font = 'Helvetica-Bold' if bold else 'Helvetica'
+        c.setFont(font, size)
+        c.setFillColor(color)
+        c.drawCentredString(x, y, str(text))
 
-    # --- Colors ---
-    green_bg = colors.HexColor("#e6f9f0")
-    green_accent = colors.HexColor("#22c55e")
-    blue_bg = colors.HexColor("#e0f2fe")
-    blue_accent = colors.HexColor("#2563eb")
-    yellow_accent = colors.HexColor("#facc15")
-    orange_accent = colors.HexColor("#fb923c")
-    border_color = colors.HexColor("#d1fae5")
+    # Header
+    if contains_hebrew(menu.get('meals', [{}])[0].get('meal', '')):
+        rtl = True
+    else:
+        rtl = False
+    draw_centered_text(width/2, y, "BetterChoice - Meal Plan", size=20, bold=True, color=accent_color, rtl=rtl)
+    y -= 30
+    draw_centered_text(width/2, y, "Personalized Nutrition Menu", size=14, color=subtitle_color, rtl=rtl)
+    y -= 25
+    today_str = datetime.datetime.now().strftime("%B %d, %Y")
+    draw_centered_text(width/2, y, f"Generated on {today_str}", size=12, color=subtitle_color, rtl=rtl)
+    y -= 40
 
-    def draw_logo(y):
-        import os  # Import os within the function to ensure availability
-        logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../public/logo-placeholder.png'))
-        if os.path.exists(logo_path):
-            try:
-                logo = ImageReader(logo_path)
-                c.drawImage(logo, width/2-40, y-60, width=80, height=80, mask='auto')
-            except Exception:
-                pass
-        return y - 80
-
-    def draw_copyright():
-        c.setStrokeColor(border_color)
-        c.setLineWidth(1)
-        c.line(margin, margin+20, width-margin, margin+20)
-        draw_centered_text(width/2, margin+8, "© BetterChoice 2025", size=10, color=colors.grey)
-
-    def draw_title(y):
-        draw_centered_text(width/2, y, "BetterChoice - Meal Plan", size=24, bold=True, color=green_accent)
-        y -= 30
-        draw_centered_text(width/2, y, "Personalized Nutrition Menu", size=14, color=colors.black)
-        y -= 18
-        draw_centered_text(width/2, y, f"Client: {client_name}", size=12, bold=True, color=green_accent)
-        y -= 14
-        draw_centered_text(width/2, y, f"Date: {today_str}", size=11, color=colors.grey)
-        y -= 12
-        c.setStrokeColor(border_color)
-        c.setLineWidth(2)
-        c.line(margin, y, width-margin, y)
-        y -= 20
-        return y
-
-    # Draw logo and title only on the first page
-    if first_page:
-        y = draw_logo(y)
-        y = draw_title(y)
-        first_page = False
-
-    # --- Daily Totals Card ---
+    # Daily totals if available
     if "totals" in menu:
         totals = menu["totals"]
-        # Create a more elegant totals card with gradient-like effect
-        c.setFillColor(green_bg)
-        c.roundRect((width-card_width)/2, y-70, card_width, 70, 15, fill=1, stroke=0)
-        
-        # Add a subtle border
-        c.setStrokeColor(green_accent)
-        c.setLineWidth(2)
-        c.roundRect((width-card_width)/2, y-70, card_width, 70, 15, fill=0, stroke=1)
-        
-        # Title with smaller, more elegant font
-        draw_text((width-card_width)/2+card_padding, y-22, "Daily Nutritional Summary", size=12, bold=True, color=green_accent)
-        
-        # Macro values with smaller, cleaner fonts
-        x0 = (width-card_width)/2+card_padding
-        
-        # Calories
-        draw_text(x0, y-42, f"{totals.get('calories', 0)} kcal", size=11, bold=True, color=green_accent)
-        
-        # Macros with better spacing
-        draw_text(x0+110, y-42, f"Carbs: {totals.get('carbs', 0)}g", size=11, bold=True, color=orange_accent)
-        draw_text(x0+220, y-42, f"Fat: {totals.get('fat', 0)}g", size=11, bold=True, color=yellow_accent)
-        draw_text(x0+310, y-42, f"Protein: {totals.get('protein', 0)}g", size=11, bold=True, color=blue_accent)
-        
-        # Add a subtle separator line
-        c.setStrokeColor(colors.HexColor("#d1fae5"))
-        c.setLineWidth(1)
-        c.line((width-card_width)/2+card_padding, y-55, (width+card_width)/2-card_padding, y-55)
-        
-        y -= 70 + 25
+        draw_text(margin if not rtl else width-margin, y, "Daily Nutritional Summary:" if not rtl else "סיכום תזונתי יומי:", size=14, bold=True, color=title_color, rtl=rtl)
+        y -= 20
+        col_width = 120
+        start_x = margin if not rtl else width - margin - col_width * 4
+        # Headers
+        draw_text(start_x, y, "Calories" if not rtl else "קלוריות", size=12, bold=True, color=macro_colors['calories'], rtl=rtl)
+        draw_text(start_x + col_width, y, "Protein" if not rtl else "חלבון", size=12, bold=True, color=macro_colors['protein'], rtl=rtl)
+        draw_text(start_x + col_width * 2, y, "Carbs" if not rtl else "פחמימות", size=12, bold=True, color=macro_colors['carbs'], rtl=rtl)
+        draw_text(start_x + col_width * 3, y, "Fat" if not rtl else "שומן", size=12, bold=True, color=macro_colors['fat'], rtl=rtl)
+        y -= 15
+        # Values
+        draw_text(start_x, y, f"{totals.get('calories', 0)} kcal", size=12, color=title_color, rtl=rtl)
+        draw_text(start_x + col_width, y, f"{totals.get('protein', 0)}g", size=12, color=title_color, rtl=rtl)
+        draw_text(start_x + col_width * 2, y, f"{totals.get('carbs', 0)}g", size=12, color=title_color, rtl=rtl)
+        draw_text(start_x + col_width * 3, y, f"{totals.get('fat', 0)}g", size=12, color=title_color, rtl=rtl)
+        y -= 40
 
-    # Helper function to estimate text lines for better height calculation
-    def estimate_ingredient_lines(ingredients, max_text_width):
-        total_lines = 0
-        for ing in ingredients:
-            item = ing.get('item', '')
-            quantity = ing.get('quantity', '')
-            unit = ing.get('unit', '')
-            household_measure = ing.get('household_measure', '')
-            
-            if household_measure:
-                ingredient_text = f"{item} - {quantity} {unit} ({household_measure})"
-            else:
-                ingredient_text = f"{item} - {quantity} {unit}"
-            
-            # Estimate number of lines this text would wrap to
-            if c.stringWidth(ingredient_text, "Helvetica", 9) > max_text_width:
-                words = ingredient_text.split()
-                lines = 1
-                current_line = ""
-                
-                for word in words:
-                    test_line = current_line + (" " if current_line else "") + word
-                    if c.stringWidth(test_line, "Helvetica", 9) > max_text_width:
-                        if current_line:
-                            lines += 1
-                            current_line = word
-                        else:
-                            current_line = word
-                    else:
-                        current_line = test_line
-                
-                total_lines += lines
-            else:
-                total_lines += 1
-        
-        return total_lines
-
-    # --- Meals as Cards ---
+    # Meals
     if "meals" in menu:
         for meal in menu["meals"]:
-            # --- Calculate total height needed for this meal box ---
-            main_ings = meal.get('main', {}).get('ingredients', [])
-            alt_ings = meal.get('alternative', {}).get('ingredients', [])
-            
-            # More accurate height calculation considering text wrapping
-            macro_x = margin + 10 + card_width - 130  # Position where macros start
-            max_text_width = macro_x - (margin + 10) - card_padding - 30
-            
-            main_ing_lines = estimate_ingredient_lines(main_ings, max_text_width) if main_ings else 0
-            alt_ing_lines = estimate_ingredient_lines(alt_ings, max_text_width) if alt_ings else 0
-            
-            main_card_height = max(card_height, card_padding*2 + line_height*main_ing_lines + 35)  # 35 for title + "Ingredients:" label
-            alt_card_height = max(card_height, card_padding*2 + line_height*alt_ing_lines + 35)
-            
-            other_alts = meal.get('alternatives', [])
-            other_alt_heights = []
-            for alt in other_alts:
-                alt_ings = alt.get('ingredients', [])
-                alt_ing_lines = estimate_ingredient_lines(alt_ings, max_text_width) if alt_ings else 0
-                other_alt_heights.append(max(card_height, card_padding*2 + line_height*alt_ing_lines + 35))
-            # Height for meal header, main, alt, label, all alternatives, and paddings
-            meal_header_height = 38
-            label_height = 18 if other_alts else 0
-            total_meal_height = (
-                meal_header_height + main_card_height + 18 + alt_card_height + 24 +
-                label_height + sum(h + 18 for h in other_alt_heights) + 10
-            )
-            # --- Page break if not enough space ---
-            if y - total_meal_height < margin + 40:
-                draw_copyright()
-                c.showPage()
-                y = height - 40
-            # --- Start of meal box (invisible, but reserve space) ---
-            box_top = y
-            
-            # Meal Header with improved frame design
             meal_name = meal.get('meal', '')
-            meal_header_height = 40
-            frame_x = margin + 10
-            
-            # Create simple, clean meal name frame
-            c.setFillColor(colors.HexColor("#f9fafb"))  # Very light gray background
-            c.roundRect(frame_x, y-meal_header_height, card_width, meal_header_height, 8, fill=1, stroke=0)
-            
-            # Add clean border
-            c.setStrokeColor(green_accent)
-            c.setLineWidth(2)
-            c.roundRect(frame_x, y-meal_header_height, card_width, meal_header_height, 8, fill=0, stroke=1)
-            
-            # Meal name with better typography
-            # Center the text vertically in the frame
-            text_y = y - meal_header_height/2 - 3
-            draw_text(frame_x + 20, text_y, meal_name, size=16, bold=True, color=colors.HexColor("#1f2937"))
-            
-            # Add a small decorative dot
-            c.setFillColor(green_accent)
-            c.circle(frame_x + 12, text_y + 2, 3, fill=1)
-            
-            y -= meal_header_height + 15
-            # Main Option Card with enhanced design and consistent width
+            is_hebrew = contains_hebrew(meal_name)
+            rtl = is_hebrew
+            if y < margin + 200:
+                c.showPage()
+                y = height - 50
+            draw_text(margin if not rtl else width-margin, y, meal_name, size=16, bold=True, color=accent_color, rtl=rtl)
+            y -= 25
+            # Main option
             main = meal.get('main', {})
-            card_x = frame_x
-            
-            # Main card background with cleaner design
-            c.setFillColor(green_bg)
-            c.roundRect(card_x, y-main_card_height, card_width, main_card_height, 8, fill=1, stroke=0)
-            
-            # Add clean border
-            c.setStrokeColor(green_accent)
-            c.setLineWidth(1)
-            c.roundRect(card_x, y-main_card_height, card_width, main_card_height, 8, fill=0, stroke=1)
-            
-            # Meal title with inline option label (no background)
-            y_main_title = y-25
-            main_title = main.get('meal_title')
+            if main:
+                draw_text((margin + 20) if not rtl else (width - margin - 20), y, "Main Option:" if not rtl else "אפשרות עיקרית:", size=12, bold=True, color=title_color, rtl=rtl)
+                y -= 15
+                main_title = main.get('meal_title', '')
             if main_title:
-                draw_text(card_x+card_padding, y_main_title, f"{main_title} - Main Option", size=11, bold=True, color=colors.HexColor("#059669"))
-                y_content = y_main_title - 20
-            else:
-                draw_text(card_x+card_padding, y_main_title, "Main Option", size=11, bold=True, color=colors.HexColor("#059669"))
-                y_content = y_main_title - 20
-            
-            # Macros on the right side, stacked vertically
-            main_nut = main.get('nutrition', {})
-            macro_x = card_x + card_width - 130  # Right side positioning
-            macro_start_y = y-30
-            
-            # Calories
-            draw_text(macro_x, macro_start_y, f"{main_nut.get('calories', 0)} kcal", size=11, bold=True, color=green_accent)
-            # Protein
-            draw_text(macro_x, macro_start_y - 15, f"Protein: {main_nut.get('protein', 0)}g", size=11, bold=True, color=blue_accent)
-            # Carbs
-            draw_text(macro_x, macro_start_y - 30, f"Carbs: {main_nut.get('carbs', 0)}g", size=11, bold=True, color=orange_accent)
-            # Fat
-            draw_text(macro_x, macro_start_y - 45, f"Fat: {main_nut.get('fat', 0)}g", size=11, bold=True, color=yellow_accent)
-            # Ingredients section with better formatting (left side, constrained width)
-            if main_ings:
-                ingredients_y_start = y_content
-                draw_text(card_x+card_padding, ingredients_y_start, "Ingredients:", size=10, bold=True, color=colors.HexColor("#374151"))
-                
-                ing_y = ingredients_y_start - 15
-                max_text_width = macro_x - card_x - card_padding - 30  # Leave space for macros
-                
-                for ing in main_ings:
-                    # Add bullet point
-                    c.circle(card_x+card_padding+5, ing_y+3, 1.5, fill=1)
-                    # Ingredient text with household_measure included
-                    item = ing.get('item', '')
-                    quantity = ing.get('quantity', '')
-                    unit = ing.get('unit', '')
-                    household_measure = ing.get('household_measure', '')
-                    
-                    # Format: "Item - Quantity Unit (Household Measure)"
-                    if household_measure:
-                        ingredient_text = f"{item} - {quantity} {unit} ({household_measure})"
-                    else:
-                        ingredient_text = f"{item} - {quantity} {unit}"
-                    
-                    # Use text wrapping instead of truncation for better readability
-                    max_width = macro_x - card_x - card_padding - 30
-                    if c.stringWidth(ingredient_text, "Helvetica", 9) > max_width:
-                        # Split long text into multiple lines
-                        words = ingredient_text.split()
-                        lines = []
-                        current_line = ""
+                    draw_text((margin + 30) if not rtl else (width - margin - 30), y, main_title, size=11, bold=True, color=title_color, rtl=rtl)
+                    y -= 15
+                    nutrition = main.get('nutrition', {})
+            if nutrition:
+                    nut_text = f"{nutrition.get('calories', 0)} kcal | Protein: {nutrition.get('protein', 0)}g | Carbs: {nutrition.get('carbs', 0)}g | Fat: {nutrition.get('fat', 0)}g"
+                    if rtl:
+                        nut_text = f"{nutrition.get('calories', 0)} קלוריות | חלבון: {nutrition.get('protein', 0)}g | פחמימות: {nutrition.get('carbs', 0)}g | שומן: {nutrition.get('fat', 0)}g"
+                    draw_text((margin + 30) if not rtl else (width - margin - 30), y, nut_text, size=10, color=subtitle_color, rtl=rtl)
+                    y -= 15
+                    ingredients = main.get('ingredients', [])
+            if ingredients:
+                    draw_text((margin + 30) if not rtl else (width - margin - 30), y, "Ingredients:" if not rtl else "מרכיבים:", size=10, bold=True, color=title_color, rtl=rtl)
+                    y -= 12
+                    for ing in ingredients:
+                        item = ing.get('item', '')
+                        quantity = ing.get('quantity', '')
+                        unit = ing.get('unit', '')
+                        household_measure = ing.get('household_measure', '')
                         
-                        for word in words:
-                            test_line = current_line + (" " if current_line else "") + word
-                            if c.stringWidth(test_line, "Helvetica", 9) <= max_width:
-                                current_line = test_line
-                            else:
-                                if current_line:
-                                    lines.append(current_line)
-                                    current_line = word
-                                else:
-                                    # Single word too long, keep it as is
-                                    current_line = word
+                        # Always show the ingredient, build the text with all available info
+                        parts = [item]
+                        if quantity:
+                            parts.append(str(quantity))
+                        if unit:
+                            parts.append(str(unit))
+                        ing_text = ' '.join(parts)
+                        if household_measure:
+                            ing_text += f" ({household_measure})"
+                        ing_text = f"• {ing_text}"
                         
-                        if current_line:
-                            lines.append(current_line)
-                        
-                        # Draw each line
-                        for line_idx, line in enumerate(lines):
-                            draw_text(card_x+card_padding+12, ing_y - (line_idx * line_height), line, size=9, color=colors.HexColor("#4b5563"))
-                        
-                        # Adjust y position for multiple lines
-                        ing_y -= (len(lines) - 1) * line_height
-                    else:
-                        draw_text(card_x+card_padding+12, ing_y, ingredient_text, size=9, color=colors.HexColor("#4b5563"))
-                    ing_y -= line_height
-            y -= main_card_height + 18
-            # Alternative Option Card with consistent design
-            alt_opt = meal.get('alternative', {})
-            
-            # Alternative card background with cleaner design
-            c.setFillColor(blue_bg)
-            c.roundRect(card_x, y-alt_card_height, card_width, alt_card_height, 8, fill=1, stroke=0)
-            
-            # Add clean border
-            c.setStrokeColor(blue_accent)
-            c.setLineWidth(1)
-            c.roundRect(card_x, y-alt_card_height, card_width, alt_card_height, 8, fill=0, stroke=1)
-            
-            # Alternative title with inline option label (no background)
-            y_alt_title = y-25
-            alt_title = alt_opt.get('meal_title')
+                        draw_text((margin + 40) if not rtl else (width - margin - 40), y, ing_text, size=9, color=title_color, rtl=rtl)
+                        y -= 10
+            y -= 10
+            # Alternative option
+            alternative = meal.get('alternative', {})
+            if alternative:
+                draw_text((margin + 20) if not rtl else (width - margin - 20), y, "Alternative Option:" if not rtl else "אפשרות חלופית:", size=12, bold=True, color=title_color, rtl=rtl)
+                y -= 15
+                alt_title = alternative.get('meal_title', '')
             if alt_title:
-                draw_text(card_x+card_padding, y_alt_title, f"{alt_title} - Alternative 1", size=11, bold=True, color=colors.HexColor("#0369a1"))
-                y_alt_content = y_alt_title - 20
-            else:
-                draw_text(card_x+card_padding, y_alt_title, "Alternative 1", size=11, bold=True, color=colors.HexColor("#0369a1"))
-                y_alt_content = y_alt_title - 20
-            
-            # Macros on the right side, stacked vertically
-            alt_nut = alt_opt.get('nutrition', {})
-            alt_macro_x = card_x + card_width - 130
-            alt_macro_start_y = y-30
-            
-            # Calories
-            draw_text(alt_macro_x, alt_macro_start_y, f"{alt_nut.get('calories', 0)} kcal", size=11, bold=True, color=green_accent)
-            # Protein
-            draw_text(alt_macro_x, alt_macro_start_y - 15, f"Protein: {alt_nut.get('protein', 0)}g", size=11, bold=True, color=blue_accent)
-            # Carbs
-            draw_text(alt_macro_x, alt_macro_start_y - 30, f"Carbs: {alt_nut.get('carbs', 0)}g", size=11, bold=True, color=orange_accent)
-            # Fat
-            draw_text(alt_macro_x, alt_macro_start_y - 45, f"Fat: {alt_nut.get('fat', 0)}g", size=11, bold=True, color=yellow_accent)
-            # Alternative ingredients section with better formatting
-            if alt_ings:
-                alt_ingredients_y_start = y_alt_content
-                draw_text(card_x+card_padding, alt_ingredients_y_start, "Ingredients:", size=10, bold=True, color=colors.HexColor("#374151"))
-                
-                ing_y = alt_ingredients_y_start - 15
-                
-                for ing in alt_ings:
-                    # Add bullet point
-                    c.circle(card_x+card_padding+5, ing_y+3, 1.5, fill=1)
-                    # Ingredient text with household_measure included
-                    item = ing.get('item', '')
-                    quantity = ing.get('quantity', '')
-                    unit = ing.get('unit', '')
-                    household_measure = ing.get('household_measure', '')
-                    
-                    # Format: "Item - Quantity Unit (Household Measure)"
-                    if household_measure:
-                        ingredient_text = f"{item} - {quantity} {unit} ({household_measure})"
-                    else:
-                        ingredient_text = f"{item} - {quantity} {unit}"
-                    
-                    # Use text wrapping instead of truncation for better readability
-                    alt_max_width = alt_macro_x - card_x - card_padding - 30
-                    if c.stringWidth(ingredient_text, "Helvetica", 9) > alt_max_width:
-                        # Split long text into multiple lines
-                        words = ingredient_text.split()
-                        lines = []
-                        current_line = ""
+                    draw_text((margin + 30) if not rtl else (width - margin - 30), y, alt_title, size=11, bold=True, color=title_color, rtl=rtl)
+                    y -= 15
+                    alt_nutrition = alternative.get('nutrition', {})
+            if alt_nutrition:
+                    alt_nut_text = f"{alt_nutrition.get('calories', 0)} kcal | Protein: {alt_nutrition.get('protein', 0)}g | Carbs: {alt_nutrition.get('carbs', 0)}g | Fat: {alt_nutrition.get('fat', 0)}g"
+                    if rtl:
+                        alt_nut_text = f"{alt_nutrition.get('calories', 0)} קלוריות | חלבון: {alt_nutrition.get('protein', 0)}g | פחמימות: {alt_nutrition.get('carbs', 0)}g | שומן: {alt_nutrition.get('fat', 0)}g"
+                    draw_text((margin + 30) if not rtl else (width - margin - 30), y, alt_nut_text, size=10, color=subtitle_color, rtl=rtl)
+                    y -= 15
+                    alt_ingredients = alternative.get('ingredients', [])
+            if alt_ingredients:
+                    draw_text((margin + 30) if not rtl else (width - margin - 30), y, "Ingredients:" if not rtl else "מרכיבים:", size=10, bold=True, color=title_color, rtl=rtl)
+                    y -= 12
+                    for ing in alt_ingredients:
+                        item = ing.get('item', '')
+                        quantity = ing.get('quantity', '')
+                        unit = ing.get('unit', '')
+                        household_measure = ing.get('household_measure', '')
                         
-                        for word in words:
-                            test_line = current_line + (" " if current_line else "") + word
-                            if c.stringWidth(test_line, "Helvetica", 9) <= alt_max_width:
-                                current_line = test_line
-                            else:
-                                if current_line:
-                                    lines.append(current_line)
-                                    current_line = word
-                                else:
-                                    # Single word too long, keep it as is
-                                    current_line = word
+                        # Always show the ingredient, build the text with all available info
+                        parts = [item]
+                        if quantity:
+                            parts.append(str(quantity))
+                        if unit:
+                            parts.append(str(unit))
+                        ing_text = ' '.join(parts)
+                        if household_measure:
+                            ing_text += f" ({household_measure})"
+                        ing_text = f"• {ing_text}"
                         
-                        if current_line:
-                            lines.append(current_line)
-                        
-                        # Draw each line
-                        for line_idx, line in enumerate(lines):
-                            draw_text(card_x+card_padding+12, ing_y - (line_idx * line_height), line, size=9, color=colors.HexColor("#4b5563"))
-                        
-                        # Adjust y position for multiple lines
-                        ing_y -= (len(lines) - 1) * line_height
-                    else:
-                        draw_text(card_x+card_padding+12, ing_y, ingredient_text, size=9, color=colors.HexColor("#4b5563"))
-                    ing_y -= line_height
-            y -= alt_card_height + 24
-            # Render all other alternatives with improved styling
+                        draw_text((margin + 40) if not rtl else (width - margin - 40), y, ing_text, size=9, color=title_color, rtl=rtl)
+                        y -= 10
+            y -= 10
+            # Additional alternatives
+            other_alts = meal.get('alternatives', [])
             if other_alts:
-                # Section header with frame (consistent width)
-                section_height = 35
-                c.setFillColor(colors.HexColor("#fef3c7"))  # Light yellow background
-                c.roundRect(frame_x, y-section_height, card_width, section_height, 10, fill=1, stroke=0)
-                c.setStrokeColor(blue_accent)
-                c.setLineWidth(1.5)
-                c.roundRect(frame_x, y-section_height, card_width, section_height, 10, fill=0, stroke=1)
-                
-                draw_text(frame_x + 20, y-20, "Additional Alternatives", size=15, bold=True, color=blue_accent)
-                y -= section_height + 15
-                
-                for alt_idx, alt in enumerate(other_alts):
-                    alt_ings = alt.get('ingredients', [])
-                    alt_card_height = max(card_height, card_padding*2 + line_height*len(alt_ings))
-                    
-                    # Additional alternative card background with cleaner design
-                    c.setFillColor(blue_bg)
-                    c.roundRect(card_x, y-alt_card_height, card_width, alt_card_height, 8, fill=1, stroke=0)
-                    
-                    # Add clean border
-                    c.setStrokeColor(blue_accent)
-                    c.setLineWidth(1)
-                    c.roundRect(card_x, y-alt_card_height, card_width, alt_card_height, 8, fill=0, stroke=1)
-                    
-                    # Alternative title with inline option label (no background)
-                    y_add_alt_title = y-25
-                    alt_title = alt.get('meal_title')
+                for idx, alt in enumerate(other_alts):
+                    draw_text((margin + 20) if not rtl else (width - margin - 20), y, f"Additional Alternative {idx + 2}:" if not rtl else f"חלופה נוספת {idx + 2}:", size=12, bold=True, color=title_color, rtl=rtl)
+                    y -= 15
+                    alt_title = alt.get('meal_title', '')
                     if alt_title:
-                        draw_text(card_x+card_padding, y_add_alt_title, f"{alt_title} - Alternative {alt_idx+2}", size=11, bold=True, color=colors.HexColor("#0369a1"))
-                        y_add_alt_content = y_add_alt_title - 20
-                    else:
-                        draw_text(card_x+card_padding, y_add_alt_title, f"Alternative {alt_idx+2}", size=11, bold=True, color=colors.HexColor("#0369a1"))
-                        y_add_alt_content = y_add_alt_title - 20
-                    
-                    # Macros on the right side, stacked vertically
-                    alt_nut = alt.get('nutrition', {})
-                    add_alt_macro_x = card_x + card_width - 130
-                    add_alt_macro_start_y = y-30
-                    
-                    # Calories
-                    draw_text(add_alt_macro_x, add_alt_macro_start_y, f"{alt_nut.get('calories', 0)} kcal", size=11, bold=True, color=green_accent)
-                    # Protein
-                    draw_text(add_alt_macro_x, add_alt_macro_start_y - 15, f"Protein: {alt_nut.get('protein', 0)}g", size=11, bold=True, color=blue_accent)
-                    # Carbs
-                    draw_text(add_alt_macro_x, add_alt_macro_start_y - 30, f"Carbs: {alt_nut.get('carbs', 0)}g", size=11, bold=True, color=orange_accent)
-                    # Fat
-                    draw_text(add_alt_macro_x, add_alt_macro_start_y - 45, f"Fat: {alt_nut.get('fat', 0)}g", size=11, bold=True, color=yellow_accent)
-                    # Additional alternative ingredients with better formatting
-                    if alt_ings:
-                        additional_ingredients_y_start = y_add_alt_content
-                        draw_text(card_x+card_padding, additional_ingredients_y_start, "Ingredients:", size=10, bold=True, color=colors.HexColor("#374151"))
-                        
-                        ing_y = additional_ingredients_y_start - 15
-                        for ing in alt_ings:
-                            # Add bullet point
-                            c.circle(card_x+card_padding+5, ing_y+3, 1.5, fill=1)
-                            # Ingredient text with household_measure included
+                        draw_text((margin + 30) if not rtl else (width - margin - 30), y, alt_title, size=11, bold=True, color=title_color, rtl=rtl)
+                        y -= 15
+                    alt_nutrition = alt.get('nutrition', {})
+                    if alt_nutrition:
+                        alt_nut_text = f"{alt_nutrition.get('calories', 0)} kcal | Protein: {alt_nutrition.get('protein', 0)}g | Carbs: {alt_nutrition.get('carbs', 0)}g | Fat: {alt_nutrition.get('fat', 0)}g"
+                        if rtl:
+                            alt_nut_text = f"{alt_nutrition.get('calories', 0)} קלוריות | חלבון: {alt_nutrition.get('protein', 0)}g | פחמימות: {alt_nutrition.get('carbs', 0)}g | שומן: {alt_nutrition.get('fat', 0)}g"
+                        draw_text((margin + 30) if not rtl else (width - margin - 30), y, alt_nut_text, size=10, color=subtitle_color, rtl=rtl)
+                        y -= 15
+                    alt_ingredients = alt.get('ingredients', [])
+                    if alt_ingredients:
+                        draw_text((margin + 30) if not rtl else (width - margin - 30), y, "Ingredients:" if not rtl else "מרכיבים:", size=10, bold=True, color=title_color, rtl=rtl)
+                        y -= 12
+                        for ing in alt_ingredients:
                             item = ing.get('item', '')
                             quantity = ing.get('quantity', '')
                             unit = ing.get('unit', '')
                             household_measure = ing.get('household_measure', '')
                             
-                            # Format: "Item - Quantity Unit (Household Measure)"
+                            # Always show the ingredient, build the text with all available info
+                            parts = [item]
+                            if quantity:
+                                parts.append(str(quantity))
+                            if unit:
+                                parts.append(str(unit))
+                            ing_text = ' '.join(parts)
                             if household_measure:
-                                ingredient_text = f"{item} - {quantity} {unit} ({household_measure})"
-                            else:
-                                ingredient_text = f"{item} - {quantity} {unit}"
+                                ing_text += f" ({household_measure})"
+                            ing_text = f"• {ing_text}"
                             
-                            # Use text wrapping instead of truncation for better readability
-                            add_alt_max_width = add_alt_macro_x - card_x - card_padding - 30
-                            if c.stringWidth(ingredient_text, "Helvetica", 9) > add_alt_max_width:
-                                # Split long text into multiple lines
-                                words = ingredient_text.split()
-                                lines = []
-                                current_line = ""
-                                
-                                for word in words:
-                                    test_line = current_line + (" " if current_line else "") + word
-                                    if c.stringWidth(test_line, "Helvetica", 9) <= add_alt_max_width:
-                                        current_line = test_line
-                                    else:
-                                        if current_line:
-                                            lines.append(current_line)
-                                            current_line = word
-                                        else:
-                                            # Single word too long, keep it as is
-                                            current_line = word
-                                
-                                if current_line:
-                                    lines.append(current_line)
-                                
-                                # Draw each line
-                                for line_idx, line in enumerate(lines):
-                                    draw_text(card_x+card_padding+12, ing_y - (line_idx * line_height), line, size=9, color=colors.HexColor("#4b5563"))
-                                
-                                # Adjust y position for multiple lines
-                                ing_y -= (len(lines) - 1) * line_height
-                            else:
-                                draw_text(card_x+card_padding+12, ing_y, ingredient_text, size=9, color=colors.HexColor("#4b5563"))
-                            ing_y -= line_height
-                    y -= alt_card_height + 18
-            # --- End of meal box ---
-            y = box_top - total_meal_height  # move y down by reserved height for next meal
-
-    draw_copyright()
-
+                            draw_text((margin + 40) if not rtl else (width - margin - 40), y, ing_text, size=9, color=title_color, rtl=rtl)
+                            y -= 10
+                        y -= 10
+                    y -= 10
+            y -= 20
+    # Footer
+    c.setStrokeColor(colors.grey)
+    c.setLineWidth(1)
+    c.line(margin, margin + 20, width - margin, margin + 20)
+    draw_centered_text(width/2, margin + 8, "© BetterChoice 2025", size=10, color=colors.grey)
     c.save()
     buffer.seek(0)
-
     return send_file(
         buffer,
         as_attachment=True,
@@ -1402,8 +956,10 @@ CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fa
    per_cal  = daily_calories ÷ number_of_meals  
    per_pro  = daily_protein  ÷ number_of_meals  
    per_fat  = daily_fat      ÷ number_of_meals  
-   per_carb = daily_carbs    ÷ number_of_meals  
-2. **Meal check:** Each meal must be within **70–130 %** of its per-meal averages **AND** Dinner must also satisfy its 25–35 % rule.  
+   per_carb = daily_carbs     ÷ number_of_meals  
+2. **Meal check:**  
+    • For Breakfast, Morning Snack, Lunch, Afternoon Snack: each within **70–130 %** of per-meal averages.  
+    • Dinner: must satisfy its own **25–35 %** of daily calories **and** each macro.  
 3. **Alternative match:** Main vs alternative within **±20 % calories & protein, ±30 % fat & carbs**.  
 4. **Daily totals:** Sum of all meals must be within **±5 %** of every daily target; otherwise rebalance and retry.
 

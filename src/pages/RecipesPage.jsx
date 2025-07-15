@@ -442,7 +442,7 @@ function RecipeModal({ recipe, onClose, translations }) {
                     </div>
                     <div className="flex items-center gap-1">
                       <Users className="w-4 h-4" />
-                      {recipe.servings} serving{recipe.servings > 1 ? 's' : ''}
+                      {recipe.servings} {translations.serving || 'serving'}{recipe.servings > 1 ? (translations.pluralSuffix || 's') : ''}
                     </div>
                     <div className="flex items-center gap-1">
                       <Target className="w-4 h-4" />
@@ -479,19 +479,19 @@ function RecipeModal({ recipe, onClose, translations }) {
           {/* Macros */}
           <div className="grid grid-cols-4 gap-4">
             <div className="bg-gradient-to-br from-primary/5 to-primary/10 rounded-xl p-4 border border-primary/20 text-center">
-              <p className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider">Calories</p>
+              <p className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider">{translations.calories || 'Calories'}</p>
               <p className="text-lg font-bold text-primary mt-1">{recipe.macros.calories}</p>
             </div>
             <div className="bg-gradient-to-br from-success/5 to-success/10 rounded-xl p-4 border border-success/20 text-center">
-              <p className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider">Protein</p>
+              <p className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider">{translations.protein || 'Protein'}</p>
               <p className="text-lg font-bold text-success mt-1">{recipe.macros.protein}</p>
             </div>
             <div className="bg-gradient-to-br from-warning/5 to-warning/10 rounded-xl p-4 border border-warning/20 text-center">
-              <p className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider">Fat</p>
+              <p className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider">{translations.fat || 'Fat'}</p>
               <p className="text-lg font-bold text-warning mt-1">{recipe.macros.fat}</p>
             </div>
             <div className="bg-gradient-to-br from-info/5 to-info/10 rounded-xl p-4 border border-info/20 text-center">
-              <p className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider">Carbs</p>
+              <p className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider">{translations.carbs || 'Carbs'}</p>
               <p className="text-lg font-bold text-info mt-1">{recipe.macros.carbs}</p>
             </div>
           </div>
@@ -569,6 +569,7 @@ function RecipeModal({ recipe, onClose, translations }) {
 }
 
 function RecipeCard({ recipe, group, onClick }) {
+  const { translations } = useLanguage();
   const colorMap = {
     success: 'from-success/5 to-success/10 border-success/30',
     warning: 'from-warning/5 to-warning/10 border-warning/30',
@@ -619,24 +620,24 @@ function RecipeCard({ recipe, group, onClick }) {
           ))}
         </div>
 
-        <div className="grid grid-cols-4 gap-2 text-xs text-muted-foreground">
-          <div className="text-center">
-            <p className="font-semibold text-primary">{recipe.macros.calories.split(' ')[0]}</p>
-            <p>kcal</p>
+                  <div className="grid grid-cols-4 gap-2 text-xs text-muted-foreground">
+            <div className="text-center">
+              <p className="font-semibold text-primary">{recipe.macros.calories.split(' ')[0]}</p>
+              <p>{translations.calories || 'kcal'}</p>
+            </div>
+            <div className="text-center">
+              <p className="font-semibold text-success">{recipe.macros.protein}</p>
+              <p>{translations.protein || 'protein'}</p>
+            </div>
+            <div className="text-center">
+              <p className="font-semibold text-warning">{recipe.macros.fat}</p>
+              <p>{translations.fat || 'fat'}</p>
+            </div>
+            <div className="text-center">
+              <p className="font-semibold text-info">{recipe.macros.carbs}</p>
+              <p>{translations.carbs || 'carbs'}</p>
+            </div>
           </div>
-          <div className="text-center">
-            <p className="font-semibold text-success">{recipe.macros.protein}</p>
-            <p>protein</p>
-          </div>
-          <div className="text-center">
-            <p className="font-semibold text-warning">{recipe.macros.fat}</p>
-            <p>fat</p>
-          </div>
-          <div className="text-center">
-            <p className="font-semibold text-info">{recipe.macros.carbs}</p>
-            <p>carbs</p>
-          </div>
-        </div>
       </CardContent>
     </Card>
   );
@@ -700,17 +701,17 @@ export default function RecipesPage() {
           </h1>
           
           <p className="text-xl text-muted-foreground/80 max-w-2xl mx-auto animate-slide-up" style={{ animationDelay: '0.1s' }}>
-            Professional nutrition recipes curated by experts for optimal health and taste
+            {translations.professionalRecipesDescription || 'Professional nutrition recipes curated by experts for optimal health and taste'}
           </p>
           
           <div className="flex items-center justify-center gap-6 mt-8 animate-slide-up" style={{ animationDelay: '0.2s' }}>
             <div className="flex items-center gap-2 px-4 py-2 bg-success/10 border border-success/30 rounded-xl">
               <div className="w-2 h-2 bg-success rounded-full"></div>
-              <span className="text-sm font-medium text-success">120+ Recipes</span>
+              <span className="text-sm font-medium text-success">{translations.recipesCount || '120+ Recipes'}</span>
             </div>
             <div className="flex items-center gap-2 px-4 py-2 bg-primary/10 border border-primary/30 rounded-xl">
               <div className="w-2 h-2 bg-primary rounded-full"></div>
-              <span className="text-sm font-medium text-primary">Expert Approved</span>
+              <span className="text-sm font-medium text-primary">{translations.expertApproved || 'Expert Approved'}</span>
             </div>
           </div>
         </div>
@@ -722,7 +723,7 @@ export default function RecipesPage() {
           <div className="text-center py-8">
             <div className="inline-flex items-center gap-3 px-6 py-3 bg-white/80 backdrop-blur-sm rounded-xl border border-border/40">
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
-              <span className="text-sm font-medium text-foreground">Translating recipes...</span>
+              <span className="text-sm font-medium text-foreground">{translations.translatingRecipes || 'Translating recipes...'}</span>
             </div>
           </div>
         )}
@@ -739,7 +740,7 @@ export default function RecipesPage() {
                     {getTranslatedGroupName(group.group)}
                   </h2>
                   <p className="text-muted-foreground/70">
-                    {group.recipes.length} professional recipe{group.recipes.length !== 1 ? 's' : ''}
+                    {group.recipes.length} {translations.professionalRecipe || 'professional recipe'}{group.recipes.length !== 1 ? (translations.pluralSuffix || 's') : ''}
                   </p>
                 </div>
               </div>

@@ -306,13 +306,13 @@ export default function Layout() {
           <Link to="/recipes" onClick={() => setSidebarOpen(false)}>
             <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-warning/8 hover:text-warning transition-all duration-300 group">
               <FileText className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
-              <span className="font-medium">Recipes</span>
+              <span className="font-medium">{translations.recipes}</span>
             </Button>
           </Link>
           <Link to="/menuload" onClick={() => setSidebarOpen(false)}>
             <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-info/8 hover:text-info transition-all duration-300 group">
               <FileText className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
-              <span className="font-medium">Menu Load</span>
+              <span className="font-medium">{translations.menuload}</span>
             </Button>
           </Link>
         </nav>

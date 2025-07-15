@@ -8,7 +8,12 @@ import {
   Mail, 
   Phone, 
   Edit,
-  Plus
+  Plus,
+  Filter,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  X
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,6 +39,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Separator } from '@/components/ui/separator';
 
 const generateUniqueCode = () => {
   const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -55,6 +62,18 @@ export default function Clients() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showAll, setShowAll] = useState(false);
+  
+  // Sorting and filtering state
+  const [sortField, setSortField] = useState('full_name');
+  const [sortDirection, setSortDirection] = useState('asc');
+  const [filters, setFilters] = useState({
+    goal: 'all',
+    activity: 'all',
+    gender: 'all',
+    ageRange: { min: '', max: '' }
+  });
+  const [showFilters, setShowFilters] = useState(false);
+  
   const [formData, setFormData] = useState({
     user_code: '',
     full_name: '',
@@ -123,6 +142,98 @@ export default function Clients() {
     return newMacros;
   };
 
+  // Sorting function
+  const sortClients = (clients) => {
+    return [...clients].sort((a, b) => {
+      // First, prioritize users with names over those without names
+      const aHasName = a.full_name && a.full_name.trim() !== '';
+      const bHasName = b.full_name && b.full_name.trim() !== '';
+      
+      if (aHasName && !bHasName) return -1; // a has name, b doesn't - a comes first
+      if (!aHasName && bHasName) return 1;  // b has name, a doesn't - b comes first
+      
+      // If both have names or both don't have names, apply normal sorting
+      let aValue = a[sortField];
+      let bValue = b[sortField];
+      
+      // Handle nested properties
+      if (sortField === 'macros.protein') {
+        aValue = a.macros?.protein || 0;
+        bValue = b.macros?.protein || 0;
+      } else if (sortField === 'macros.carbs') {
+        aValue = a.macros?.carbs || 0;
+        bValue = b.macros?.carbs || 0;
+      } else if (sortField === 'macros.fat') {
+        aValue = a.macros?.fat || 0;
+        bValue = b.macros?.fat || 0;
+      }
+      
+      // Convert to numbers for numeric fields
+      if (['age', 'weight_kg', 'height_cm', 'dailyTotalCalories'].includes(sortField)) {
+        aValue = parseFloat(aValue) || 0;
+        bValue = parseFloat(bValue) || 0;
+      }
+      
+      // Handle string comparison
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        aValue = aValue.toLowerCase();
+        bValue = bValue.toLowerCase();
+      }
+      
+      if (sortDirection === 'asc') {
+        return aValue > bValue ? 1 : -1;
+      } else {
+        return aValue < bValue ? 1 : -1;
+      }
+    });
+  };
+
+  // Filtering function
+  const filterClients = (clients) => {
+    return clients.filter(client => {
+      // Goal filter
+      if (filters.goal && filters.goal !== 'all' && client.goal !== filters.goal) return false;
+      
+      // Activity filter
+      if (filters.activity && filters.activity !== 'all' && client.Activity_level !== filters.activity) return false;
+      
+      // Gender filter
+      if (filters.gender && filters.gender !== 'all' && client.gender !== filters.gender) return false;
+      
+      // Age range filter
+      if (filters.ageRange.min && client.age < parseInt(filters.ageRange.min)) return false;
+      if (filters.ageRange.max && client.age > parseInt(filters.ageRange.max)) return false;
+      
+      return true;
+    });
+  };
+
+  // Handle sort column click
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Clear all filters
+  const clearFilters = () => {
+    setFilters({
+      goal: 'all',
+      activity: 'all',
+      gender: 'all',
+      ageRange: { min: '', max: '' }
+    });
+  };
+
+  // Get sort icon
+  const getSortIcon = (field) => {
+    if (sortField !== field) return <ArrowUpDown className="h-4 w-4" />;
+    return sortDirection === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />;
+  };
+
   // Sync macro sliders with formData and calories
   useEffect(() => {
     let cals = parseInt(formData.dailyTotalCalories) || 0;
@@ -159,7 +270,7 @@ export default function Clients() {
       setError(null);
     } catch (error) {
       console.error('Error loading clients:', error);
-      setError('Failed to load clients. Please try again.');
+      setError(translations.failedToLoadClients);
       setClients([]);
     } finally {
       setLoading(false);
@@ -173,9 +284,12 @@ export default function Clients() {
     client.phone_number?.includes(searchTerm)
   );
 
+  // Apply filters and sorting
+  const processedClients = sortClients(filterClients(filteredClients));
+
   // Limit displayed clients to 5 unless "Show All" is clicked or searching
-  const displayedClients = searchTerm || showAll ? filteredClients : filteredClients.slice(0, 5);
-  const hasMoreClients = !searchTerm && !showAll && filteredClients.length > 5;
+  const displayedClients = searchTerm || showAll ? processedClients : processedClients.slice(0, 5);
+  const hasMoreClients = !searchTerm && !showAll && processedClients.length > 5;
 
   const resetForm = () => {
     setFormData({
@@ -342,7 +456,8 @@ export default function Clients() {
       resetForm();
     } catch (error) {
       console.error('Error saving client:', error);
-      setError(`Failed to ${currentClient ? 'update' : 'create'} client: ${error.message}`);
+      const errorMessage = currentClient ? translations.failedToUpdateClient : translations.failedToCreateClient;
+      setError(`${errorMessage} ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -386,19 +501,19 @@ export default function Clients() {
   const getBMIStatus = (bmi) => {
     if (!bmi) return '';
     const bmiNum = parseFloat(bmi);
-    if (bmiNum < 18.5) return 'Underweight';
-    if (bmiNum < 25) return 'Normal';
-    if (bmiNum < 30) return 'Overweight';
-    return 'Obese';
+    if (bmiNum < 18.5) return translations.underweight;
+    if (bmiNum < 25) return translations.normal;
+    if (bmiNum < 30) return translations.overweight;
+    return translations.obese;
   };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Client Management</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{translations.clientManagement}</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Manage your client profiles and information
+            {translations.manageClientProfiles}
           </p>
         </div>
         <Button 
@@ -406,7 +521,7 @@ export default function Clients() {
           className="bg-green-600 hover:bg-green-700"
         >
           <Plus className="h-4 w-4 mr-2" />
-          Add New Client
+          {translations.addNewClient}
         </Button>
       </div>
 
@@ -419,7 +534,7 @@ export default function Clients() {
       <div className="flex items-center space-x-2">
         <Search className="w-5 h-5 text-gray-400" />
         <Input
-          placeholder="Search clients by name, email, code, or phone..."
+          placeholder={translations.searchClients}
           value={searchTerm}
           onChange={(e) => {
             setSearchTerm(e.target.value);
@@ -430,17 +545,174 @@ export default function Clients() {
           }}
           className="max-w-sm"
         />
+        
+        {/* Filter Button */}
+        <Popover open={showFilters} onOpenChange={setShowFilters}>
+          <PopoverTrigger asChild>
+            <Button variant="outline" className="ml-2">
+              <Filter className="h-4 w-4 mr-2" />
+              {translations.filterBy}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-80" align="start">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="font-medium">{translations.filterBy}</h4>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearFilters}
+                  className="h-6 px-2 text-xs"
+                >
+                  <X className="h-3 w-3 mr-1" />
+                  {translations.clearFilters}
+                </Button>
+              </div>
+              
+              <Separator />
+              
+              {/* Goal Filter */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">{translations.filterByGoal}</Label>
+                <Select
+                  value={filters.goal}
+                  onValueChange={(value) => setFilters({...filters, goal: value === 'all' ? '' : value})}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={translations.allGoals} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{translations.allGoals}</SelectItem>
+                    <SelectItem value="lose">{translations.loseWeight}</SelectItem>
+                    <SelectItem value="maintain">{translations.maintainWeight}</SelectItem>
+                    <SelectItem value="gain">{translations.gainWeight}</SelectItem>
+                    <SelectItem value="muscle">{translations.buildMuscle}</SelectItem>
+                    <SelectItem value="health">{translations.improveHealth}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {/* Activity Filter */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">{translations.filterByActivity}</Label>
+                <Select
+                  value={filters.activity}
+                  onValueChange={(value) => setFilters({...filters, activity: value === 'all' ? '' : value})}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={translations.allActivities} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{translations.allActivities}</SelectItem>
+                    <SelectItem value="sedentary">{translations.sedentary}</SelectItem>
+                    <SelectItem value="light">{translations.lightActivity}</SelectItem>
+                    <SelectItem value="moderate">{translations.moderateActivity}</SelectItem>
+                    <SelectItem value="very">{translations.veryActive}</SelectItem>
+                    <SelectItem value="extra">{translations.extraActive}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {/* Gender Filter */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">{translations.filterByGender}</Label>
+                <Select
+                  value={filters.gender}
+                  onValueChange={(value) => setFilters({...filters, gender: value === 'all' ? '' : value})}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={translations.allGenders} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{translations.allGenders}</SelectItem>
+                    <SelectItem value="male">{translations.male}</SelectItem>
+                    <SelectItem value="female">{translations.female}</SelectItem>
+                    <SelectItem value="other">{translations.other}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {/* Age Range Filter */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">{translations.filterByAge}</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    placeholder="Min"
+                    type="number"
+                    value={filters.ageRange.min}
+                    onChange={(e) => setFilters({
+                      ...filters, 
+                      ageRange: {...filters.ageRange, min: e.target.value}
+                    })}
+                  />
+                  <Input
+                    placeholder="Max"
+                    type="number"
+                    value={filters.ageRange.max}
+                    onChange={(e) => setFilters({
+                      ...filters, 
+                      ageRange: {...filters.ageRange, max: e.target.value}
+                    })}
+                  />
+                </div>
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
       </div>
+
+      {/* Filter Summary */}
+      {(filters.goal !== 'all' || filters.activity !== 'all' || filters.gender !== 'all' || filters.ageRange.min || filters.ageRange.max) && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm text-gray-500">{translations.filterBy}:</span>
+          {filters.goal && filters.goal !== 'all' && (
+            <Badge variant="secondary" className="text-xs">
+              {translations.goal}: {translations[filters.goal] || filters.goal}
+              <X 
+                className="h-3 w-3 ml-1 cursor-pointer" 
+                onClick={() => setFilters({...filters, goal: 'all'})}
+              />
+            </Badge>
+          )}
+          {filters.activity && filters.activity !== 'all' && (
+            <Badge variant="secondary" className="text-xs">
+              {translations.activityLevel}: {translations[filters.activity] || filters.activity}
+              <X 
+                className="h-3 w-3 ml-1 cursor-pointer" 
+                onClick={() => setFilters({...filters, activity: 'all'})}
+              />
+            </Badge>
+          )}
+          {filters.gender && filters.gender !== 'all' && (
+            <Badge variant="secondary" className="text-xs">
+              {translations.gender}: {translations[filters.gender] || filters.gender}
+              <X 
+                className="h-3 w-3 ml-1 cursor-pointer" 
+                onClick={() => setFilters({...filters, gender: 'all'})}
+              />
+            </Badge>
+          )}
+          {(filters.ageRange.min || filters.ageRange.max) && (
+            <Badge variant="secondary" className="text-xs">
+              {translations.age}: {filters.ageRange.min || '0'} - {filters.ageRange.max || '∞'}
+              <X 
+                className="h-3 w-3 ml-1 cursor-pointer" 
+                onClick={() => setFilters({...filters, ageRange: { min: '', max: '' }})}
+              />
+            </Badge>
+          )}
+        </div>
+      )}
 
       <Card>
         <CardHeader>
           <div className="flex justify-between items-center">
             <div>
               <CardTitle>
-                Clients ({displayedClients.length}{showAll || searchTerm ? '' : ` of ${filteredClients.length}`})
+                {translations.clients} ({displayedClients.length}{showAll || searchTerm ? '' : ` ${translations.of} ${processedClients.length}`})
               </CardTitle>
               <CardDescription>
-                View and manage your client profiles
+                {translations.viewAndManageClients}
               </CardDescription>
             </div>
             {hasMoreClients && (
@@ -449,16 +721,16 @@ export default function Clients() {
                 onClick={() => setShowAll(true)}
                 className="text-green-600 border-green-600 hover:bg-green-50"
               >
-                Show All ({filteredClients.length})
+                {translations.showAll} ({processedClients.length})
               </Button>
             )}
-            {showAll && !searchTerm && filteredClients.length > 5 && (
+            {showAll && !searchTerm && processedClients.length > 5 && (
               <Button 
                 variant="outline" 
                 onClick={() => setShowAll(false)}
                 className="text-gray-600 border-gray-600 hover:bg-gray-50"
               >
-                Show Less
+                {translations.showLess}
               </Button>
             )}
           </div>
@@ -473,13 +745,53 @@ export default function Clients() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Contact</TableHead>
-                    <TableHead>Code</TableHead>
-                    <TableHead>Physical</TableHead>
-                    <TableHead>Goals</TableHead>
-                    <TableHead>Macros</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead 
+                      className="cursor-pointer hover:bg-gray-50"
+                      onClick={() => handleSort('full_name')}
+                    >
+                      <div className="flex items-center gap-1">
+                        {translations.name}
+                        {getSortIcon('full_name')}
+                      </div>
+                    </TableHead>
+                    <TableHead>{translations.contact}</TableHead>
+                    <TableHead 
+                      className="cursor-pointer hover:bg-gray-50"
+                      onClick={() => handleSort('user_code')}
+                    >
+                      <div className="flex items-center gap-1">
+                        {translations.clientCode}
+                        {getSortIcon('user_code')}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer hover:bg-gray-50"
+                      onClick={() => handleSort('age')}
+                    >
+                      <div className="flex items-center gap-1">
+                        {translations.physical}
+                        {getSortIcon('age')}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer hover:bg-gray-50"
+                      onClick={() => handleSort('goal')}
+                    >
+                      <div className="flex items-center gap-1">
+                        {translations.goals}
+                        {getSortIcon('goal')}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer hover:bg-gray-50"
+                      onClick={() => handleSort('dailyTotalCalories')}
+                    >
+                      <div className="flex items-center gap-1">
+                        {translations.macros}
+                        {getSortIcon('dailyTotalCalories')}
+                      </div>
+                    </TableHead>
+                    <TableHead className="text-right">{translations.actions}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -503,7 +815,7 @@ export default function Clients() {
                               <div>{client.full_name}</div>
                               {client.age && (
                                 <div className="text-sm text-gray-500">
-                                  {client.age} years old
+                                  {client.age} {translations.yearsOld}
                                 </div>
                               )}
                             </div>
@@ -543,12 +855,12 @@ export default function Clients() {
                                     </div>
                                   ) : (
                                     <div className="text-red-400 text-xs">
-                                      Invalid BMI data
+                                      {translations.invalidBmiData}
                                     </div>
                                   )}
                                 </div>
                               ) : (
-                                <span className="text-gray-400">No data</span>
+                                <span className="text-gray-400">{translations.noDataAvailable}</span>
                               )}
                             </div>
                           </TableCell>
@@ -560,10 +872,10 @@ export default function Clients() {
                                 </Badge>
                               )}
                               {client.Activity_level && (
-                                <div className="text-gray-500">{client.Activity_level} activity</div>
+                                <div className="text-gray-500">{client.Activity_level} {translations.activity}</div>
                               )}
                               {client.dailyTotalCalories && (
-                                <div className="text-gray-500">{client.dailyTotalCalories} kcal/day</div>
+                                <div className="text-gray-500">{client.dailyTotalCalories} {translations.kcalPerDay}</div>
                               )}
                             </div>
                           </TableCell>
@@ -590,7 +902,7 @@ export default function Clients() {
                                 )}
                               </div>
                             ) : (
-                              <span className="text-gray-400 text-sm">No macros set</span>
+                              <span className="text-gray-400 text-sm">{translations.noMacrosSet}</span>
                             )}
                           </TableCell>
                           <TableCell className="text-right">
@@ -609,7 +921,7 @@ export default function Clients() {
                   ) : (
                     <TableRow>
                       <TableCell colSpan={7} className="text-center py-6 text-gray-500">
-                        {searchTerm ? 'No clients found matching your search' : 'No clients found. Add your first client to get started.'}
+                        {searchTerm ? translations.noClientsFound : translations.noClientsFoundGeneral}
                       </TableCell>
                     </TableRow>
                   )}
@@ -624,7 +936,7 @@ export default function Clients() {
         <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {currentClient ? 'Edit Client Information' : 'Add New Client'}
+              {currentClient ? translations.editUserInformation : translations.addNewClient}
             </DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit}>
@@ -632,10 +944,10 @@ export default function Clients() {
               
               {/* Basic Information */}
               <div className="space-y-4">
-                <h3 className="text-lg font-medium">Basic Information</h3>
+                <h3 className="text-lg font-medium">{translations.basicInformation}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="user_code">Client Code</Label>
+                    <Label htmlFor="user_code">{translations.clientCode}</Label>
                     <Input
                       id="user_code"
                       value={formData.user_code}
@@ -645,7 +957,7 @@ export default function Clients() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="full_name">Full Name *</Label>
+                    <Label htmlFor="full_name">{translations.fullName} *</Label>
                     <Input
                       id="full_name"
                       value={formData.full_name}
@@ -654,7 +966,7 @@ export default function Clients() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="email">Email</Label>
+                    <Label htmlFor="email">{translations.email}</Label>
                     <Input
                       id="email"
                       type="email"
@@ -663,7 +975,7 @@ export default function Clients() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="phone_number">Phone Number</Label>
+                    <Label htmlFor="phone_number">{translations.phoneNumber}</Label>
                     <Input
                       id="phone_number"
                       value={formData.phone_number}
@@ -671,7 +983,7 @@ export default function Clients() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="city">City</Label>
+                    <Label htmlFor="city">{translations.city}</Label>
                     <Input
                       id="city"
                       value={formData.city}
@@ -679,7 +991,7 @@ export default function Clients() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="date_of_birth">Date of Birth</Label>
+                    <Label htmlFor="date_of_birth">{translations.dateOfBirth}</Label>
                     <Input
                       id="date_of_birth"
                       type="date"
@@ -692,10 +1004,10 @@ export default function Clients() {
 
               {/* Physical Information */}
               <div className="space-y-4">
-                <h3 className="text-lg font-medium">Physical Information</h3>
+                <h3 className="text-lg font-medium">{translations.physicalInformation}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <Label htmlFor="age">Age</Label>
+                    <Label htmlFor="age">{translations.age}</Label>
                     <Input
                       id="age"
                       type="number"
@@ -704,23 +1016,23 @@ export default function Clients() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="gender">Gender</Label>
+                    <Label htmlFor="gender">{translations.gender}</Label>
                     <Select 
                       value={formData.gender} 
                       onValueChange={(value) => setFormData({...formData, gender: value})}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select gender" />
+                        <SelectValue placeholder={translations.selectGender} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="male">Male</SelectItem>
-                        <SelectItem value="female">Female</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
+                        <SelectItem value="male">{translations.male}</SelectItem>
+                        <SelectItem value="female">{translations.female}</SelectItem>
+                        <SelectItem value="other">{translations.other}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div>
-                    <Label htmlFor="weight_kg">Weight (kg)</Label>
+                    <Label htmlFor="weight_kg">{translations.weightKg}</Label>
                     <Input
                       id="weight_kg"
                       type="number"
@@ -730,7 +1042,7 @@ export default function Clients() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="height_cm">Height (cm)</Label>
+                    <Label htmlFor="height_cm">{translations.heightCm}</Label>
                     <Input
                       id="height_cm"
                       type="number"
@@ -739,39 +1051,39 @@ export default function Clients() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="Activity_level">Activity Level</Label>
+                    <Label htmlFor="Activity_level">{translations.activityLevel}</Label>
                     <Select 
                       value={formData.Activity_level} 
                       onValueChange={(value) => setFormData({...formData, Activity_level: value})}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select activity level" />
+                        <SelectValue placeholder={translations.selectActivityLevel} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="sedentary">Sedentary</SelectItem>
-                        <SelectItem value="light">Light Activity</SelectItem>
-                        <SelectItem value="moderate">Moderate Activity</SelectItem>
-                        <SelectItem value="very">Very Active</SelectItem>
-                        <SelectItem value="extra">Extra Active</SelectItem>
-                        <SelectItem value="extra">Toning</SelectItem>
+                        <SelectItem value="sedentary">{translations.sedentary}</SelectItem>
+                        <SelectItem value="light">{translations.lightActivity}</SelectItem>
+                        <SelectItem value="moderate">{translations.moderateActivity}</SelectItem>
+                        <SelectItem value="very">{translations.veryActive}</SelectItem>
+                        <SelectItem value="extra">{translations.extraActive}</SelectItem>
+                        <SelectItem value="extra">{translations.toning}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div>
-                    <Label htmlFor="goal">Goal</Label>
+                    <Label htmlFor="goal">{translations.goal}</Label>
                     <Select 
                       value={formData.goal} 
                       onValueChange={(value) => setFormData({...formData, goal: value})}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select goal" />
+                        <SelectValue placeholder={translations.selectGoal} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="lose">Lose Weight</SelectItem>
-                        <SelectItem value="maintain">Maintain Weight</SelectItem>
-                        <SelectItem value="gain">Gain Weight</SelectItem>
-                        <SelectItem value="muscle">Build Muscle</SelectItem>
-                        <SelectItem value="health">Improve Health</SelectItem>
+                        <SelectItem value="lose">{translations.loseWeight}</SelectItem>
+                        <SelectItem value="maintain">{translations.maintainWeight}</SelectItem>
+                        <SelectItem value="gain">{translations.gainWeight}</SelectItem>
+                        <SelectItem value="muscle">{translations.buildMuscle}</SelectItem>
+                        <SelectItem value="health">{translations.improveHealth}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -780,10 +1092,10 @@ export default function Clients() {
 
               {/* Nutrition Information */}
               <div className="space-y-4">
-                <h3 className="text-lg font-medium">Nutrition Information</h3>
+                <h3 className="text-lg font-medium">{translations.nutritionInformation}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="dailyTotalCalories">Daily Total Calories</Label>
+                    <Label htmlFor="dailyTotalCalories">{translations.dailyTotalCalories}</Label>
                     <Input
                       id="dailyTotalCalories"
                       type="number"
@@ -796,11 +1108,11 @@ export default function Clients() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Macros (grams)</Label>
+                  <Label>{translations.macrosGrams}</Label>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {['protein', 'carbs', 'fat'].map(macro => (
                       <div key={macro}>
-                        <Label className="text-sm capitalize">{macro.charAt(0).toUpperCase() + macro.slice(1)}</Label>
+                        <Label className="text-sm capitalize">{translations[macro]}</Label>
                         <Slider
                           min={macro === 'fat' ? 0 : 0}
                           max={macro === 'protein' ? 300 : macro === 'carbs' ? 400 : 150}
@@ -818,62 +1130,62 @@ export default function Clients() {
                     ))}
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
-                    The sum of macros always matches calories: <br />
-                    <span className="font-mono">calories = (4 × protein) + (4 × carbs) + (9 × fat)</span>
+                    {translations.macrosSumMatches} <br />
+                    <span className="font-mono">{translations.caloriesFormula}</span>
                   </p>
                 </div>
               </div>
 
               {/* Dietary Information */}
               <div className="space-y-4">
-                <h3 className="text-lg font-medium">Dietary Information</h3>
+                <h3 className="text-lg font-medium">{translations.dietaryInformation}</h3>
                 <div className="grid grid-cols-1 gap-4">
                   <div>
-                    <Label htmlFor="food_allergies">Food Allergies</Label>
+                    <Label htmlFor="food_allergies">{translations.foodAllergies}</Label>
                     <Input
                       id="food_allergies"
                       value={formData.food_allergies}
                       onChange={(e) => setFormData({...formData, food_allergies: e.target.value})}
-                      placeholder="e.g., nuts, dairy, shellfish (separate with commas)"
+                      placeholder={translations.foodAllergiesPlaceholder}
                     />
                   </div>
                   <div>
-                    <Label htmlFor="food_limitations">Food Limitations</Label>
+                    <Label htmlFor="food_limitations">{translations.foodLimitations}</Label>
                     <Textarea
                       id="food_limitations"
                       value={formData.food_limitations}
                       onChange={(e) => setFormData({...formData, food_limitations: e.target.value})}
-                      placeholder="Simple text: vegetarian, kosher, low sodium (auto-converts to JSON array)"
+                      placeholder={translations.foodLimitationsPlaceholder}
                       rows={3}
                     />
                     <p className="text-xs text-gray-500 mt-1">
-                      ✨ Enter simple text like "vegetarian, kosher" and it will auto-convert to ["vegetarian", "kosher"]
+                      {translations.foodLimitationsHelp}
                     </p>
                   </div>
                   <div>
-                    <Label htmlFor="client_preference">Client Preferences</Label>
+                    <Label htmlFor="client_preference">{translations.clientPreferences}</Label>
                     <Textarea
                       id="client_preference"
                       value={formData.client_preference}
                       onChange={(e) => setFormData({...formData, client_preference: e.target.value})}
-                      placeholder="Simple text: loves pasta, mediterranean cuisine, quick meals"
+                      placeholder={translations.clientPreferencesPlaceholder}
                       rows={3}
                     />
                     <p className="text-xs text-gray-500 mt-1">
-                      ✨ Enter simple text like "loves pasta" and it will auto-convert to ["loves pasta"]
+                      {translations.clientPreferencesHelp}
                     </p>
                   </div>
                   <div>
-                    <Label htmlFor="recommendations">Recommendations</Label>
+                    <Label htmlFor="recommendations">{translations.recommendations}</Label>
                     <Textarea
                       id="recommendations"
                       value={formData.recommendations}
                       onChange={(e) => setFormData({...formData, recommendations: e.target.value})}
-                      placeholder="Simple text: drink more water, take vitamin D, exercise 30min daily"
+                      placeholder={translations.recommendationsPlaceholder}
                       rows={3}
                     />
                     <p className="text-xs text-gray-500 mt-1">
-                      ✨ Enter simple text and it will auto-convert to structured recommendations
+                      {translations.recommendationsHelp}
                     </p>
                   </div>
                 </div>
@@ -887,14 +1199,14 @@ export default function Clients() {
                 onClick={() => setDialogOpen(false)}
                 disabled={loading}
               >
-                Cancel
+                {translations.cancel}
               </Button>
               <Button 
                 type="submit"
                 className="bg-green-600 hover:bg-green-700"
                 disabled={loading}
               >
-                {loading ? 'Saving...' : currentClient ? 'Update Client' : 'Add Client'}
+                {loading ? translations.saving : currentClient ? translations.updateClient : translations.addClient}
               </Button>
             </div>
           </form>

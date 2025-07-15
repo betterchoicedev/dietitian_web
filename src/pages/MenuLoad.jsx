@@ -72,7 +72,7 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
   );
 };
 
-const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex }) => {
+const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, translations }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
   const [originalValue, setOriginalValue] = useState(value);
@@ -278,7 +278,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
                 <div className="flex flex-col">
                   <div className="font-medium">{suggestion.name}</div>
                   <div className="text-xs text-gray-500">
-                    {Math.round(suggestion.Energy || 0)} cal, {Math.round(suggestion.Protein || 0)}g protein
+                    {Math.round(suggestion.Energy || 0)} {translations?.calories || 'cal'}, {Math.round(suggestion.Protein || 0)}g {translations?.protein || 'protein'}
                   </div>
                 </div>
               )}
@@ -665,7 +665,7 @@ const MenuLoad = () => {
           />
           <div className="flex gap-2">
             <Badge variant="outline" className={`${isAlternative ? 'bg-blue-100 border-blue-200' : 'bg-green-100 border-green-200'}`}>
-              {typeof option.nutrition?.calories === 'number' ? option.nutrition.calories + 'kcal' : option.nutrition?.calories}
+              {typeof option.nutrition?.calories === 'number' ? option.nutrition.calories + ' ' + (translations.calories || 'kcal') : option.nutrition?.calories}
             </Badge>
           </div>
         </div>
@@ -700,6 +700,7 @@ const MenuLoad = () => {
                         mealIndex={option.mealIndex}
                         optionIndex={isAlternative ? 'alternative' : 'main'}
                         ingredientIndex={idx}
+                        translations={translations}
                       />
                       <span className="text-gray-600">
                         {ingredient.household_measure}
@@ -707,10 +708,10 @@ const MenuLoad = () => {
                       {(ingredient.calories || ingredient.protein) && (
                         <>
                           <span className="text-orange-600 font-medium">
-                            {Math.round(ingredient.calories || 0)} cal
+                            {Math.round(ingredient.calories || 0)} {translations.calories || 'cal'}
                           </span>
                           <span className="text-blue-600 font-medium">
-                            {Math.round(ingredient.protein || 0)}g protein
+                            {Math.round(ingredient.protein || 0)}g {translations.protein || 'protein'}
                           </span>
                         </>
                       )}
@@ -734,10 +735,10 @@ const MenuLoad = () => {
           </Button>
           <div>
             <h1 className="text-2xl font-bold">
-              Edit Menu: {editedMenu.meal_plan_name || 'Loaded Menu'}
+              {translations.editMenu || 'Edit Menu'}: {editedMenu.meal_plan_name || (translations.loadedMenu || 'Loaded Menu')}
             </h1>
             {editedMenu.user_code && (
-              <p className="text-sm text-gray-500">User Code: {editedMenu.user_code}</p>
+              <p className="text-sm text-gray-500">{translations.clientCode || 'User Code'}: {editedMenu.user_code}</p>
             )}
           </div>
         </div>
@@ -763,7 +764,7 @@ const MenuLoad = () => {
                   <p className="text-sm text-green-600 font-medium">{translations.calories || 'Calories'}</p>
                   <p className="text-2xl font-bold text-green-700">
                     {editedMenu.totals.calories}
-                    <span className="text-sm font-normal text-green-600 ml-1">kcal</span>
+                    <span className="text-sm font-normal text-green-600 ml-1">{translations.calories || 'kcal'}</span>
                   </p>
                 </div>
                 <div className="p-4 bg-white rounded-lg shadow-sm">
@@ -843,7 +844,7 @@ const MenuLoad = () => {
             ) : (
               <Save className="h-4 w-4 mr-2" />
             )}
-            {saving ? 'Saving...' : 'Save Changes'}
+            {saving ? (translations.saving || 'Saving...') : (translations.saveChanges || 'Save Changes')}
           </Button>
         </div>
       </div>
@@ -856,7 +857,7 @@ const MenuLoad = () => {
         <Button variant="outline" size="icon" onClick={() => navigate(-1)}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <h1 className="text-2xl font-bold">Load & Edit Menu</h1>
+        <h1 className="text-2xl font-bold">{translations.loadMenu || 'Load & Edit Menu'}</h1>
       </div>
 
       {error && (
@@ -870,7 +871,7 @@ const MenuLoad = () => {
         <div className="flex items-center space-x-2 w-full sm:w-auto">
           <Search className="w-5 h-5 text-gray-400" />
           <Input
-            placeholder="Search by name, menu code, or client code..."
+            placeholder={translations.searchMenus || "Search by name, menu code, or client code..."}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="flex-1"
@@ -881,10 +882,10 @@ const MenuLoad = () => {
           <Filter className="w-5 h-5 text-gray-400" />
           <Select value={filterUserCode} onValueChange={setFilterUserCode}>
             <SelectTrigger className="w-full sm:w-[180px]">
-              <SelectValue placeholder="Filter by client" />
+              <SelectValue placeholder={translations.filterByClient || "Filter by client"} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Clients</SelectItem>
+              <SelectItem value="all">{translations.allClients || 'All Clients'}</SelectItem>
               {userCodes.map(code => (
                 <SelectItem key={code} value={code}>{code}</SelectItem>
               ))}
@@ -912,45 +913,45 @@ const MenuLoad = () => {
               <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
                 <div className="space-y-1">
                   <CardTitle className="text-lg font-medium">
-                    {menu.meal_plan_name || 'Untitled Menu'}
+                    {menu.meal_plan_name || (translations.untitledMenu || 'Untitled Menu')}
                   </CardTitle>
                   <CardDescription>
-                    <span>User Code: {menu.user_code || 'N/A'}</span>
+                    <span>{translations.clientCode || 'User Code'}: {menu.user_code || (translations.notAvailable || 'N/A')}</span>
                   </CardDescription>
                 </div>
                 <Badge 
                   variant="secondary"
                   className={getStatusColor(menu.status)}
                 >
-                  {menu.status === 'published' ? 'Published' : 
-                   menu.status === 'active' ? 'Active' : 'Draft'}
+                  {menu.status === 'published' ? (translations.published || 'Published') : 
+                   menu.status === 'active' ? (translations.active || 'Active') : (translations.draft || 'Draft')}
                 </Badge>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
-                    <p className="text-gray-500">Total Calories</p>
-                    <p className="font-medium">{menu.daily_total_calories || 0} kcal</p>
+                                      <p className="text-gray-500">{translations.targetCalories || 'Total Calories'}</p>
+                  <p className="font-medium">{menu.daily_total_calories || 0} {translations.calories || 'kcal'}</p>
                   </div>
                   <div>
-                    <p className="text-gray-500">Protein</p>
+                    <p className="text-gray-500">{translations.protein || 'Protein'}</p>
                     <p className="font-medium">{menu.macros_target?.protein || '0g'}</p>
                   </div>
                   <div>
-                    <p className="text-gray-500">Carbs</p>
+                    <p className="text-gray-500">{translations.carbs || 'Carbs'}</p>
                     <p className="font-medium">{menu.macros_target?.carbs || '0g'}</p>
                   </div>
                   <div>
-                    <p className="text-gray-500">Fat</p>
+                    <p className="text-gray-500">{translations.fat || 'Fat'}</p>
                     <p className="font-medium">{menu.macros_target?.fat || '0g'}</p>
                   </div>
                 </div>
 
                 <div className="pt-2 border-t">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500">Menu Code:</span>
+                    <span className="text-xs text-gray-500">{translations.menuCode || 'Menu Code'}:</span>
                     <span className="text-xs font-mono bg-gray-100 px-2 py-1 rounded">
-                      {menu.menu_code || 'N/A'}
+                      {menu.menu_code || (translations.notAvailable || 'N/A')}
                     </span>
                   </div>
                 </div>
@@ -964,7 +965,7 @@ const MenuLoad = () => {
                     }}
                   >
                     <Edit className="h-4 w-4 mr-2" />
-                    Load & Edit Menu
+                    {translations.loadAndEditMenu || 'Load & Edit Menu'}
                   </Button>
                 </div>
               </CardContent>
@@ -976,10 +977,10 @@ const MenuLoad = () => {
               <Card>
                 <CardContent className="flex flex-col items-center justify-center py-10">
                   <h3 className="mt-2 text-sm font-medium text-gray-900">
-                    No menus found
+                    {translations.noMenusFound || 'No menus found'}
                   </h3>
                   <p className="mt-1 text-sm text-gray-500">
-                    No menus match your search criteria
+                    {translations.noMenusMatchCriteria || 'No menus match your search criteria'}
                   </p>
                 </CardContent>
               </Card>

@@ -77,7 +77,7 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
   );
 };
 
-const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex }) => {
+const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, translations }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
   const [originalValue, setOriginalValue] = useState(value);
@@ -277,13 +277,13 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
                   <div className="flex flex-col flex-1 min-w-0">
                     <span className="font-semibold text-gray-900 whitespace-normal leading-snug">{suggestion.hebrew || suggestion.english}</span>
                     <span className="text-xs text-gray-500 whitespace-normal leading-snug flex flex-row gap-2 mt-0.5">
-                      <span>{(suggestion.protein ?? suggestion.Protein ?? 0)}g protein</span>
+                      <span>{(suggestion.protein ?? suggestion.Protein ?? 0)}g {translations?.protein || 'protein'}</span>
                       <span className="text-gray-300">·</span>
-                      <span>{(suggestion.calories ?? suggestion.Energy ?? 0)} kcal</span>
+                      <span>{(suggestion.calories ?? suggestion.Energy ?? 0)} {translations?.calories || 'kcal'}</span>
                       <span className="text-gray-300">·</span>
-                      <span>{(suggestion.fat ?? suggestion.Total_lipid__fat_ ?? 0)}g fat</span>
+                      <span>{(suggestion.fat ?? suggestion.Total_lipid__fat_ ?? 0)}g {translations?.fat || 'fat'}</span>
                       <span className="text-gray-300">·</span>
-                      <span>{(suggestion.carbs ?? suggestion.Carbohydrate ?? 0)}g carbs</span>
+                      <span>{(suggestion.carbs ?? suggestion.Carbohydrate ?? 0)}g {translations?.carbs || 'carbs'}</span>
                     </span>
                   </div>
                   {suggestion.household_measure && (
@@ -672,6 +672,7 @@ const MenuCreate = () => {
       let totalIngredients = 0;
 
       menuToEnrich.meals.forEach((meal, mealIndex) => {
+        // Process main and alternative sections
         ['main', 'alternative'].forEach(section => {
           if (meal[section]?.ingredients) {
             meal[section].ingredients.forEach((ingredient, ingredientIndex) => {
@@ -702,6 +703,41 @@ const MenuCreate = () => {
             });
           }
         });
+
+        // Process additional alternatives array
+        if (meal.alternatives && Array.isArray(meal.alternatives)) {
+          meal.alternatives.forEach((altMeal, altIndex) => {
+            if (altMeal?.ingredients) {
+              altMeal.ingredients.forEach((ingredient, ingredientIndex) => {
+                const brand = ingredient['brand of pruduct'] || ingredient.brand || '';
+                const name = ingredient.item || '';
+                const key = `${brand}|${name}`.toLowerCase();
+                totalIngredients++;
+
+                // Check cache first
+                if (upcCache.has(key)) {
+                  ingredient.UPC = upcCache.get(key);
+                  cacheHits++;
+                  return;
+                }
+
+                if (!allIngredients.has(key)) {
+                  allIngredients.set(key, { brand, name, upc: null });
+                }
+
+                // Track position for later update
+                ingredientPositions.push({
+                  key,
+                  mealIndex,
+                  section: 'alternatives',
+                  alternativeIndex: altIndex,
+                  ingredientIndex,
+                  ingredient
+                });
+              });
+            }
+          });
+        }
       });
 
       const uniqueIngredients = Array.from(allIngredients.values());
@@ -749,7 +785,14 @@ const MenuCreate = () => {
       const enrichedMenu = JSON.parse(JSON.stringify(menuToEnrich));
       ingredientPositions.forEach(pos => {
         const upc = newCacheEntries.get(pos.key);
-        enrichedMenu.meals[pos.mealIndex][pos.section].ingredients[pos.ingredientIndex].UPC = upc;
+        
+        if (pos.section === 'alternatives') {
+          // Handle alternatives array
+          enrichedMenu.meals[pos.mealIndex].alternatives[pos.alternativeIndex].ingredients[pos.ingredientIndex].UPC = upc;
+        } else {
+          // Handle main and alternative sections
+          enrichedMenu.meals[pos.mealIndex][pos.section].ingredients[pos.ingredientIndex].UPC = upc;
+        }
       });
 
       const finalCacheHitRate = totalIngredients > 0 ? Math.round((cacheHits / totalIngredients) * 100) : 0;
@@ -1039,7 +1082,7 @@ const MenuCreate = () => {
           />
           <div className="flex gap-2">
             <Badge variant="outline" className={`${isAlternative ? 'bg-blue-100 border-blue-200' : 'bg-green-100 border-green-200'}`}>
-              {typeof option.nutrition?.calories === 'number' ? option.nutrition.calories + 'kcal' : option.nutrition?.calories}
+              {typeof option.nutrition?.calories === 'number' ? option.nutrition.calories + ' ' + (translations.calories || 'kcal') : option.nutrition?.calories}
             </Badge>
           </div>
         </div>
@@ -1074,6 +1117,7 @@ const MenuCreate = () => {
                         mealIndex={option.mealIndex}
                         optionIndex={isAlternative ? 'alternative' : 'main'}
                         ingredientIndex={idx}
+                        translations={translations}
                       />
                       <span className="text-gray-600">
                         {ingredient.household_measure}
@@ -1081,16 +1125,16 @@ const MenuCreate = () => {
                       {(ingredient.calories || ingredient.protein) && (
                         <>
                           <span className="font-bold text-green-700">
-                            {Math.round(ingredient.calories || 0)} k
+                            {Math.round(ingredient.calories || 0)} {translations.calories || 'k'}
                           </span>
                           <span className="text-blue-600 font-medium">
-                            {Math.round(ingredient.protein || 0)}g protein
+                            {Math.round(ingredient.protein || 0)}g {translations.protein || 'protein'}
                           </span>
                           <span className="font-bold text-amber-700">
-                            {Math.round(ingredient.carbs || 0)}g carbs
+                            {Math.round(ingredient.carbs || 0)}g {translations.carbs || 'carbs'}
                           </span>
                           <span className="font-bold text-orange-700">
-                            {Math.round(ingredient.fat || 0)}g fat
+                            {Math.round(ingredient.fat || 0)}g {translations.fat || 'fat'}
                           </span>
                         </>
                       )}
@@ -1419,7 +1463,7 @@ const MenuCreate = () => {
           </Button>
           <div>
             <h1 className="text-2xl font-bold">
-              {translations.generateMenu || 'Generate Menu Plan'}
+              {translations.menuCreate || 'Generate Menu Plan'}
             </h1>
           </div>
         </div>
@@ -1431,13 +1475,13 @@ const MenuCreate = () => {
             size="sm"
             className="text-red-600 hover:bg-red-50 border-red-300"
             onClick={() => {
-              if (window.confirm('Are you sure you want to clear the current menu and start fresh? This action cannot be undone.')) {
+              if (window.confirm(translations.confirmClearMenu || 'Are you sure you want to clear the current menu and start fresh? This action cannot be undone.')) {
                 clearSavedMenuState();
                 setError(null);
               }
             }}
           >
-            Start Fresh
+            {translations.startFresh || 'Start Fresh'}
           </Button>
         )}
       </div>
@@ -1461,10 +1505,10 @@ const MenuCreate = () => {
           return (
             <Alert className="border-blue-200 bg-blue-50">
               <Clock className="h-4 w-4" />
-              <AlertTitle className="text-blue-800">Previous Menu Found</AlertTitle>
+              <AlertTitle className="text-blue-800">{translations.previousMenuFound || 'Previous Menu Found'}</AlertTitle>
               <AlertDescription className="text-blue-700">
-                We found a previously generated menu for <strong>{savedUser}</strong> from <strong>{savedAt}</strong>.
-                Would you like to continue working on it or start fresh?
+                {translations.previousMenuDescription || 'We found a previously generated menu for'} <strong>{savedUser}</strong> {translations.fromTime || 'from'} <strong>{savedAt}</strong>.
+                {translations.continueOrStartFresh || 'Would you like to continue working on it or start fresh?'}
                 <div className="flex gap-3 mt-3">
                   <Button
                     variant="outline"
@@ -1478,7 +1522,7 @@ const MenuCreate = () => {
                     }}
                   >
                     <ArrowRight className="h-4 w-4 mr-1" />
-                    Continue Previous Menu
+                    {translations.continuePreviousMenu || 'Continue Previous Menu'}
                   </Button>
                   <Button
                     variant="outline"
@@ -1489,7 +1533,7 @@ const MenuCreate = () => {
                       setError(null);
                     }}
                   >
-                    Start Fresh
+                    {translations.startFresh || 'Start Fresh'}
                   </Button>
                 </div>
               </AlertDescription>
@@ -1501,18 +1545,18 @@ const MenuCreate = () => {
       })()}
 
       {/* User Selection */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Select Client</CardTitle>
-          <CardDescription>
-            Choose which client to generate a menu for
-          </CardDescription>
-        </CardHeader>
+              <Card>
+          <CardHeader>
+            <CardTitle>{translations.clientSelection || 'Select Client'}</CardTitle>
+            <CardDescription>
+              {translations.selectTargetClient || 'Choose which client to generate a menu for'}
+            </CardDescription>
+          </CardHeader>
         <CardContent>
           {loadingUsers ? (
             <div className="flex items-center gap-2 text-sm text-gray-500">
               <Loader className="animate-spin h-4 w-4" />
-              Loading clients...
+              {translations.loading || 'Loading clients...'}
             </div>
           ) : (
             <div className="space-y-3">
@@ -1532,7 +1576,7 @@ const MenuCreate = () => {
                 }}
                 className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="">Choose a client...</option>
+                <option value="">{translations.selectAClient || 'Choose a client...'}</option>
                 {users.map((user) => (
                   <option key={user.user_code} value={user.user_code}>
                     {user.full_name} ({user.user_code})
@@ -1543,7 +1587,7 @@ const MenuCreate = () => {
                 <div className="p-3 bg-green-50 border border-green-200 rounded-md">
                   <div className="flex items-center gap-2 text-sm text-green-700">
                     <span>✓</span>
-                    <span className="font-medium">Selected: {selectedUser.full_name}</span>
+                    <span className="font-medium">{translations.selected || 'Selected'}: {selectedUser.full_name}</span>
                     <span className="text-green-600">({selectedUser.user_code})</span>
                   </div>
                 </div>
@@ -1557,47 +1601,47 @@ const MenuCreate = () => {
       {selectedUser && (
         <Card className="border-blue-200 bg-blue-50/30">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-blue-800">
-              <span>🎯</span>
-              Client Nutritional Targets
-            </CardTitle>
-            <CardDescription className="text-blue-600">
-              {selectedUser.full_name}'s daily nutrition goals from database
-            </CardDescription>
+                      <CardTitle className="flex items-center gap-2 text-blue-800">
+            <span>🎯</span>
+            {translations.nutritionTargets || 'Client Nutritional Targets'}
+          </CardTitle>
+          <CardDescription className="text-blue-600">
+            {translations.fromDatabase ? `${translations.fromDatabase} ${selectedUser.full_name}` : `from database ${selectedUser.full_name}`}
+          </CardDescription>
           </CardHeader>
           <CardContent>
             {loadingUserTargets ? (
               <div className="flex items-center gap-2 text-sm text-blue-600">
                 <Loader className="animate-spin h-4 w-4" />
-                Loading client targets...
+                {translations.loadingClientTargets || 'Loading client targets...'}
               </div>
             ) : userTargets ? (
               <div className="space-y-4">
                 {/* Target Macros */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200">
-                    <p className="text-sm text-blue-600 font-medium">Target Calories</p>
+                    <p className="text-sm text-blue-600 font-medium">{translations.targetCalories || 'Target Calories'}</p>
                     <p className="text-2xl font-bold text-blue-700">
                       {userTargets.calories}
-                      <span className="text-sm font-normal text-blue-600 ml-1">kcal</span>
+                      <span className="text-sm font-normal text-blue-600 ml-1">{translations.calories || 'kcal'}</span>
                     </p>
                   </div>
                   <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200">
-                    <p className="text-sm text-blue-600 font-medium">Target Protein</p>
+                    <p className="text-sm text-blue-600 font-medium">{translations.proteinTarget || 'Target Protein'}</p>
                     <p className="text-2xl font-bold text-blue-700">
                       {userTargets.macros.protein}
                       <span className="text-sm font-normal text-blue-600 ml-1">g</span>
                     </p>
                   </div>
                   <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200">
-                    <p className="text-sm text-blue-600 font-medium">Target Fat</p>
+                    <p className="text-sm text-blue-600 font-medium">{translations.fatTarget || 'Target Fat'}</p>
                     <p className="text-2xl font-bold text-blue-700">
                       {userTargets.macros.fat}
                       <span className="text-sm font-normal text-blue-600 ml-1">g</span>
                     </p>
                   </div>
                   <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200">
-                    <p className="text-sm text-blue-600 font-medium">Target Carbs</p>
+                    <p className="text-sm text-blue-600 font-medium">{translations.carbsTarget || 'Target Carbs'}</p>
                     <p className="text-2xl font-bold text-blue-700">
                       {userTargets.macros.carbs}
                       <span className="text-sm font-normal text-blue-600 ml-1">g</span>
@@ -1608,7 +1652,7 @@ const MenuCreate = () => {
                 {/* Additional Info */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-blue-200">
                   <div className="space-y-2">
-                    <p className="text-sm font-medium text-blue-700">Region</p>
+                    <p className="text-sm font-medium text-blue-700">{translations.region || 'Region'}</p>
                     <div className="flex items-center gap-2">
                       <span className="text-lg">🌍</span>
                       <span className="capitalize text-blue-600">{userTargets.region}</span>
@@ -1617,7 +1661,7 @@ const MenuCreate = () => {
 
                   {userTargets.allergies.length > 0 && (
                     <div className="space-y-2">
-                      <p className="text-sm font-medium text-red-700">Food Allergies</p>
+                      <p className="text-sm font-medium text-red-700">{translations.dietaryAllergies || 'Food Allergies'}</p>
                       <div className="flex flex-wrap gap-1">
                         {userTargets.allergies.map((allergy, idx) => (
                           <Badge key={idx} variant="outline" className="bg-red-50 border-red-200 text-red-700 text-xs">
@@ -1630,7 +1674,7 @@ const MenuCreate = () => {
 
                   {userTargets.limitations.length > 0 && (
                     <div className="space-y-2">
-                      <p className="text-sm font-medium text-orange-700">Dietary Limitations</p>
+                      <p className="text-sm font-medium text-orange-700">{translations.dietaryRestrictions || 'Dietary Limitations'}</p>
                       <div className="flex flex-wrap gap-1">
                         {userTargets.limitations.map((limitation, idx) => (
                           <Badge key={idx} variant="outline" className="bg-orange-50 border-orange-200 text-orange-700 text-xs">
@@ -1647,23 +1691,23 @@ const MenuCreate = () => {
                   <div className="pt-4 border-t border-blue-200">
                     <h4 className="text-lg font-semibold text-blue-800 mb-3 flex items-center gap-2">
                       <span>📊</span>
-                      Target vs Generated Menu Comparison
+                      {translations.targetVsGenerated || 'Target vs Generated Menu Comparison'}
                     </h4>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       {/* Calories Comparison */}
                       <div className="p-3 bg-white rounded-lg border">
-                        <p className="text-xs text-gray-500 mb-1">Calories</p>
+                        <p className="text-xs text-gray-500 mb-1">{translations.calories || 'Calories'}</p>
                         <div className="space-y-1">
                           <div className="flex justify-between items-center">
-                            <span className="text-sm text-blue-600">Target:</span>
+                            <span className="text-sm text-blue-600">{translations.target || 'Target'}:</span>
                             <span className="font-bold text-blue-700">{userTargets.calories}</span>
                           </div>
                           <div className="flex justify-between items-center">
-                            <span className="text-sm text-green-600">Generated:</span>
+                            <span className="text-sm text-green-600">{translations.generated || 'Generated'}:</span>
                             <span className="font-bold text-green-700">{menu.totals.calories}</span>
                           </div>
                           <div className="flex justify-between items-center">
-                            <span className="text-xs text-gray-500">Difference:</span>
+                            <span className="text-xs text-gray-500">{translations.difference || 'Difference'}:</span>
                             <span className={`text-xs font-medium ${Math.abs(menu.totals.calories - userTargets.calories) <= userTargets.calories * 0.05
                                 ? 'text-green-600'
                                 : 'text-red-600'
@@ -1678,7 +1722,7 @@ const MenuCreate = () => {
 
                       {/* Protein Comparison */}
                       <div className="p-3 bg-white rounded-lg border">
-                        <p className="text-xs text-gray-500 mb-1">Protein (g)</p>
+                        <p className="text-xs text-gray-500 mb-1">{translations.protein || 'Protein'} (g)</p>
                         <div className="space-y-1">
                           <div className="flex justify-between items-center">
                             <span className="text-sm text-blue-600">Target:</span>
@@ -1706,18 +1750,18 @@ const MenuCreate = () => {
 
                       {/* Fat Comparison */}
                       <div className="p-3 bg-white rounded-lg border">
-                        <p className="text-xs text-gray-500 mb-1">Fat (g)</p>
+                        <p className="text-xs text-gray-500 mb-1">{translations.fat || 'Fat'} (g)</p>
                         <div className="space-y-1">
                           <div className="flex justify-between items-center">
-                            <span className="text-sm text-blue-600">Target:</span>
+                            <span className="text-sm text-blue-600">{translations.target || 'Target'}:</span>
                             <span className="font-bold text-blue-700">{userTargets.macros.fat}</span>
                           </div>
                           <div className="flex justify-between items-center">
-                            <span className="text-sm text-green-600">Generated:</span>
+                            <span className="text-sm text-green-600">{translations.generated || 'Generated'}:</span>
                             <span className="font-bold text-green-700">{menu.totals.fat}</span>
                           </div>
                           <div className="flex justify-between items-center">
-                            <span className="text-xs text-gray-500">Difference:</span>
+                            <span className="text-xs text-gray-500">{translations.difference || 'Difference'}:</span>
                             <span className={`text-xs font-medium ${Math.abs(menu.totals.fat - userTargets.macros.fat) <= userTargets.macros.fat * 0.05
                                 ? 'text-green-600'
                                 : 'text-red-600'
@@ -1734,18 +1778,18 @@ const MenuCreate = () => {
 
                       {/* Carbs Comparison */}
                       <div className="p-3 bg-white rounded-lg border">
-                        <p className="text-xs text-gray-500 mb-1">Carbs (g)</p>
+                        <p className="text-xs text-gray-500 mb-1">{translations.carbs || 'Carbs'} (g)</p>
                         <div className="space-y-1">
                           <div className="flex justify-between items-center">
-                            <span className="text-sm text-blue-600">Target:</span>
+                            <span className="text-sm text-blue-600">{translations.target || 'Target'}:</span>
                             <span className="font-bold text-blue-700">{userTargets.macros.carbs}</span>
                           </div>
                           <div className="flex justify-between items-center">
-                            <span className="text-sm text-green-600">Generated:</span>
+                            <span className="text-sm text-green-600">{translations.generated || 'Generated'}:</span>
                             <span className="font-bold text-green-700">{menu.totals.carbs}</span>
                           </div>
                           <div className="flex justify-between items-center">
-                            <span className="text-xs text-gray-500">Difference:</span>
+                            <span className="text-xs text-gray-500">{translations.difference || 'Difference'}:</span>
                             <span className={`text-xs font-medium ${Math.abs(menu.totals.carbs - userTargets.macros.carbs) <= userTargets.macros.carbs * 0.05
                                 ? 'text-green-600'
                                 : 'text-red-600'
@@ -1765,7 +1809,7 @@ const MenuCreate = () => {
                     {/* Overall Accuracy Indicator */}
                     <div className="mt-4 p-3 rounded-lg bg-gradient-to-r from-blue-50 to-green-50 border border-blue-200">
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-700">Menu Accuracy:</span>
+                        <span className="text-sm font-medium text-gray-700">{translations.menuAccuracy || 'Menu Accuracy'}:</span>
                         <div className="flex items-center gap-2">
                           {(() => {
                             const caloriesAccurate = Math.abs(menu.totals.calories - userTargets.calories) <= userTargets.calories * 0.05;
@@ -1782,10 +1826,10 @@ const MenuCreate = () => {
                                     accuracy >= 50 ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
                                       'bg-red-100 text-red-700 border border-red-200'
                                   }`}>
-                                  {Math.round(accuracy)}% Accurate
+                                  {Math.round(accuracy)}% {translations.accurate || 'Accurate'}
                                 </div>
                                 <span className="text-xs text-gray-500">
-                                  ({accurateCount}/4 within ±5%)
+                                  ({accurateCount}/4 {translations.within5Percent || 'within ±5%'})
                                 </span>
                               </>
                             );
@@ -1797,19 +1841,19 @@ const MenuCreate = () => {
                 )}
               </div>
             ) : (
-              <p className="text-blue-600">No target data found for this client.</p>
+              <p className="text-blue-600">{translations.noTargetDataFound || 'No target data found for this client.'}</p>
             )}
           </CardContent>
         </Card>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{translations.generateNewMenu || 'Generate a New Menu Plan'}</CardTitle>
-          <CardDescription>
-            {translations.generateMenuDescription || 'Click the button below to generate a personalized menu plan based on your preferences.'}
-          </CardDescription>
-        </CardHeader>
+              <Card>
+          <CardHeader>
+            <CardTitle>{translations.generateMenu || 'Generate a New Menu Plan'}</CardTitle>
+            <CardDescription>
+              {translations.generateMenuDescription || 'Click the button below to generate a personalized menu plan based on your preferences.'}
+            </CardDescription>
+          </CardHeader>
         <CardContent className="flex flex-col items-center py-6">
           <Button
             onClick={fetchMenu}
@@ -1831,7 +1875,7 @@ const MenuCreate = () => {
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3">
                   <Loader className="animate-spin h-5 w-5 text-blue-600" />
-                  <span className="text-blue-700">Adding product codes to ingredients...</span>
+                  <span className="text-blue-700">{translations.addingProductCodes || 'Adding product codes to ingredients...'}</span>
                 </div>
               </CardContent>
             </Card>
@@ -1851,7 +1895,7 @@ const MenuCreate = () => {
                     <p className="text-sm text-green-600 font-medium">{translations.calories || 'Calories'}</p>
                     <p className="text-2xl font-bold text-green-700">
                       {menu.totals.calories}
-                      <span className="text-sm font-normal text-green-600 ml-1">kcal</span>
+                      <span className="text-sm font-normal text-green-600 ml-1">{translations.calories || 'kcal'}</span>
                     </p>
                   </div>
                   <div className="p-4 bg-white rounded-lg shadow-sm">
@@ -1889,7 +1933,7 @@ const MenuCreate = () => {
                   {translations.recommendations || 'Recommendations'}
                 </CardTitle>
                 <CardDescription className="text-purple-600">
-                  Personalized recommendations for {selectedUser?.full_name}
+                  {translations.personalizedRecommendations || 'Personalized recommendations'} for {selectedUser?.full_name}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -1907,10 +1951,10 @@ const MenuCreate = () => {
                         </div>
                         <div className="flex-1">
                           <h4 className="font-medium text-purple-800 mb-1">
-                            {rec.recommendation_key === 'generalComments' ? 'General Comments' :
-                             rec.recommendation_key === 'supplements' ? 'Supplements' :
-                             rec.recommendation_key === 'hydration' ? 'Hydration' :
-                             rec.recommendation_key === 'sleep' ? 'Sleep' :
+                            {rec.recommendation_key === 'generalComments' ? (translations.generalComments || 'General Comments') :
+                             rec.recommendation_key === 'supplements' ? (translations.supplements || 'Supplements') :
+                             rec.recommendation_key === 'hydration' ? (translations.hydration || 'Hydration') :
+                             rec.recommendation_key === 'sleep' ? (translations.sleep || 'Sleep') :
                              rec.recommendation_key.charAt(0).toUpperCase() + rec.recommendation_key.slice(1)}
                           </h4>
                           <p className="text-purple-700 text-sm leading-relaxed">
@@ -1962,7 +2006,7 @@ const MenuCreate = () => {
                     {/* Render additional alternatives if present */}
                     {meal.alternatives && meal.alternatives.length > 0 && (
                       <div className="mt-4">
-                        <div className="font-semibold mb-2 text-blue-700">Other Alternatives:</div>
+                        <div className="font-semibold mb-2 text-blue-700">{translations.otherAlternatives || 'Other Alternatives'}:</div>
                         <div className="space-y-4">
                           {meal.alternatives.map((alt, altIdx) => (
                             <div key={altIdx} className="bg-blue-50 rounded-lg p-3">
@@ -1983,7 +2027,7 @@ const MenuCreate = () => {
                         {generatingAlt[mealIdx] ? (
                           <Loader className="animate-spin h-4 w-4 mr-2" />
                         ) : null}
-                        {generatingAlt[mealIdx] ? 'Generating...' : 'Add Alternative'}
+                        {generatingAlt[mealIdx] ? (translations.generating || 'Generating...') : (translations.addAlternative || 'Add Alternative')}
                       </Button>
                     </div>
                   </div>
@@ -1993,7 +2037,7 @@ const MenuCreate = () => {
           </div>
         </>
       )}
-      <Button onClick={() => downloadPdf(menu)}>Download as PDF</Button>
+      <Button onClick={() => downloadPdf(menu)}>{translations.downloadAsPdf || 'Download as PDF'}</Button>
 
       {/* Save Button and Cache Management (not in PDF) */}
       {menu && menu.meals && menu.meals.length > 0 && (
@@ -2001,7 +2045,7 @@ const MenuCreate = () => {
           {/* Cache Statistics and Auto-save indicator */}
           <div className="text-sm text-gray-600 space-y-1">
             <div>
-              <span className="font-medium">UPC Cache:</span> {upcCache.size} ingredients stored
+              <span className="font-medium">{translations.upcCache || 'UPC Cache'}:</span> {upcCache.size} {translations.ingredientsStored || 'ingredients stored'}
               {upcCache.size > 0 && (
                 <Button
                   variant="outline"
@@ -2009,17 +2053,17 @@ const MenuCreate = () => {
                   onClick={() => {
                     setUpcCache(new Map());
                     localStorage.removeItem('upc_cache');
-                    alert('UPC cache cleared successfully!');
+                    alert(translations.upcCacheCleared || 'UPC cache cleared successfully!');
                   }}
                   className="ml-3 text-xs"
                 >
-                  Clear Cache
+                  {translations.clearCache || 'Clear Cache'}
                 </Button>
               )}
             </div>
             <div className="flex items-center gap-2">
               <span className="inline-block w-2 h-2 bg-green-500 rounded-full"></span>
-              <span className="text-xs text-green-600">Menu auto-saved locally</span>
+                              <span className="text-xs text-green-600">{translations.menuAutoSaved || 'Menu auto-saved locally'}</span>
             </div>
           </div>
 
@@ -2041,7 +2085,7 @@ const MenuCreate = () => {
             ) : (
               <Save className="h-4 w-4 mr-2" />
             )}
-            {saving ? (translations.saving || 'Saving...') : 'Save Schema & Menu Plan'}
+            {saving ? (translations.saving || 'Saving...') : (translations.saveSchemaAndMenu || 'Save Schema & Menu Plan')}
           </Button>
         </div>
       )}
@@ -2054,7 +2098,7 @@ const MenuCreate = () => {
             className="bg-yellow-100 hover:bg-yellow-200 text-yellow-800 border-yellow-300 shadow-sm font-semibold"
             onClick={() => setShowShoppingList((prev) => !prev)}
           >
-            {showShoppingList ? 'Hide Shopping List' : '🛒 Show Shopping List'}
+            {showShoppingList ? (translations.hideShoppingList || 'Hide Shopping List') : `🛒 ${translations.showShoppingList || 'Show Shopping List'}`}
           </Button>
         </div>
       )}
@@ -2121,7 +2165,7 @@ const MenuCreate = () => {
 
 
 async function translateMenu(menu, targetLang = 'he') {
-  const response = await fetch('https://dietitian-web-backend.onrender.com/api/translate', {
+  const response = await fetch('http://127.0.0.1:5000/api/translate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ menu, targetLang }),

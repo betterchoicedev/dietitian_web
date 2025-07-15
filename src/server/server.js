@@ -199,6 +199,16 @@ app.get('/api/ingredient-upc-hebrew', async (req, res) => {
 
   console.log(`🔍 Hebrew UPC lookup: query="${query}"`);
 
+  // Define processing words that shouldn't heavily influence scoring
+  const processingWords = [
+    'chopped', 'smashed', 'cut', 'sliced', 'diced', 'minced', 'grated', 'shredded',
+    'frozen', 'fresh', 'raw', 'cooked', 'baked', 'fried', 'grilled', 'roasted',
+    'dried', 'canned', 'jarred', 'packaged', 'prepared', 'ready', 'instant',
+    'organic', 'natural', 'artificial', 'sweetened', 'unsweetened', 'low', 'high',
+    'light', 'heavy', 'thick', 'thin', 'large', 'small', 'mini', 'regular',
+    'extra', 'premium', 'standard', 'basic', 'deluxe', 'classic', 'traditional'
+  ];
+
   // Split on spaces, drop any empties, and normalize
   const terms = query
     .trim()
@@ -238,11 +248,22 @@ app.get('/api/ingredient-upc-hebrew', async (req, res) => {
     .split(/\s+/)
     .filter(Boolean)
     .map(term => term.replace(/[^\w\s]/g, ''))
+    .filter(term => !processingWords.includes(term.toLowerCase()))
     .slice(0, 3); // Limit to first 3 terms to speed up search
 
   // Extract numeric terms from product
   const numericTerms = productTerms.filter(term => 
     /^\d+%?$/.test(term) || /^\d+\.\d+%?$/.test(term)
+  );
+
+  // Extract processing words from original product name for bonus scoring
+  const originalProductTerms = productName
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(term => term.replace(/[^\w\s]/g, ''));
+    
+  const processingTerms = originalProductTerms.filter(term => 
+    processingWords.includes(term.toLowerCase())
   );
 
   // Debug logging
@@ -251,6 +272,7 @@ app.get('/api/ingredient-upc-hebrew', async (req, res) => {
     brandName,
     productName,
     productTerms,
+    processingTerms,
     numericTerms
   });
 
@@ -264,12 +286,12 @@ app.get('/api/ingredient-upc-hebrew', async (req, res) => {
     // Create optimized search strategies (reduced from 7 to 3)
     const searchStrategies = [];
 
-    // Strategy 1: Israeli Brand + Product Priority (highest weight)
+    // Strategy 1: First Word + Brand Match (highest priority)
     if (brandName && productTerms.length > 0) {
       request.input('brand', sql.NVarChar, brandName);
       
       const productClauses = productTerms.map((term, i) => {
-        const key = `product${i}`;
+        const key = `firstBrand${i}`;
         request.input(key, sql.NVarChar, term);
         return `LOWER(english_name) LIKE N'%' + @${key} + '%'`;
       });
@@ -279,20 +301,128 @@ app.get('/api/ingredient-upc-hebrew', async (req, res) => {
       
       const israeliBrandClause = israeliBrands.map(brand => `LOWER(english_name) LIKE N'%${brand}%'`).join(' OR ');
       
+      // Add parameter for full product name match
+      request.input('fullProductName', sql.NVarChar, productName);
+      
+      // Add parameters for processing terms
+      const processingClauses = processingTerms.map((term, i) => {
+        const key = `processing${i}`;
+        request.input(key, sql.NVarChar, term);
+        return `CASE WHEN LOWER(english_name) LIKE N'%' + @${key} + '%' THEN 3 ELSE 0 END`;
+      }).join(' + ');
+      
+      searchStrategies.push({
+        name: 'first_word_brand_match',
+        sql: `SELECT TOP 10 gtinUpc AS upc, english_name,
+               CASE WHEN LOWER(english_name) LIKE LOWER(@fullProductName) + N'%' THEN 80 ELSE 0 END +
+               (${productClauses.map((_, i) => `CASE WHEN LOWER(english_name) LIKE @firstBrand${i} + N'%' THEN 40 ELSE CASE WHEN LOWER(english_name) LIKE N'%' + @firstBrand${i} + '%' THEN 5 ELSE 0 END END`).join(' + ')}) +
+               CASE WHEN LOWER(english_name) LIKE N'%' + @brand + '%' THEN 8 ELSE 0 END +
+               CASE WHEN (${israeliBrandClause}) THEN 3 ELSE 0 END +
+               ${processingClauses ? `+ ${processingClauses}` : ''} +
+               CASE WHEN LOWER(english_name) LIKE N'%raw%' THEN 2 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%fresh%' THEN 2 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%without peel%' THEN 2 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%sticks%' THEN 2 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%sliced%' THEN 1 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%mini%' THEN 2 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%with%' THEN -3 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%drink%' THEN -5 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%yoghurt%' THEN -5 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%milk%' THEN -5 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%fat%' THEN -3 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%%' THEN -2 ELSE 0 END as total_score
+               FROM foods_storage WITH (NOLOCK)
+               WHERE LOWER(english_name) LIKE N'%' + @brand + '%' AND (${productClauses.join(' OR ')})
+               AND LEN(gtinUpc) = 8 AND ISNUMERIC(gtinUpc) = 1
+               ORDER BY total_score DESC`,
+        weight: 150
+      });
+    }
+
+    // Strategy 2: First Word Match Only (high priority)
+    if (productTerms.length > 0) {
+      const productClauses = productTerms.map((term, i) => {
+        const key = `first${i}`;
+        request.input(key, sql.NVarChar, term);
+        return `LOWER(english_name) LIKE N'%' + @${key} + '%'`;
+      });
+      
+      // Israeli brands filter
+      const israeliBrands = ['tnuva', 'tara', 'strauss', 'yotvata', 'harduf', 'gad', 'danone', 'nestle', 'feldman', 'osem', 'telma', 'angel', 'elite', 'shufersal', 'ramilevy', 'coop', 'victory', 'bamba', 'bissli', 'krembo', 'lechem eretz', 'achla', 'taboon', 'dan cake', 'kibutz galuyot', 'machsanei hashuk', 'shamir salads', 'meshek tzuriel', 'priniv', 'shimrit', 'tenuva', 'emek', 'milko', 'para', 'shoko', 'cottage', 'gamadim', 'hashachar', 'zoglovek', 'wilke', 'galil mountain', 'carmel', 'barkan', 'golan heights', 'dalton', 'recanati', 'tabor', 'tulip', 'yarden', 'vita', 'primor', 'meshulam', 'golden star', 'kfar shaul', 'hazirim', 'hatzbani', 'aviv', 'masuah', 'shemen', 'mizra', 'tivall', 'achva', 'halva kingdom'];
+      
+      const israeliBrandClause = israeliBrands.map(brand => `LOWER(english_name) LIKE N'%${brand}%'`).join(' OR ');
+      
+      // Add parameter for full product name match
+      request.input('fullProductName2', sql.NVarChar, productName);
+      
+      // Add parameters for processing terms
+      const processingClauses2 = processingTerms.map((term, i) => {
+        const key = `processing2${i}`;
+        request.input(key, sql.NVarChar, term);
+        return `CASE WHEN LOWER(english_name) LIKE N'%' + @${key} + '%' THEN 3 ELSE 0 END`;
+      }).join(' + ');
+      
+      searchStrategies.push({
+        name: 'first_word_match',
+        sql: `SELECT TOP 10 gtinUpc AS upc, english_name,
+               CASE WHEN LOWER(english_name) LIKE LOWER(@fullProductName2) + N'%' THEN 80 ELSE 0 END +
+               (${productClauses.map((_, i) => `CASE WHEN LOWER(english_name) LIKE @first${i} + N'%' THEN 40 ELSE CASE WHEN LOWER(english_name) LIKE N'%' + @first${i} + '%' THEN 5 ELSE 0 END END`).join(' + ')}) +
+               CASE WHEN (${israeliBrandClause}) THEN 3 ELSE 0 END +
+               ${processingClauses2 ? `+ ${processingClauses2}` : ''} +
+               CASE WHEN LOWER(english_name) LIKE N'%raw%' THEN 2 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%fresh%' THEN 2 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%without peel%' THEN 2 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%sticks%' THEN 2 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%sliced%' THEN 1 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%mini%' THEN 2 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%with%' THEN -3 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%drink%' THEN -5 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%yoghurt%' THEN -5 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%milk%' THEN -5 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%fat%' THEN -3 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%%' THEN -2 ELSE 0 END as total_score
+               FROM foods_storage WITH (NOLOCK)
+               WHERE (${productClauses.join(' OR ')})
+               AND LEN(gtinUpc) = 8 AND ISNUMERIC(gtinUpc) = 1
+               ORDER BY total_score DESC`,
+        weight: 120
+      });
+    }
+
+    // Strategy 3: Israeli Brand + Product Priority (medium weight)
+    if (brandName && productTerms.length > 0) {
+      request.input('brand3', sql.NVarChar, brandName);
+      
+      const productClauses = productTerms.map((term, i) => {
+        const key = `product3${i}`;
+        request.input(key, sql.NVarChar, term);
+        return `LOWER(english_name) LIKE N'%' + @${key} + '%'`;
+      });
+      
+      // Israeli brands filter
+      const israeliBrands = ['tnuva', 'tara', 'strauss', 'yotvata', 'harduf', 'gad', 'danone', 'nestle', 'feldman', 'osem', 'telma', 'angel', 'elite', 'shufersal', 'ramilevy', 'coop', 'victory', 'bamba', 'bissli', 'krembo', 'lechem eretz', 'achla', 'taboon', 'dan cake', 'kibutz galuyot', 'machsanei hashuk', 'shamir salads', 'meshek tzuriel', 'priniv', 'shimrit', 'tenuva', 'emek', 'milko', 'para', 'shoko', 'cottage', 'gamadim', 'hashachar', 'zoglovek', 'wilke', 'galil mountain', 'carmel', 'barkan', 'golan heights', 'dalton', 'recanati', 'tabor', 'tulip', 'yarden', 'vita', 'primor', 'meshulam', 'golden star', 'kfar shaul', 'hazirim', 'hatzbani', 'aviv', 'masuah', 'shemen', 'mizra', 'tivall', 'achva', 'halva kingdom'];
+      
+      const israeliBrandClause = israeliBrands.map(brand => `LOWER(english_name) LIKE N'%${brand}%'`).join(' OR ');
+      
+      // Add parameter for full product name match
+      request.input('fullProductName3', sql.NVarChar, productName);
+      
       searchStrategies.push({
         name: 'israeli_brand_product_priority',
         sql: `SELECT TOP 10 gtinUpc AS upc, english_name,
-               CASE WHEN LOWER(english_name) LIKE N'%' + @brand + '%' THEN 10 ELSE 0 END +
-               (${productClauses.map((_, i) => `CASE WHEN LOWER(english_name) LIKE N'%' + @product${i} + '%' THEN 3 ELSE 0 END`).join(' + ')}) +
+               CASE WHEN LOWER(english_name) LIKE LOWER(@fullProductName3) + N'%' THEN 50 ELSE 0 END +
+               CASE WHEN LOWER(english_name) LIKE N'%' + @brand3 + '%' THEN 10 ELSE 0 END +
+               (${productClauses.map((_, i) => `CASE WHEN LOWER(english_name) LIKE N'%' + @product3${i} + '%' THEN 3 ELSE 0 END`).join(' + ')}) +
                CASE WHEN (${israeliBrandClause}) THEN 5 ELSE 0 END as total_score
                FROM foods_storage WITH (NOLOCK)
-               WHERE LOWER(english_name) LIKE N'%' + @brand + '%' AND (${productClauses.join(' OR ')})
+               WHERE LOWER(english_name) LIKE N'%' + @brand3 + '%' AND (${productClauses.join(' OR ')})
+               AND LEN(gtinUpc) = 8 AND ISNUMERIC(gtinUpc) = 1
                ORDER BY total_score DESC`,
         weight: 100
       });
     }
 
-    // Strategy 2: Israeli Products with Product Terms (high weight)
+    // Strategy 4: Israeli Products with Product Terms (low weight)
     if (productTerms.length > 0) {
       const productClauses = productTerms.map((term, i) => {
         const key = `product2${i}`;
@@ -312,12 +442,13 @@ app.get('/api/ingredient-upc-hebrew', async (req, res) => {
                CASE WHEN (${israeliBrandClause}) THEN 8 ELSE 0 END as total_score
                FROM foods_storage WITH (NOLOCK)
                WHERE (${productClauses.join(' OR ')})
+               AND LEN(gtinUpc) = 8 AND ISNUMERIC(gtinUpc) = 1
                ORDER BY total_score DESC`,
         weight: 90
       });
     }
 
-    // Strategy 3: Simple fallback - any term match
+    // Strategy 5: Simple fallback - any term match
     const allTerms = [brandName, ...productTerms].filter(Boolean);
     if (allTerms.length > 0) {
       const fallbackClauses = allTerms.map((term, i) => {
@@ -332,6 +463,7 @@ app.get('/api/ingredient-upc-hebrew', async (req, res) => {
                (${fallbackClauses.map((_, i) => `CASE WHEN LOWER(english_name) LIKE N'%' + @fallback${i} + '%' THEN 1 ELSE 0 END`).join(' + ')}) as matched_terms
                FROM foods_storage WITH (NOLOCK)
                WHERE (${fallbackClauses.join(' OR ')})
+               AND LEN(gtinUpc) = 8 AND ISNUMERIC(gtinUpc) = 1
                ORDER BY matched_terms DESC`,
         weight: 50
       });
