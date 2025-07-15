@@ -38,26 +38,6 @@ jobs:
           package: ${{ github.workspace }}/backend.zip
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_E89ED6E4A48748E299AEA7F7A5E3AD42 }}
 
-      - name: Configure App Service settings
-        uses: azure/appservice-settings@v1
-        with:
-          app-name: dietitian-be
-          app-settings-json: |
-            [
-              {
-                "name": "WEBSITES_PORT",
-                "value": "8000"
-              },
-              {
-                "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
-                "value": "0"
-              },
-              {
-                "name": "WEBSITES_CONTAINER_START_TIME_LIMIT",
-                "value": "1800"
-              }
-            ]
-
 # Note: Make sure to configure these environment variables in Azure App Service:
 # - supabaseUrl
 # - supabaseKey  
@@ -70,3 +50,8 @@ jobs:
 #
 # Startup Command to set in Azure App Service:
 # python backend.py
+#
+# App Settings to configure in Azure App Service:
+# - WEBSITES_PORT = 8000
+# - SCM_DO_BUILD_DURING_DEPLOYMENT = 0
+# - WEBSITES_CONTAINER_START_TIME_LIMIT = 1800
