@@ -24,9 +24,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # package only the backend folder
+      # package only the backend folder contents (not the folder itself)
       - name: Zip backend for Azure
         run: |
+          cd backend
           zip -r ${{ github.workspace }}/backend.zip . \
                  -x "venv/**" "__pycache__/**"
 
