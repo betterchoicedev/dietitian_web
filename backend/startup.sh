@@ -1,11 +1,11 @@
 #!/bin/bash
 cd /home/site/wwwroot
 
-# Install dependencies
+# Install dependencies using the correct Python path
 echo "Installing Python dependencies..."
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
 
 # Start the application with gunicorn
 echo "Starting Flask application..."
-gunicorn --bind 0.0.0.0:8000 --timeout 120 --workers 1 backend:app 
+python3 -m gunicorn --bind 0.0.0.0:8000 --timeout 120 --workers 1 backend:app 

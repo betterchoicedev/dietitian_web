@@ -26,7 +26,7 @@ Configure these environment variables in your Azure App Service:
 ### Startup Command
 Set the startup command in Azure App Service to:
 ```bash
-python -m pip install --upgrade pip && pip install -r requirements.txt && python backend.py
+pip install -r requirements.txt && python backend.py
 ```
 
 ### Application Settings
