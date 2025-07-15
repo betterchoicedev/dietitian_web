@@ -24,8 +24,7 @@ jobs:
       - name: Zip backend for Azure
         run: |
           cd backend
-          zip -r ../backend.zip . \
-                 -x "venv/**" "__pycache__/**"
+          find . -type f -not -path "./venv/*" -not -path "./__pycache__/*" -exec zip ../backend.zip {} \;
 
       - name: Deploy to App Service
         uses: azure/webapps-deploy@v3
