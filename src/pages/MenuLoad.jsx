@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ArrowLeft, Loader, Save, Search, Filter, Utensils, Edit, CalendarRange } from 'lucide-react';
+import { ArrowLeft, Loader, Save, Search, Filter, Utensils, Edit, CalendarRange, Download } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useNavigate } from 'react-router-dom';
 import { Menu } from '@/api/entities';
@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { EventBus } from '@/utils/EventBus';
 import {
   Select,
   SelectContent,
@@ -104,7 +105,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
     setIsLoading(true);
     try {
       // Try MenuCreate API first, fallback to original API
-      let response = await fetch(`http://127.0.0.1:5000/api/suggestions?query=${encodeURIComponent(query)}`);
+      let response = await fetch(`https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/suggestions?query=${encodeURIComponent(query)}`);
       
       if (response.ok) {
         const data = await response.json();
@@ -311,8 +312,10 @@ const MenuLoad = () => {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [checkingExpired, setCheckingExpired] = useState(false);
   const [expiredCheckResult, setExpiredCheckResult] = useState(null);
+  const [generatingAlt, setGeneratingAlt] = useState({});
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { translations } = useLanguage();
+  const { language, translations } = useLanguage();
 
   // Convert saved menu format to editable format
   const convertToEditFormat = (savedMenu) => {
@@ -559,6 +562,144 @@ const MenuLoad = () => {
     });
   };
 
+  const handleMakeAlternativeMain = (mealIndex, alternativeIndex = null) => {
+    setEditedMenu(prev => {
+      const updated = JSON.parse(JSON.stringify(prev));
+      const meal = updated.meals[mealIndex];
+      
+      if (alternativeIndex !== null) {
+        // Handle additional alternatives array
+        const alternative = meal.alternatives[alternativeIndex];
+        const currentMain = meal.main;
+        
+        // Swap main with the selected alternative
+        meal.main = alternative;
+        meal.alternatives[alternativeIndex] = currentMain;
+      } else {
+        // Handle main and alternative sections
+        const currentMain = meal.main;
+        const currentAlternative = meal.alternative;
+        
+        // Swap main and alternative
+        meal.main = currentAlternative;
+        meal.alternative = currentMain;
+      }
+
+      // Recalculate daily totals
+      updated.totals = calculateMainTotals(updated);
+
+      return updated;
+    });
+  };
+
+  const handleDeleteIngredient = (mealIndex, optionIndex, ingredientIndex, alternativeIndex = null) => {
+    setEditedMenu(prev => {
+      const updated = JSON.parse(JSON.stringify(prev));
+      const meal = updated.meals[mealIndex];
+      
+      let option;
+      if (alternativeIndex !== null) {
+        // Handle additional alternatives array
+        option = meal.alternatives[alternativeIndex];
+      } else {
+        // Handle main and alternative sections
+        option = optionIndex === 'main' ? meal.main : meal.alternative;
+      }
+
+      // Remove the ingredient
+      option.ingredients.splice(ingredientIndex, 1);
+
+      // Recalculate nutrition totals from remaining ingredients
+      const newNutrition = option.ingredients.reduce(
+        (acc, ing) => {
+          acc.calories += Number(ing.calories) || 0;
+          acc.protein += Number(ing.protein) || 0;
+          acc.fat += Number(ing.fat) || 0;
+          acc.carbs += Number(ing.carbs) || 0;
+          return acc;
+        },
+        { calories: 0, protein: 0, fat: 0, carbs: 0 }
+      );
+
+      // Update option nutrition
+      option.nutrition = {
+        calories: Math.round(newNutrition.calories),
+        protein: Math.round(newNutrition.protein),
+        fat: Math.round(newNutrition.fat),
+        carbs: Math.round(newNutrition.carbs),
+      };
+
+      // Recalculate daily totals
+      updated.totals = calculateMainTotals(updated);
+
+      return updated;
+    });
+  };
+
+  async function generateAlternativeMeal(main, alternative) {
+    const response = await fetch('https://dietitian-be.azurewebsites.net/api/generate-alternative-meal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        main,
+        alternative,
+        user_code: editedMenu.user_code
+      })
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to generate alternative meal');
+    }
+    return await response.json();
+  }
+
+  const handleAddAlternative = async (mealIdx) => {
+    setGeneratingAlt((prev) => ({ ...prev, [mealIdx]: true }));
+    try {
+      const meal = editedMenu.meals[mealIdx];
+      if (!meal || !meal.main || !meal.alternative) return;
+      
+      const newAlt = await generateAlternativeMeal(meal.main, meal.alternative);
+      
+      // If we're in Hebrew mode, translate the new alternative immediately
+      let translatedAlt = newAlt;
+      if (language === 'he') {
+        try {
+          console.log('🌐 Translating new alternative meal to Hebrew...');
+          
+          // Create a proper menu structure for translation
+          const menuForTranslation = {
+            meals: [{
+              meal: newAlt.meal || 'Alternative',
+              main: newAlt,
+              alternative: newAlt
+            }]
+          };
+          
+          const translatedMenu = await translateMenu(menuForTranslation, 'he');
+          translatedAlt = translatedMenu.meals[0].main; // Extract the translated meal
+          console.log('✅ New alternative translated to Hebrew:', translatedAlt);
+        } catch (translationError) {
+          console.error('❌ Failed to translate new alternative:', translationError);
+          // Fall back to original English version
+          translatedAlt = newAlt;
+        }
+      }
+      
+      // Update the edited menu with the new alternative
+      setEditedMenu((prevMenu) => {
+        const updated = { ...prevMenu };
+        if (!updated.meals[mealIdx].alternatives) updated.meals[mealIdx].alternatives = [];
+        updated.meals[mealIdx].alternatives.push(translatedAlt);
+        return { ...updated };
+      });
+    } catch (err) {
+      alert(err.message || 'Failed to generate alternative meal');
+    } finally {
+      setGeneratingAlt((prev) => ({ ...prev, [mealIdx]: false }));
+    }
+  };
+
   const handleSave = async () => {
     if (!editedMenu || !selectedMenu) {
       setError('No menu to save');
@@ -732,6 +873,90 @@ const MenuLoad = () => {
     }
   };
 
+  // Translation function
+  async function translateMenu(menu, targetLang = 'he') {
+    const response = await fetch('https://dietitian-be.azurewebsites.net/api/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ menu, targetLang }),
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Translation failed');
+    }
+    return await response.json();
+  }
+
+  // PDF download function
+  async function downloadPdf(menu) {
+    try {
+      const response = await fetch('https://dietitian-be.azurewebsites.net/api/menu-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ menu })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to generate PDF');
+      }
+      
+      const blob = await response.blob();
+      // Create a link to download
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${menu.meal_plan_name || 'meal_plan'}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading PDF:', error);
+      alert('Failed to download PDF. Please try again.');
+    }
+  }
+
+  // Handle language changes
+  const handleLanguageChange = async (lang) => {
+    if (!editedMenu || loading) return;
+
+    if (lang === 'en') {
+      // Load the original menu data (English)
+      const originalMenu = menus.find(m => m.id === editedMenu.id);
+      if (originalMenu) {
+        const converted = convertToEditFormat(originalMenu);
+        if (converted) {
+          setEditedMenu(converted);
+        }
+      }
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const translated = await translateMenu(editedMenu, lang);
+      setEditedMenu(translated);
+    } catch (err) {
+      console.error('Translation failed:', err);
+      setError('Failed to translate menu.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Subscribe to language changes
+  useEffect(() => {
+    EventBus.on('translateMenu', handleLanguageChange);
+    return () => {
+      if (EventBus.off) {
+        EventBus.off('translateMenu', handleLanguageChange);
+      }
+    };
+  }, [editedMenu, loading]);
+
   // Check and update expired menus
   const checkAndUpdateExpiredMenus = async () => {
     try {
@@ -827,6 +1052,17 @@ const MenuLoad = () => {
             <Badge variant="outline" className={`${isAlternative ? 'bg-blue-100 border-blue-200' : 'bg-green-100 border-green-200'}`}>
               {typeof option.nutrition?.calories === 'number' ? option.nutrition.calories + ' ' + (translations.calories || 'kcal') : option.nutrition?.calories}
             </Badge>
+            {isAlternative && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleMakeAlternativeMain(option.mealIndex, option.alternativeIndex)}
+                className="text-xs bg-green-50 hover:bg-green-100 border-green-200 text-green-700"
+                title={translations.makeMain || 'Make this the main option'}
+              >
+                ⭐ {translations.makeMain || 'Make Main'}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -850,7 +1086,7 @@ const MenuLoad = () => {
             <h5 className="text-sm font-medium text-gray-700 mb-2">{translations.ingredients || 'Ingredients'}:</h5>
             <ul className="space-y-1">
               {option.ingredients.map((ingredient, idx) => (
-                <li key={idx} className="flex items-start gap-2 text-sm">
+                <li key={idx} className="flex items-start gap-2 text-sm group">
                   <span className="w-1.5 h-1.5 rounded-full bg-gray-400 mt-2" />
                   <div className="flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -877,6 +1113,15 @@ const MenuLoad = () => {
                       )}
                     </div>
                   </div>
+                  <button
+                    onClick={() => handleDeleteIngredient(option.mealIndex, isAlternative ? 'alternative' : 'main', idx, option.alternativeIndex)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-red-500 hover:text-red-700 hover:bg-red-50 p-1 rounded"
+                    title={translations.deleteIngredient || 'Delete ingredient'}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
                 </li>
               ))}
             </ul>
@@ -907,6 +1152,14 @@ const MenuLoad = () => {
           <Alert variant="destructive">
             <AlertTitle>Error</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {loading && (
+          <Alert>
+            <Loader className="animate-spin h-4 w-4 mr-2" />
+            <AlertTitle>Translating Menu</AlertTitle>
+            <AlertDescription>Please wait while the menu is being translated...</AlertDescription>
           </Alert>
         )}
 
@@ -987,13 +1240,49 @@ const MenuLoad = () => {
                       {renderMealOption({ ...meal.alternative, mealIndex: mealIdx }, true)}
                     </div>
                   )}
+
+                  {/* Render additional alternatives if present */}
+                  {meal.alternatives && meal.alternatives.length > 0 && (
+                    <div className="mt-4">
+                      <div className="font-semibold mb-2 text-blue-700">{translations.otherAlternatives || 'Other Alternatives'}:</div>
+                      <div className="space-y-4">
+                        {meal.alternatives.map((alt, altIdx) => (
+                          <div key={altIdx} className="bg-blue-50 rounded-lg p-3">
+                            {renderMealOption({ ...alt, mealIndex: mealIdx, alternativeIndex: altIdx }, true)}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Add Alternative Button */}
+                  <div className="mt-4 flex justify-end">
+                    <Button
+                      onClick={() => handleAddAlternative(mealIdx)}
+                      disabled={generatingAlt[mealIdx]}
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      {generatingAlt[mealIdx] ? (
+                        <Loader className="animate-spin h-4 w-4 mr-2" />
+                      ) : null}
+                      {generatingAlt[mealIdx] ? (translations.generating || 'Generating...') : (translations.addAlternative || 'Add Alternative')}
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
           ))}
         </div>
 
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-3">
+          <Button
+            onClick={() => downloadPdf(editedMenu)}
+            variant="outline"
+            className="border-blue-300 text-blue-700 hover:bg-blue-50"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            {translations.downloadAsPdf || 'Download as PDF'}
+          </Button>
           <Button
             onClick={handleSave}
             disabled={saving}

@@ -891,10 +891,13 @@ def get_generated_menu():
 @app.route("/api/template", methods=["POST"])
 def api_template():
     max_retries = 4  # Build 4 templates before giving up
+    previous_issues = []  # Track issues from previous attempts
     
     for attempt in range(1, max_retries + 1):
         try:
             logger.info(f"🔄 Attempt {attempt}/{max_retries} to generate template")
+            if previous_issues:
+                logger.info(f"📋 Previous issues to address: {previous_issues}")
             
             data = request.get_json()
             user_code = data.get("user_code") if data else None
@@ -914,6 +917,19 @@ def api_template():
             
             region_instruction = region_instructions.get(region, region_instructions['israel'])
 
+            # Build system prompt with previous issues feedback
+            previous_issues_text = ""
+            if previous_issues:
+                previous_issues_text = f"""
+**CRITICAL: PREVIOUS ATTEMPT FAILURES TO AVOID:**
+{chr(10).join([f"• {issue}" for issue in previous_issues])}
+
+**IMPORTANT: The above issues caused previous template generation to fail.**
+**You MUST address these specific problems in your new template.**
+**If the previous template had macro distribution issues, adjust your calculations accordingly.**
+**If there were dietary restriction violations, ensure strict compliance.**
+"""
+
             system_prompt = f"""
 You are a professional dietitian AI specializing in personalized, practical meal planning.
 Your mission: generate a realistic meal template that a real person can cook and enjoy, while strictly hitting their daily calorie & macro targets and honoring every user's unique preferences, allergies, and dietary rules.
@@ -923,6 +939,8 @@ Your mission: generate a realistic meal template that a real person can cook and
 - Do not use Hebrew, Arabic, or any other language
 - Use English names for all foods, brands, and cooking terms
 - This applies regardless of the user's region or preferences
+
+{previous_issues_text}
 
 CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fat)
 
@@ -1054,22 +1072,63 @@ If any meal is missing or fails a rule, silently self-correct and regenerate bef
             try:
                 parsed = json.loads(result)
                 logger.info("✅ Parsed template successfully on attempt %d.", attempt)
-                return jsonify(parsed)
+                
+                # Validate the template before returning
+                template = parsed.get("template", [])
+                if template:
+                    # Test validation to catch issues early
+                    val_res = app.test_client().post("/api/validate-template", json={
+                        "template": template, 
+                        "user_code": user_code
+                    })
+                    val_data = val_res.get_json()
+                    
+                    if val_data.get("is_valid"):
+                        logger.info("✅ Template passes validation on attempt %d.", attempt)
+                        return jsonify(parsed)
+                    else:
+                        # Collect issues for next attempt
+                        main_issues = val_data.get("issues_main", [])
+                        alt_issues = val_data.get("issues_alt", [])
+                        new_issues = main_issues + alt_issues
+                        
+                        if new_issues:
+                            previous_issues = new_issues
+                            logger.warning("❌ Template validation failed on attempt %d. Issues: %s", attempt, new_issues)
+                            
+                            if attempt < max_retries:
+                                logger.info(f"🔄 Retrying template generation with issues feedback...")
+                                continue
+                            else:
+                                logger.warning("⚠️ Returning template despite validation failure after all attempts")
+                                return jsonify(parsed)
+                        else:
+                            return jsonify(parsed)
+                else:
+                    logger.error("❌ No template found in parsed response")
+                    if attempt < max_retries:
+                        previous_issues = ["No template structure found in response"]
+                        continue
+                    else:
+                        return jsonify({"error": "No valid template generated after all attempts"}), 500
+                        
             except json.JSONDecodeError:
                 logger.error("❌ JSON decode error in /api/template (attempt %d):\n%s", attempt, result)
-                if attempt == max_retries:
-                    return jsonify({"error": "Invalid JSON from OpenAI after all attempts", "raw": result}), 500
-                else:
+                if attempt < max_retries:
+                    previous_issues = ["Invalid JSON response from AI"]
                     logger.info(f"🔄 Retrying template generation due to JSON decode error...")
                     continue
+                else:
+                    return jsonify({"error": "Invalid JSON from OpenAI after all attempts", "raw": result}), 500
                     
         except Exception as e:
             logger.error("❌ Exception in /api/template (attempt %d):\n%s", attempt, traceback.format_exc())
-            if attempt == max_retries:
-                return jsonify({"error": str(e)}), 500
-            else:
+            if attempt < max_retries:
+                previous_issues = [f"Exception occurred: {str(e)}"]
                 logger.info(f"🔄 Retrying template generation due to exception...")
                 continue
+            else:
+                return jsonify({"error": str(e)}), 500
     
     # If we get here, all attempts failed
     logger.error("❌ All %d attempts to generate template failed", max_retries)
@@ -1913,20 +1972,35 @@ def generate_alternative_meal():
     
     # Compose prompt for OpenAI
     system_prompt = (
-        "You are a professional dietitian AI. Given a main meal, an existing alternative, and user preferences, generate a new, distinct alternative meal option. "
-        "The new alternative should have similar calories and macros, but use different main ingredients than both the main and the current alternative. "
+        "You are a professional dietitian AI. Generate a COMPLETELY DIFFERENT alternative meal that is entirely distinct from both the main meal and the existing alternative. "
+        "CRITICAL REQUIREMENTS: "
+        "- Create a meal with DIFFERENT main protein source, DIFFERENT cooking method, and DIFFERENT flavor profile "
+        "- Use COMPLETELY DIFFERENT ingredients than both the main and existing alternative "
+        "- The new meal MUST match the main meal's macros within ±5% tolerance (calories, protein, fat, carbs) "
         f"REGION-SPECIFIC REQUIREMENTS: {region_instruction} "
         "**CRITICAL: ALWAYS GENERATE ALL CONTENT IN ENGLISH ONLY.** "
         "- All meal names, ingredient names, and descriptions must be in English "
         "- Do not use Hebrew, Arabic, or any other language "
         "- Use English names for all foods, brands, and cooking terms "
-        "PREFERENCE LOGIC: If user 'likes' or 'loves' any food, consider it but DON'T overuse it. "
-        "Ensure variety - avoid repeating main ingredients that already appear in other meals. "
-        "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences. "
-        "If user has 'kosher' limitation, you MUST follow kosher dietary laws: "
-        "- NEVER mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) in the same meal "
-        "- Use only kosher-certified ingredients and brands "
-        "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
+        "DIETARY RESTRICTIONS: "
+        "- STRICTLY AVOID all foods in user allergies: {', '.join(preferences.get('allergies', []))} "
+        "- STRICTLY FOLLOW all dietary limitations: {', '.join(preferences.get('limitations', []))} "
+        "- If user has 'kosher' limitation, NEVER mix meat with dairy in the same meal "
+        "- Use only kosher-certified ingredients and brands if kosher is required "
+        "HUMAN-LIKE MEAL REQUIREMENTS: "
+        "- Generate SIMPLE, REALISTIC meals that people actually eat daily "
+        "- Use common, familiar ingredients and combinations "
+        "- Avoid overly complex recipes or unusual ingredient combinations "
+        "- Focus on comfort foods, simple sandwiches, basic salads, easy-to-make dishes "
+        "- Examples of good meals: grilled chicken with rice, tuna sandwich, yogurt with fruit, simple pasta dishes "
+        "- Examples to AVOID: complex multi-ingredient recipes, unusual spice combinations, overly fancy preparations "
+        "- Keep ingredients list short (3-6 ingredients max) "
+        "- Use realistic portion sizes that match the region's packaging standards "
+        "VARIETY REQUIREMENTS: "
+        "- Use a DIFFERENT main protein source than both existing meals "
+        "- Use a DIFFERENT cooking method (if main is grilled, use baked/steamed/fried) "
+        "- Use a DIFFERENT flavor profile (if main is Mediterranean, use Asian/Mexican/Italian) "
+        "- Include DIFFERENT vegetables and grains than existing meals "
         "IMPORTANT: For any brand names in ingredients, you MUST use real, specific brand names based on the user's region. "
         "NEVER use 'Generic' or 'generic' as a brand name. Always specify actual commercial brands available in the user's region. "
         "Return ONLY the new alternative meal as valid JSON with: meal_title, ingredients (list of {item, brand of pruduct, household_measure, calories, protein, fat, carbs}), and nutrition (sum of ingredients)."

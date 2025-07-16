@@ -310,9 +310,21 @@ const MenuCreate = () => {
   const [menu, setMenu] = useState(() => {
     try {
       const saved = localStorage.getItem('menuCreate_menu');
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+      
+      const parsed = JSON.parse(saved);
+      // Validate that the loaded menu has the required structure
+      if (!parsed || !parsed.meals || !Array.isArray(parsed.meals) || parsed.meals.length === 0) {
+        console.warn('Invalid menu structure in localStorage, clearing...');
+        localStorage.removeItem('menuCreate_menu');
+        return null;
+      }
+      
+      console.log('📋 Loaded menu from localStorage with', parsed.meals.length, 'meals');
+      return parsed;
     } catch (err) {
       console.warn('Failed to load menu from localStorage:', err);
+      localStorage.removeItem('menuCreate_menu');
       return null;
     }
   });
@@ -320,9 +332,21 @@ const MenuCreate = () => {
   const [originalMenu, setOriginalMenu] = useState(() => {
     try {
       const saved = localStorage.getItem('menuCreate_originalMenu');
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+      
+      const parsed = JSON.parse(saved);
+      // Validate that the loaded originalMenu has the required structure
+      if (!parsed || !parsed.meals || !Array.isArray(parsed.meals) || parsed.meals.length === 0) {
+        console.warn('Invalid originalMenu structure in localStorage, clearing...');
+        localStorage.removeItem('menuCreate_originalMenu');
+        return null;
+      }
+      
+      console.log('📋 Loaded originalMenu from localStorage with', parsed.meals.length, 'meals');
+      return parsed;
     } catch (err) {
       console.warn('Failed to load originalMenu from localStorage:', err);
+      localStorage.removeItem('menuCreate_originalMenu');
       return null;
     }
   });
@@ -346,7 +370,15 @@ const MenuCreate = () => {
   });
 
   const [loadingUsers, setLoadingUsers] = useState(true);
-  const [userTargets, setUserTargets] = useState(null);
+  const [userTargets, setUserTargets] = useState(() => {
+    try {
+      const saved = localStorage.getItem('menuCreate_userTargets');
+      return saved ? JSON.parse(saved) : null;
+    } catch (err) {
+      console.warn('Failed to load userTargets from localStorage:', err);
+      return null;
+    }
+  });
   const [loadingUserTargets, setLoadingUserTargets] = useState(false);
   const navigate = useNavigate();
   const { language, translations } = useLanguage();
@@ -414,6 +446,19 @@ const MenuCreate = () => {
       console.warn('Failed to save selectedUser to localStorage:', err);
     }
   }, [selectedUser]);
+
+  // Save userTargets state to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      if (userTargets) {
+        localStorage.setItem('menuCreate_userTargets', JSON.stringify(userTargets));
+      } else {
+        localStorage.removeItem('menuCreate_userTargets');
+      }
+    } catch (err) {
+      console.warn('Failed to save userTargets to localStorage:', err);
+    }
+  }, [userTargets]);
 
 
 
@@ -541,6 +586,160 @@ const MenuCreate = () => {
       const option = optionIndex === 'main' ? meal.main : meal.alternative;
 
       option.ingredients[ingredientIndex] = newValues;
+
+      const baseName = option.meal_title ? option.meal_title.split(' with ')[0] : meal.meal;
+      option.meal_title = baseName;
+
+      const newNutrition = option.ingredients.reduce(
+        (acc, ing) => {
+          acc.calories += Number(ing.calories) || 0;
+          acc.protein += Number(ing.protein) || 0;
+          acc.fat += Number(ing.fat) || 0;
+          acc.carbs += Number(ing.carbs) || 0;
+          return acc;
+        },
+        { calories: 0, protein: 0, fat: 0, carbs: 0 }
+      );
+
+      option.nutrition = {
+        calories: Math.round(newNutrition.calories),
+        protein: Math.round(newNutrition.protein),
+        fat: Math.round(newNutrition.fat),
+        carbs: Math.round(newNutrition.carbs),
+      };
+
+      updatedOriginal.totals = calculateMainTotals(updatedOriginal);
+
+      return updatedOriginal;
+    });
+  };
+
+  const handleMakeAlternativeMain = (mealIndex, alternativeIndex = null) => {
+    setMenu(prevMenu => {
+      const updatedMenu = JSON.parse(JSON.stringify(prevMenu));
+      const meal = updatedMenu.meals[mealIndex];
+      
+      if (alternativeIndex !== null) {
+        // Handle additional alternatives array
+        const alternative = meal.alternatives[alternativeIndex];
+        const currentMain = meal.main;
+        
+        // Swap main with the selected alternative
+        meal.main = alternative;
+        meal.alternatives[alternativeIndex] = currentMain;
+      } else {
+        // Handle main and alternative sections
+        const currentMain = meal.main;
+        const currentAlternative = meal.alternative;
+        
+        // Swap main and alternative
+        meal.main = currentAlternative;
+        meal.alternative = currentMain;
+      }
+
+      // Recalculate daily totals
+      updatedMenu.totals = calculateMainTotals(updatedMenu);
+
+      return updatedMenu;
+    });
+
+    // Also update the original menu for consistency
+    setOriginalMenu(prevOriginal => {
+      if (!prevOriginal) return prevOriginal;
+
+      const updatedOriginal = JSON.parse(JSON.stringify(prevOriginal));
+      const meal = updatedOriginal.meals[mealIndex];
+      
+      if (alternativeIndex !== null) {
+        // Handle additional alternatives array
+        const alternative = meal.alternatives[alternativeIndex];
+        const currentMain = meal.main;
+        
+        // Swap main with the selected alternative
+        meal.main = alternative;
+        meal.alternatives[alternativeIndex] = currentMain;
+      } else {
+        // Handle main and alternative sections
+        const currentMain = meal.main;
+        const currentAlternative = meal.alternative;
+        
+        // Swap main and alternative
+        meal.main = currentAlternative;
+        meal.alternative = currentMain;
+      }
+
+      updatedOriginal.totals = calculateMainTotals(updatedOriginal);
+
+      return updatedOriginal;
+    });
+  };
+
+  const handleDeleteIngredient = (mealIndex, optionIndex, ingredientIndex, alternativeIndex = null) => {
+    setMenu(prevMenu => {
+      const updatedMenu = JSON.parse(JSON.stringify(prevMenu));
+      const meal = updatedMenu.meals[mealIndex];
+      
+      let option;
+      if (alternativeIndex !== null) {
+        // Handle additional alternatives array
+        option = meal.alternatives[alternativeIndex];
+      } else {
+        // Handle main and alternative sections
+        option = optionIndex === 'main' ? meal.main : meal.alternative;
+      }
+
+      // Remove the ingredient
+      option.ingredients.splice(ingredientIndex, 1);
+
+      // Update meal name with a concise, appealing name (not listing every ingredient)
+      const baseName = option.meal_title ? option.meal_title.split(' with ')[0] : meal.meal;
+      // Keep the original meal name without listing all ingredients
+      option.meal_title = baseName;
+
+      // Recalculate nutrition totals from remaining ingredients
+      const newNutrition = option.ingredients.reduce(
+        (acc, ing) => {
+          acc.calories += Number(ing.calories) || 0;
+          acc.protein += Number(ing.protein) || 0;
+          acc.fat += Number(ing.fat) || 0;
+          acc.carbs += Number(ing.carbs) || 0;
+          return acc;
+        },
+        { calories: 0, protein: 0, fat: 0, carbs: 0 }
+      );
+
+      // Update option nutrition
+      option.nutrition = {
+        calories: Math.round(newNutrition.calories),
+        protein: Math.round(newNutrition.protein),
+        fat: Math.round(newNutrition.fat),
+        carbs: Math.round(newNutrition.carbs),
+      };
+
+      // Recalculate daily totals
+      updatedMenu.totals = calculateMainTotals(updatedMenu);
+
+      return updatedMenu;
+    });
+
+    // Also update the original menu for consistency
+    setOriginalMenu(prevOriginal => {
+      if (!prevOriginal) return prevOriginal;
+
+      const updatedOriginal = JSON.parse(JSON.stringify(prevOriginal));
+      const meal = updatedOriginal.meals[mealIndex];
+      
+      let option;
+      if (alternativeIndex !== null) {
+        // Handle additional alternatives array
+        option = meal.alternatives[alternativeIndex];
+      } else {
+        // Handle main and alternative sections
+        option = optionIndex === 'main' ? meal.main : meal.alternative;
+      }
+
+      // Remove the ingredient
+      option.ingredients.splice(ingredientIndex, 1);
 
       const baseName = option.meal_title ? option.meal_title.split(' with ')[0] : meal.meal;
       option.meal_title = baseName;
@@ -850,10 +1049,15 @@ const MenuCreate = () => {
   // Clear saved menu state when starting fresh
   const clearSavedMenuState = () => {
     try {
+      console.log('🧹 Clearing saved menu state...');
       localStorage.removeItem('menuCreate_menu');
       localStorage.removeItem('menuCreate_originalMenu');
+      localStorage.removeItem('menuCreate_userTargets');
       setMenu(null);
       setOriginalMenu(null);
+      setUserTargets(null);
+      setError(null);
+      console.log('✅ Menu state cleared successfully');
     } catch (err) {
       console.warn('Failed to clear saved menu state:', err);
     }
@@ -885,8 +1089,34 @@ const MenuCreate = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_code: selectedUser.user_code })
       });
+      
+      if (!templateRes.ok) {
+        if (templateRes.status === 404) {
+          throw new Error("Client not found. Please check if the client exists in the database.");
+        } else if (templateRes.status === 500) {
+          throw new Error("Server error while analyzing client preferences. Please try again in a moment.");
+        } else if (templateRes.status === 503) {
+          throw new Error("Menu generation service is temporarily unavailable. Please try again later.");
+        } else {
+          throw new Error(`Unable to analyze client preferences (Error ${templateRes.status}). Please try again.`);
+        }
+      }
+      
       const templateData = await templateRes.json();
-      if (templateData.error || !templateData.template) throw new Error("Template generation failed");
+      if (templateData.error) {
+        if (templateData.error.includes("Template validation failed")) {
+          throw new Error("Unable to create a balanced meal plan that meets the client's nutritional requirements. Please check the client's dietary restrictions and try again.");
+        } else if (templateData.error.includes("Failed to generate template")) {
+          throw new Error("Unable to create a meal template. The system is having trouble with the client's dietary preferences. Please review the client's profile and try again.");
+        } else {
+          throw new Error(`Template creation failed: ${templateData.error}`);
+        }
+      }
+      
+      if (!templateData.template) {
+        throw new Error("No meal template was generated. Please check the client's profile and try again.");
+      }
+      
       const template = templateData.template;
 
       setProgress(25);
@@ -901,8 +1131,31 @@ const MenuCreate = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template, user_code: selectedUser.user_code }),
       });
+      
+      if (!buildRes.ok) {
+        if (buildRes.status === 500) {
+          throw new Error("Server error while creating meals. Please try again in a moment.");
+        } else if (buildRes.status === 503) {
+          throw new Error("Meal creation service is temporarily unavailable. Please try again later.");
+        } else {
+          throw new Error(`Unable to create meals (Error ${buildRes.status}). Please try again.`);
+        }
+      }
+      
       const buildData = await buildRes.json();
-      if (buildData.error || !buildData.menu) throw new Error("Menu build failed");
+      if (buildData.error) {
+        if (buildData.error.includes("Template validation failed")) {
+          throw new Error("The meal plan doesn't meet the client's nutritional requirements. Please try generating a new menu.");
+        } else if (buildData.error.includes("Menu build failed")) {
+          throw new Error("Unable to create the complete meal plan. Please try again.");
+        } else {
+          throw new Error(`Meal creation failed: ${buildData.error}`);
+        }
+      }
+      
+      if (!buildData.menu) {
+        throw new Error("No meals were created. Please try generating the menu again.");
+      }
 
       setProgress(60);
       setProgressStep('🔢 Calculating nutrition values...');
@@ -913,38 +1166,25 @@ const MenuCreate = () => {
         note: buildData.note || ''
       };
 
-      // Set the original English menu data ONCE. This is our source of truth.
-      setOriginalMenu(menuData);
-
       setProgress(70);
-      setProgressStep('🌐 Preparing menu display...');
-
-      // Display the correct version based on the initial language
-      if (language === 'he') {
-        setProgressStep('🌐 Translating to Hebrew...');
-        const translatedMenu = await translateMenu(menuData, 'he');
-        setMenu(translatedMenu);
-        setProgress(85);
-      } else {
-        setMenu(menuData); // Already in English
-        setProgress(85);
-        console.log(menuData);
-      }
-
-      // Step 3: Synchronously enrich with UPC codes (now with progress tracking)
-      setProgress(90);
       setProgressStep('🛒 Adding product codes...');
 
+      // Step 3: Enrich with UPC codes BEFORE setting any state
       const enrichedMenu = await enrichMenuWithUPC(menuData);
+      
+      // Set the original English menu data ONCE and FINAL. This is our source of truth.
       setOriginalMenu(enrichedMenu);
+      
+      setProgress(85);
+      setProgressStep('🌐 Preparing menu display...');
 
-      // Update displayed menu as well
+      // Display the correct version based on the current language
       if (language === 'he') {
-        setProgressStep('🌐 Finalizing Hebrew translation...');
-        const translatedEnriched = await translateMenu(enrichedMenu, 'he');
-        setMenu(translatedEnriched);
+        setProgressStep('🌐 Translating to Hebrew...');
+        const translatedMenu = await translateMenu(enrichedMenu, 'he');
+        setMenu(translatedMenu);
       } else {
-        setMenu(enrichedMenu);
+        setMenu(enrichedMenu); // Already in English
       }
 
       setProgress(100);
@@ -958,7 +1198,19 @@ const MenuCreate = () => {
 
     } catch (err) {
       console.error("Error generating menu:", err);
-      setError(err.message || "Something went wrong");
+      
+      // Handle network errors specifically
+      if (err.name === 'TypeError' && err.message.includes('fetch')) {
+        setError("Unable to connect to the menu generation service. Please check your internet connection and try again.");
+      } else if (err.message.includes('Failed to fetch')) {
+        setError("Connection to the menu service was lost. Please check your internet connection and try again.");
+      } else if (err.message.includes('NetworkError')) {
+        setError("Network connection error. Please check your internet connection and try again.");
+      } else {
+        // Use the specific error message we created above, or a generic one
+        setError(err.message || "Something unexpected went wrong while creating your menu. Please try again.");
+      }
+      
       setProgress(0);
       setProgressStep('');
     } finally {
@@ -1059,8 +1311,8 @@ const MenuCreate = () => {
       console.log('🎉 Schema and menu plan saved in single record!');
       alert('Schema and menu plan saved successfully!');
 
-      // Clear saved state since it's now permanently saved
-      clearSavedMenuState();
+      // Don't clear the menu from UI - keep it visible for the user
+      // The menu is now saved in the database but remains visible for further editing
 
     } catch (err) {
       console.error('❌ Error during save process:', err);
@@ -1089,6 +1341,17 @@ const MenuCreate = () => {
             <Badge variant="outline" className={`${isAlternative ? 'bg-blue-100 border-blue-200' : 'bg-green-100 border-green-200'}`}>
               {typeof option.nutrition?.calories === 'number' ? option.nutrition.calories + ' ' + (translations.calories || 'kcal') : option.nutrition?.calories}
             </Badge>
+            {isAlternative && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleMakeAlternativeMain(option.mealIndex, option.alternativeIndex)}
+                className="text-xs bg-green-50 hover:bg-green-100 border-green-200 text-green-700"
+                title={translations.makeMain || 'Make this the main option'}
+              >
+                ⭐ {translations.makeMain || 'Make Main'}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -1112,7 +1375,7 @@ const MenuCreate = () => {
             <h5 className="text-sm font-medium text-gray-700 mb-2">{translations.ingredients || 'Ingredients'}:</h5>
             <ul className="space-y-1">
               {option.ingredients.map((ingredient, idx) => (
-                <li key={idx} className="flex items-start gap-2 text-sm">
+                <li key={idx} className="flex items-start gap-2 text-sm group">
                   <span className="w-1.5 h-1.5 rounded-full bg-gray-400 mt-2" />
                   <div className="flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -1145,6 +1408,15 @@ const MenuCreate = () => {
                       )}
                     </div>
                   </div>
+                  <button
+                    onClick={() => handleDeleteIngredient(option.mealIndex, isAlternative ? 'alternative' : 'main', idx, option.alternativeIndex)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-red-500 hover:text-red-700 hover:bg-red-50 p-1 rounded"
+                    title={translations.deleteIngredient || 'Delete ingredient'}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
                 </li>
               ))}
             </ul>
@@ -1156,31 +1428,53 @@ const MenuCreate = () => {
 
   // Create a stable function to handle language changes
   const handleLanguageChange = useCallback(async (lang) => {
-    if (!originalMenu) return; // Nothing to translate
+    console.log('🌐 Language change requested:', lang, 'Current originalMenu:', !!originalMenu, 'Loading:', loading);
+    
+    // Prevent language changes during menu generation
+    if (loading) {
+      console.log('⏳ Menu generation in progress, ignoring language change');
+      return;
+    }
+    
+    if (!originalMenu) {
+      console.log('❌ No originalMenu available for translation');
+      return; // Nothing to translate
+    }
 
     // If switching to English, instantly use the original menu
     if (lang === 'en') {
+      console.log('✅ Switching to English, using originalMenu directly');
       setMenu(originalMenu);
       return;
     }
 
     // For other languages, translate from the pristine original menu
+    console.log('🌐 Starting translation to:', lang);
     setLoading(true);
     setError(null);
+    
     try {
-      const translated = await translateMenu(originalMenu, lang);
+      // Create a local copy to ensure we're using the current state
+      const currentOriginalMenu = originalMenu;
+      console.log('📋 Translating menu with', currentOriginalMenu.meals?.length, 'meals');
+      
+      const translated = await translateMenu(currentOriginalMenu, lang);
+      console.log('✅ Translation completed, setting menu');
       setMenu(translated);
     } catch (err) {
+      console.error('❌ Translation failed:', err);
       setError('Failed to translate menu.');
       setMenu(originalMenu); // Fallback to original on error
     } finally {
       setLoading(false);
     }
-  }, [originalMenu]); // This function is stable and only recreated if originalMenu changes
+  }, [originalMenu, loading]); // Include loading in dependencies to prevent changes during generation
 
   useEffect(() => {
     // Subscribe the stable handler to the language change event
     EventBus.on('translateMenu', handleLanguageChange);
+    
+    // Cleanup function to unsubscribe
     return () => {
       // Unsubscribe on cleanup to prevent memory leaks
       if (EventBus.off) {
@@ -1215,11 +1509,43 @@ const MenuCreate = () => {
       
       const newAlt = await generateAlternativeMeal(meal.main, meal.alternative);
       
+      // If we're in Hebrew mode, translate the new alternative immediately
+      let translatedAlt = newAlt;
+      if (language === 'he') {
+        try {
+          console.log('🌐 Translating new alternative meal to Hebrew...');
+          console.log('📋 Original newAlt:', newAlt);
+          console.log('🌍 Current language:', language);
+          
+          // Create a proper menu structure for translation
+          const menuForTranslation = {
+            meals: [{
+              meal: newAlt.meal || 'Alternative',
+              main: newAlt,
+              alternative: newAlt
+            }]
+          };
+          console.log('📤 Sending to translation:', menuForTranslation);
+          
+          const translatedMenu = await translateMenu(menuForTranslation, 'he');
+          console.log('📥 Received translation:', translatedMenu);
+          
+          translatedAlt = translatedMenu.meals[0].main; // Extract the translated meal
+          console.log('✅ New alternative translated to Hebrew:', translatedAlt);
+        } catch (translationError) {
+          console.error('❌ Failed to translate new alternative:', translationError);
+          // Fall back to original English version
+          translatedAlt = newAlt;
+        }
+      } else {
+        console.log('🔤 Not in Hebrew mode, using English version');
+      }
+      
       // Update both current menu and original menu to maintain consistency
       setMenu((prevMenu) => {
         const updated = { ...prevMenu };
         if (!updated.meals[mealIdx].alternatives) updated.meals[mealIdx].alternatives = [];
-        updated.meals[mealIdx].alternatives.push(newAlt);
+        updated.meals[mealIdx].alternatives.push(translatedAlt);
         return { ...updated };
       });
       
@@ -1228,7 +1554,7 @@ const MenuCreate = () => {
         if (!prevOriginal) return prevOriginal;
         const updated = { ...prevOriginal };
         if (!updated.meals[mealIdx].alternatives) updated.meals[mealIdx].alternatives = [];
-        updated.meals[mealIdx].alternatives.push(newAlt);
+        updated.meals[mealIdx].alternatives.push(newAlt); // Always store English version in original
         return { ...updated };
       });
     } catch (err) {
@@ -1315,6 +1641,14 @@ const MenuCreate = () => {
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  // Auto-fetch user targets if a user was previously selected
+  useEffect(() => {
+    if (selectedUser && !userTargets) {
+      console.log('🔄 Auto-fetching user targets for previously selected user:', selectedUser.user_code);
+      fetchUserTargets(selectedUser.user_code);
+    }
+  }, [selectedUser, userTargets]);
 
   // Whenever menu changes, update shopping list
   useEffect(() => {
@@ -1860,16 +2194,16 @@ const MenuCreate = () => {
                         <p className="text-sm text-gray-600 font-medium mb-2">{translations.protein || 'Protein'} (g)</p>
                         <div className="space-y-2">
                           <div className="flex justify-between items-center">
-                            <span className="text-sm text-blue-600">Target:</span>
-                            <span className="font-bold text-blue-700">{userTargets.macros.protein}</span>
+                          <span className="text-sm text-blue-600">{translations.target || 'Target'}:</span>
+                          <span className="font-bold text-blue-700">{userTargets.macros.protein}</span>
                           </div>
                           <div className="flex justify-between items-center">
-                            <span className="text-sm text-green-600">Generated:</span>
-                            <span className="font-bold text-green-700">{menu.totals.protein}</span>
+                          <span className="text-sm text-green-600">{translations.generated || 'Generated'}:</span>
+                          <span className="font-bold text-green-700">{menu.totals.protein}</span>
                           </div>
                           <div className="flex justify-between items-center pt-1 border-t border-gray-100">
-                            <span className="text-xs text-gray-500">Difference:</span>
-                            <span className={`text-sm font-medium ${Math.abs(menu.totals.protein - userTargets.macros.protein) <= userTargets.macros.protein * 0.05
+                          <span className="text-xs text-gray-500">{translations.difference || 'Difference'}:</span>
+                          <span className={`text-sm font-medium ${Math.abs(menu.totals.protein - userTargets.macros.protein) <= userTargets.macros.protein * 0.05
                                 ? 'text-green-600'
                                 : 'text-red-600'
                               }`}>
@@ -2136,7 +2470,7 @@ const MenuCreate = () => {
                         <div className="space-y-4">
                           {meal.alternatives.map((alt, altIdx) => (
                             <div key={altIdx} className="bg-blue-50 rounded-lg p-3">
-                              {renderMealOption({ ...alt, mealIndex: mealIdx }, true)}
+                              {renderMealOption({ ...alt, mealIndex: mealIdx, alternativeIndex: altIdx }, true)}
                             </div>
                           ))}
                         </div>
