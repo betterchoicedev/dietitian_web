@@ -552,13 +552,14 @@ export const entities = {
     },
     getMealPlanByUserCode: async (userCode) => {
       try {
-        console.log('🍽️ Getting meal plan for user_code:', userCode);
+        console.log('🍽️ Getting active meal plan for user_code:', userCode);
         
         const { data, error } = await supabase
           .from('meal_plans_and_schemas')
           .select('meal_plan, daily_total_calories, macros_target, recommendations, dietary_restrictions')
           .eq('user_code', userCode)
           .eq('record_type', 'meal_plan')
+          .eq('status', 'active')
           .order('created_at', { ascending: false })
           .limit(1);
         
@@ -567,9 +568,9 @@ export const entities = {
           throw new Error(`Supabase error: ${error.message}`);
         }
         
-        // Return the first (most recent) meal plan, or null if none found
+        // Return the first (most recent) active meal plan, or null if none found
         const mealPlan = data && data.length > 0 ? data[0] : null;
-        console.log('✅ Retrieved meal plan from Supabase:', mealPlan);
+        console.log('✅ Retrieved active meal plan from Supabase:', mealPlan);
         return mealPlan;
         
       } catch (err) {

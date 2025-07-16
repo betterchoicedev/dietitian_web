@@ -188,13 +188,17 @@ export default function Chat() {
       // Log comprehensive client profile for debugging
       console.log('🧠 Comprehensive client profile being sent to LLM:', JSON.stringify(clientProfile, null, 2));
 
-      // Prepare meal plan context
+      // Prepare meal plan context with detailed meal information
       const mealPlanContext = mealPlanData ? {
         meal_plan: mealPlanData.meal_plan,
         daily_total_calories: mealPlanData.daily_total_calories,
         macros_target: mealPlanData.macros_target,
         recommendations: mealPlanData.recommendations,
-        dietary_restrictions: mealPlanData.dietary_restrictions
+        dietary_restrictions: mealPlanData.dietary_restrictions,
+        // Extract detailed meal information for better AI responses
+        meals: mealPlanData.meal_plan?.meals || [],
+        totals: mealPlanData.meal_plan?.totals || {},
+        note: mealPlanData.meal_plan?.note || ''
       } : null;
 
       // Prepare AI prompt
@@ -202,6 +206,8 @@ export default function Chat() {
       const instruction = `You are a professional and friendly nutrition coach for BetterChoice.
 Your response must be in natural, conversational language. DO NOT output JSON, code, or markdown.
 Address the client by their first name: ${client.full_name.split(' ')[0]}.
+
+IMPORTANT: You have access to the client's current meal plan. You can answer detailed questions about their specific meals, ingredients, nutrition values, and provide personalized advice based on their actual meal plan.
 
 Here is the comprehensive context for your response:
 
@@ -222,11 +228,43 @@ ${clientProfile.macros ? `- Macro Targets: ${typeof clientProfile.macros === 'st
 CHAT HISTORY (most recent messages are last):
 ${chatHistoryForPrompt}
 
-CURRENT MEAL PLAN:
-${mealPlanContext ? JSON.stringify(mealPlanContext, null, 2) : 'Not available.'}
+CURRENT MEAL PLAN DETAILS:
+${mealPlanContext ? `
+Your personalized meal plan includes:
+
+DAILY TOTALS:
+- Calories: ${mealPlanContext.totals?.calories || 'Not specified'} kcal
+- Protein: ${mealPlanContext.totals?.protein || 'Not specified'}g
+- Fat: ${mealPlanContext.totals?.fat || 'Not specified'}g
+- Carbs: ${mealPlanContext.totals?.carbs || 'Not specified'}g
+
+MEALS:
+${mealPlanContext.meals?.map((meal, index) => `
+${index + 1}. ${meal.meal}:
+   - Main Option: ${meal.main?.meal_title || meal.main?.name || 'Not specified'}
+     Calories: ${meal.main?.nutrition?.calories || 'Not specified'} kcal
+     Protein: ${meal.main?.nutrition?.protein || 'Not specified'}g
+     Fat: ${meal.main?.nutrition?.fat || 'Not specified'}g
+     Carbs: ${meal.main?.nutrition?.carbs || 'Not specified'}g
+     Ingredients: ${meal.main?.ingredients?.map(ing => `${ing.item} (${ing.household_measure})`).join(', ') || 'Not specified'}
+   
+   - Alternative Option: ${meal.alternative?.meal_title || meal.alternative?.name || 'Not specified'}
+     Calories: ${meal.alternative?.nutrition?.calories || 'Not specified'} kcal
+     Protein: ${meal.alternative?.nutrition?.protein || 'Not specified'}g
+     Fat: ${meal.alternative?.nutrition?.fat || 'Not specified'}g
+     Carbs: ${meal.alternative?.nutrition?.carbs || 'Not specified'}g
+     Ingredients: ${meal.alternative?.ingredients?.map(ing => `${ing.item} (${ing.household_measure})`).join(', ') || 'Not specified'}
+`).join('\n') || 'No meals specified'}
+
+${mealPlanContext.note ? `NOTES: ${mealPlanContext.note}` : ''}
+
+RECOMMENDATIONS: ${mealPlanContext.recommendations ? JSON.stringify(mealPlanContext.recommendations, null, 2) : 'None specified'}
+
+You can ask me specific questions about any meal, ingredient, nutrition values, or request modifications to your meal plan.
+` : 'No meal plan available. I can help you create a personalized meal plan based on your preferences and goals.'}
 
 ---
-Your task is to respond to the user's message below, taking into account their specific dietary needs, health goals, allergies, limitations, and nutrition targets.
+Your task is to respond to the user's message below, taking into account their specific dietary needs, health goals, allergies, limitations, nutrition targets, and their current meal plan. You can provide detailed information about their meals, suggest modifications, explain nutrition values, and answer any questions about their personalized meal plan.
 `;
 
       if (base64Image) {
@@ -273,7 +311,32 @@ Your task is to respond to the user's message below, taking into account their s
         }
       }
       
-      if (mealPlanContext) {
+      if (mealPlanContext && mealPlanContext.meals && mealPlanContext.meals.length > 0) {
+        aiResponse += `\nYour personalized meal plan includes:\n\n`;
+        
+        // Daily totals
+        if (mealPlanContext.totals) {
+          aiResponse += `📊 Daily Totals:\n`;
+          aiResponse += `• Calories: ${mealPlanContext.totals.calories || 'Not specified'} kcal\n`;
+          aiResponse += `• Protein: ${mealPlanContext.totals.protein || 'Not specified'}g\n`;
+          aiResponse += `• Fat: ${mealPlanContext.totals.fat || 'Not specified'}g\n`;
+          aiResponse += `• Carbs: ${mealPlanContext.totals.carbs || 'Not specified'}g\n\n`;
+        }
+        
+        // Meals overview
+        aiResponse += `🍽️ Your Meals:\n`;
+        mealPlanContext.meals.forEach((meal, index) => {
+          aiResponse += `${index + 1}. ${meal.meal}\n`;
+          if (meal.main?.meal_title) {
+            aiResponse += `   Main: ${meal.main.meal_title} (${meal.main.nutrition?.calories || 'N/A'} kcal)\n`;
+          }
+          if (meal.alternative?.meal_title) {
+            aiResponse += `   Alternative: ${meal.alternative.meal_title} (${meal.alternative.nutrition?.calories || 'N/A'} kcal)\n`;
+          }
+        });
+        
+        aiResponse += `\nYou can ask me specific questions about any meal, ingredient, or nutrition values in your plan!\n`;
+      } else if (mealPlanContext) {
         aiResponse += `\nYour current meal plan details:\n`;
         if (mealPlanContext.daily_total_calories) {
           aiResponse += `• Plan calories: ${mealPlanContext.daily_total_calories} calories\n`;
@@ -342,7 +405,7 @@ Your task is to respond to the user's message below, taking into account their s
       // Update chat with AI response
       const finalMessages = [...updatedMessages, { role: 'assistant', content: aiResponse }];
 
-      // Update local state
+      // Update local git add ,e
       setSelectedChat(prev => ({
         ...prev,
         messages: finalMessages
