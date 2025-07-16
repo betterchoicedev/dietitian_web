@@ -8,6 +8,16 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Polyfill for $.trim to prevent errors from third-party libraries
+      if (typeof window !== 'undefined' && !window.$) {
+        window.$ = {
+          trim: function(str) {
+            return str ? str.toString().trim() : '';
+          }
+        };
+      }
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

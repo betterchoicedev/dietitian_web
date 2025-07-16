@@ -33,7 +33,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -358,7 +358,7 @@ export default function Clients() {
   };
 
   const parseJsonField = (value, fieldType = 'object') => {
-    if (!value || value.trim() === '') return null;
+    if (!value || typeof value !== 'string' || value.trim() === '') return null;
     
     // Try to parse as JSON first
     try {
@@ -392,7 +392,7 @@ export default function Clients() {
   };
 
   const parseArrayField = (value) => {
-    if (!value || value.trim() === '') return [];
+    if (!value || typeof value !== 'string' || value.trim() === '') return [];
     
     // Try JSON parsing first
     try {
@@ -410,15 +410,15 @@ export default function Clients() {
 
   const parseMacrosField = (protein, carbs, fat) => {
     const result = {};
-    if (protein && protein.trim()) {
+    if (protein && typeof protein === 'string' && protein.trim()) {
       const p = protein.trim();
       result.protein = p.endsWith('g') ? p : `${p}g`;
     }
-    if (carbs && carbs.trim()) {
+    if (carbs && typeof carbs === 'string' && carbs.trim()) {
       const c = carbs.trim();
       result.carbs = c.endsWith('g') ? c : `${c}g`;
     }
-    if (fat && fat.trim()) {
+    if (fat && typeof fat === 'string' && fat.trim()) {
       const f = fat.trim();
       result.fat = f.endsWith('g') ? f : `${f}g`;
     }
@@ -431,8 +431,17 @@ export default function Clients() {
     setError(null);
 
     try {
+      // Validate required fields
+      if (!formData.full_name || formData.full_name.trim() === '') {
+        throw new Error('Full name is required');
+      }
+
       const submitData = {
         ...formData,
+        full_name: formData.full_name.trim(),
+        email: formData.email ? formData.email.trim() : '',
+        phone_number: formData.phone_number ? formData.phone_number.trim() : '',
+        city: formData.city ? formData.city.trim() : '',
         age: formData.age ? parseInt(formData.age) : null,
         weight_kg: formData.weight_kg ? parseFloat(formData.weight_kg) : null,
         height_cm: formData.height_cm ? parseFloat(formData.height_cm) : null,
@@ -938,6 +947,9 @@ export default function Clients() {
             <DialogTitle>
               {currentClient ? translations.editUserInformation : translations.addNewClient}
             </DialogTitle>
+            <DialogDescription>
+              {currentClient ? translations.editUserDescription : translations.addUserDescription}
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit}>
             <div className="grid gap-6 py-4">
