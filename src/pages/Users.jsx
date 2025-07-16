@@ -13,7 +13,8 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  X
+  X,
+  Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -60,6 +61,7 @@ export default function Clients() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [currentClient, setCurrentClient] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(null); // Track which client is being deleted
   const [error, setError] = useState(null);
   const [showAll, setShowAll] = useState(false);
   
@@ -104,44 +106,251 @@ export default function Clients() {
   // Add macro slider state
   const [macroSliders, setMacroSliders] = useState({ protein: 0, carbs: 0, fat: 0 });
 
+  // Enhanced macro calculation state
+  const [macroInputs, setMacroInputs] = useState({
+    protein: { percentage: 0, grams: 0, gramsPerKg: 0 },
+    carbs: { percentage: 0, grams: 0, gramsPerKg: 0 },
+    fat: { percentage: 0, grams: 0, gramsPerKg: 0 }
+  });
+
+  // Track which fields have been touched/visited
+  const [touchedFields, setTouchedFields] = useState({});
+
+  // Track if form has been submitted (to show validation errors)
+  const [formSubmitted, setFormSubmitted] = useState(false);
+
+  // Check if all required fields for Harris-Benedict calculation are filled
+  const hasRequiredFieldsForCalculation = () => {
+    return formData.age && formData.gender && formData.weight_kg && formData.height_cm && formData.Activity_level;
+  };
+
+  // Check if a field should show error styling
+  const shouldShowError = (fieldName) => {
+    return formSubmitted && (!formData[fieldName] || formData[fieldName].toString().trim() === '');
+  };
+
+  // Mark field as touched when user interacts with it
+  const handleFieldBlur = (fieldName) => {
+    setTouchedFields(prev => ({ ...prev, [fieldName]: true }));
+  };
+
+  // Calculate age from date of birth
+  const calculateAgeFromBirthDate = (birthDate) => {
+    if (!birthDate) return '';
+    
+    const today = new Date();
+    const birth = new Date(birthDate);
+    
+    let age = today.getFullYear() - birth.getFullYear();
+    const monthDiff = today.getMonth() - birth.getMonth();
+    
+    // Adjust age if birthday hasn't occurred this year
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+      age--;
+    }
+    
+    return age.toString();
+  };
+
+  // Calculate macros based on different input methods
+  const calculateMacrosFromInputs = (inputType, value, macroType) => {
+    const calories = parseInt(formData.dailyTotalCalories) || 0;
+    const weight = parseFloat(formData.weight_kg) || 0;
+    
+    if (calories <= 0) return;
+
+    let newMacros = { ...macroInputs };
+    
+    if (inputType === 'percentage') {
+      // Calculate grams from percentage
+      const grams = Math.round((value * calories) / (macroType === 'fat' ? 9 : 4));
+      newMacros[macroType] = {
+        percentage: value,
+        grams: grams,
+        gramsPerKg: weight > 0 ? Math.round((grams / weight) * 10) / 10 : 0
+      };
+    } else if (inputType === 'grams') {
+      // Calculate percentage from grams
+      const percentage = Math.round(((value * (macroType === 'fat' ? 9 : 4)) / calories) * 100);
+      newMacros[macroType] = {
+        percentage: percentage,
+        grams: value,
+        gramsPerKg: weight > 0 ? Math.round((value / weight) * 10) / 10 : 0
+      };
+    } else if (inputType === 'gramsPerKg') {
+      // Calculate grams from grams per kg
+      const grams = Math.round(value * weight);
+      const percentage = Math.round(((grams * (macroType === 'fat' ? 9 : 4)) / calories) * 100);
+      newMacros[macroType] = {
+        percentage: percentage,
+        grams: grams,
+        gramsPerKg: value
+      };
+    }
+
+    setMacroInputs(newMacros);
+    
+    // Update macro sliders for compatibility
+    setMacroSliders({
+      protein: newMacros.protein.grams,
+      carbs: newMacros.carbs.grams,
+      fat: newMacros.fat.grams
+    });
+  };
+
+  // Calculate total percentages and calories
+  const calculateTotals = () => {
+    const totalPercentage = macroInputs.protein.percentage + macroInputs.carbs.percentage + macroInputs.fat.percentage;
+    const totalCalories = (macroInputs.protein.grams * 4) + (macroInputs.carbs.grams * 4) + (macroInputs.fat.grams * 9);
+    return { totalPercentage, totalCalories };
+  };
+
+  // Auto-calculate initial macros when calories change
+  useEffect(() => {
+    const calories = parseInt(formData.dailyTotalCalories) || 0;
+    if (calories > 0 && (!macroInputs.protein.grams && !macroInputs.carbs.grams && !macroInputs.fat.grams)) {
+      // Default distribution: 30% protein, 40% carbs, 30% fat
+      const defaultMacros = {
+        protein: { percentage: 30, grams: Math.round((0.3 * calories) / 4), gramsPerKg: 0 },
+        carbs: { percentage: 40, grams: Math.round((0.4 * calories) / 4), gramsPerKg: 0 },
+        fat: { percentage: 30, grams: Math.round((0.3 * calories) / 9), gramsPerKg: 0 }
+      };
+      
+      // Calculate grams per kg if weight is available
+      const weight = parseFloat(formData.weight_kg) || 0;
+      if (weight > 0) {
+        defaultMacros.protein.gramsPerKg = Math.round((defaultMacros.protein.grams / weight) * 10) / 10;
+        defaultMacros.carbs.gramsPerKg = Math.round((defaultMacros.carbs.grams / weight) * 10) / 10;
+        defaultMacros.fat.gramsPerKg = Math.round((defaultMacros.fat.grams / weight) * 10) / 10;
+      }
+      
+      setMacroInputs(defaultMacros);
+      setMacroSliders({
+        protein: defaultMacros.protein.grams,
+        carbs: defaultMacros.carbs.grams,
+        fat: defaultMacros.fat.grams
+      });
+    }
+  }, [formData.dailyTotalCalories, formData.weight_kg]);
+
+  // Update grams per kg when weight changes
+  useEffect(() => {
+    const weight = parseFloat(formData.weight_kg) || 0;
+    if (weight > 0) {
+      const updatedMacros = { ...macroInputs };
+      Object.keys(updatedMacros).forEach(macro => {
+        if (updatedMacros[macro].grams > 0) {
+          updatedMacros[macro].gramsPerKg = Math.round((updatedMacros[macro].grams / weight) * 10) / 10;
+        }
+      });
+      setMacroInputs(updatedMacros);
+    }
+  }, [formData.weight_kg]);
+
+  // Mifflin-St Jeor calculation function (more accurate than Harris-Benedict)
+  const calculateMifflinStJeor = (age, gender, weight, height, activityLevel, goal) => {
+    if (!age || !gender || !weight || !height || !activityLevel) {
+      return null;
+    }
+
+    // Convert height to cm if it's in meters
+    let heightInCm = parseFloat(height);
+    if (heightInCm > 0 && heightInCm < 10) {
+      heightInCm = heightInCm * 100;
+    }
+
+    // Calculate BMR using Mifflin-St Jeor equation (more accurate)
+    let bmr = 0;
+    if (gender === 'male') {
+      bmr = (10 * parseFloat(weight)) + (6.25 * heightInCm) - (5 * parseFloat(age)) + 5;
+    } else {
+      bmr = (10 * parseFloat(weight)) + (6.25 * heightInCm) - (5 * parseFloat(age)) - 161;
+    }
+
+    // Apply activity multiplier (more conservative values)
+    let activityMultiplier = 1.2; // Sedentary as default
+    switch (activityLevel) {
+      case 'sedentary': activityMultiplier = 1.2; break;
+      case 'light': activityMultiplier = 1.375; break;
+      case 'moderate': activityMultiplier = 1.55; break;
+      case 'very': activityMultiplier = 1.725; break;
+      case 'extra': activityMultiplier = 1.9; break;
+    }
+
+    // Calculate TDEE (Total Daily Energy Expenditure)
+    let tdee = bmr * activityMultiplier;
+
+    // Adjust for goal (more conservative adjustments)
+    switch (goal) {
+      case 'lose': tdee -= 300; break; // Reduced from 500 to 300
+      case 'gain': tdee += 300; break; // Reduced from 500 to 300
+      case 'muscle': tdee += 200; break; // Reduced from 300 to 200
+      // 'maintain' and 'health' don't change the calculation
+    }
+
+    return Math.round(tdee);
+  };
+
+  // Auto-calculate calories when relevant fields change
+  useEffect(() => {
+    const calculatedCalories = calculateMifflinStJeor(
+      formData.age,
+      formData.gender,
+      formData.weight_kg,
+      formData.height_cm,
+      formData.Activity_level,
+      formData.goal
+    );
+
+    if (calculatedCalories && calculatedCalories > 0) {
+      setFormData(prev => ({ ...prev, dailyTotalCalories: calculatedCalories.toString() }));
+      
+      // Update macros to match the new calorie total
+      const currentPercentages = {
+        protein: macroInputs.protein.percentage,
+        carbs: macroInputs.carbs.percentage,
+        fat: macroInputs.fat.percentage
+      };
+      
+      // If we have existing percentages, recalculate grams based on new calories
+      if (currentPercentages.protein > 0 || currentPercentages.carbs > 0 || currentPercentages.fat > 0) {
+        const weight = parseFloat(formData.weight_kg) || 0;
+        const updatedMacros = {
+          protein: {
+            percentage: currentPercentages.protein,
+            grams: Math.round(((currentPercentages.protein / 100) * calculatedCalories) / 4),
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.protein / 100) * calculatedCalories) / 4) / weight * 10) / 10 : 0
+          },
+          carbs: {
+            percentage: currentPercentages.carbs,
+            grams: Math.round(((currentPercentages.carbs / 100) * calculatedCalories) / 4),
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.carbs / 100) * calculatedCalories) / 4) / weight * 10) / 10 : 0
+          },
+          fat: {
+            percentage: currentPercentages.fat,
+            grams: Math.round(((currentPercentages.fat / 100) * calculatedCalories) / 9),
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.fat / 100) * calculatedCalories) / 9) / weight * 10) / 10 : 0
+          }
+        };
+        
+        setMacroInputs(updatedMacros);
+        setMacroSliders({
+          protein: updatedMacros.protein.grams,
+          carbs: updatedMacros.carbs.grams,
+          fat: updatedMacros.fat.grams
+        });
+      }
+    } else if (formData.age || formData.gender || formData.weight_kg || formData.height_cm || formData.Activity_level || formData.goal) {
+      // Clear calories if we have some data but calculation failed
+      setFormData(prev => ({ ...prev, dailyTotalCalories: '' }));
+    }
+  }, [formData.age, formData.gender, formData.weight_kg, formData.height_cm, formData.Activity_level, formData.goal]);
+
   useEffect(() => {
     loadClients();
   }, []);
 
-  // Helper to recalculate macros so that 4*protein + 4*carbs + 9*fat = calories
-  const recalculateMacros = (changed, value, calories, prevMacros) => {
-    // Clamp value to min/max
-    const min = { protein: 0, carbs: 0, fat: 0 };
-    const max = { protein: 300, carbs: 400, fat: 150 };
-    value = Math.max(min[changed], Math.min(max[changed], value));
-    let macros = { ...prevMacros, [changed]: value };
-    // Calculate remaining calories
-    let calUsed = 0;
-    if (changed === 'protein') calUsed = 4 * value;
-    if (changed === 'carbs') calUsed = 4 * value;
-    if (changed === 'fat') calUsed = 9 * value;
-    let otherMacros = Object.keys(macros).filter(m => m !== changed);
-    let otherCal = calories - (changed === 'fat' ? 9 : 4) * value;
-    // Distribute remaining calories proportionally to the other two macros
-    let totalPrev = otherMacros.reduce((sum, m) => sum + (prevMacros[m] || 0), 0) || 1;
-    let newMacros = { ...macros };
-    otherMacros.forEach(m => {
-      let factor = (prevMacros[m] || 0) / totalPrev;
-      let calPerGram = m === 'fat' ? 9 : 4;
-      let grams = Math.max(min[m], Math.min(max[m], Math.round((otherCal * factor) / calPerGram)));
-      newMacros[m] = grams;
-    });
-    // Final adjustment to ensure total calories match
-    let totalCals = 4 * newMacros.protein + 4 * newMacros.carbs + 9 * newMacros.fat;
-    if (totalCals !== calories) {
-      // Adjust the last macro to fix rounding
-      let last = otherMacros[1];
-      let calPerGram = last === 'fat' ? 9 : 4;
-      newMacros[last] += Math.round((calories - totalCals) / calPerGram);
-      newMacros[last] = Math.max(min[last], Math.min(max[last], newMacros[last]));
-    }
-    return newMacros;
-  };
+
 
   // Sorting function
   const sortClients = (clients) => {
@@ -235,38 +444,28 @@ export default function Clients() {
     return sortDirection === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />;
   };
 
-  // Sync macro sliders with formData and calories
+
+
+  // When macroInputs change, update formData.macros
   useEffect(() => {
-    let cals = parseInt(formData.dailyTotalCalories) || 0;
-    if (cals > 0) {
-      // If all macros are empty or 0, initialize to 30% protein, 40% carbs, 30% fat
-      if ((!macroSliders.protein && !macroSliders.carbs && !macroSliders.fat) || 
-          (macroSliders.protein === 0 && macroSliders.carbs === 0 && macroSliders.fat === 0)) {
-        let p = Math.round((0.3 * cals) / 4);
-        let c = Math.round((0.4 * cals) / 4);
-        let f = Math.round((0.3 * cals) / 9);
-        setMacroSliders({ protein: p, carbs: c, fat: f });
-        setFormData(fd => ({ ...fd, macros: { protein: p, carbs: c, fat: f } }));
-      } else {
-        // Recalculate macros to match calories
-        let totalCals = 4 * macroSliders.protein + 4 * macroSliders.carbs + 9 * macroSliders.fat;
-        if (totalCals !== cals) {
-          let newMacros = recalculateMacros('protein', macroSliders.protein, cals, macroSliders);
-          setMacroSliders(newMacros);
-          setFormData(fd => ({ ...fd, macros: newMacros }));
-        }
+    setFormData(fd => ({ 
+      ...fd, 
+      macros: {
+        protein: macroInputs.protein.grams,
+        carbs: macroInputs.carbs.grams,
+        fat: macroInputs.fat.grams
       }
-    }
-  }, [formData.dailyTotalCalories]);
+    }));
+  }, [macroInputs]);
 
-  // When macroSliders change, update formData.macros
-  useEffect(() => {
-    setFormData(fd => ({ ...fd, macros: macroSliders }));
-  }, [macroSliders]);
-
-  // Reset macro sliders when dialog opens for new user
+  // Reset macro inputs when dialog opens for new user
   useEffect(() => {
     if (dialogOpen && !currentClient) {
+      setMacroInputs({
+        protein: { percentage: 0, grams: 0, gramsPerKg: 0 },
+        carbs: { percentage: 0, grams: 0, gramsPerKg: 0 },
+        fat: { percentage: 0, grams: 0, gramsPerKg: 0 }
+      });
       setMacroSliders({ protein: 0, carbs: 0, fat: 0 });
     }
   }, [dialogOpen, currentClient]);
@@ -318,7 +517,7 @@ export default function Clients() {
         carbs: '',
         protein: ''
       },
-      dailyTotalCalories: '',
+      dailyTotalCalories: '', // Will be calculated automatically when required fields are filled
       recommendations: '',
       food_limitations: '',
       Activity_level: '',
@@ -327,13 +526,20 @@ export default function Clients() {
       client_preference: '',
       region: 'israel'
     });
-    // Reset macro sliders to 0 when adding new user
+    // Reset macro inputs and sliders to 0 when adding new user
+    setMacroInputs({
+      protein: { percentage: 0, grams: 0, gramsPerKg: 0 },
+      carbs: { percentage: 0, grams: 0, gramsPerKg: 0 },
+      fat: { percentage: 0, grams: 0, gramsPerKg: 0 }
+    });
     setMacroSliders({ protein: 0, carbs: 0, fat: 0 });
   };
 
   const handleAdd = () => {
     setCurrentClient(null);
     resetForm();
+    setFormSubmitted(false);
+    setTouchedFields({});
     setDialogOpen(true);
   };
 
@@ -345,13 +551,16 @@ export default function Clients() {
     const carbsValue = client.macros?.carbs ? parseInt(client.macros.carbs.toString().replace('g', '')) || 0 : 0;
     const fatValue = client.macros?.fat ? parseInt(client.macros.fat.toString().replace('g', '')) || 0 : 0;
     
+    // Calculate age from date of birth if available, otherwise use stored age
+    const calculatedAge = client.date_of_birth ? calculateAgeFromBirthDate(client.date_of_birth) : (client.age?.toString() || '');
+    
     setFormData({
       user_code: client.user_code || generateUniqueCode(),
       full_name: client.full_name || '',
       email: client.email || '',
       phone_number: client.phone_number || '',
       city: client.city || '',
-      age: client.age?.toString() || '',
+      age: calculatedAge,
       date_of_birth: client.date_of_birth || '',
       gender: client.gender || '',
       weight_kg: client.weight_kg?.toString() || '',
@@ -374,9 +583,113 @@ export default function Clients() {
       region: client.region || 'israel'
     });
     
-    // Set macro sliders to match the client's macros
+    // Set macro inputs to match the client's macros
+    const calories = client.dailyTotalCalories ? parseInt(client.dailyTotalCalories) : 0;
+    const weight = client.weight_kg ? parseFloat(client.weight_kg) : 0;
+    
+    const macroInputsData = {
+      protein: {
+        percentage: calories > 0 ? Math.round(((proteinValue * 4) / calories) * 100) : 0,
+        grams: proteinValue,
+        gramsPerKg: weight > 0 ? Math.round((proteinValue / weight) * 10) / 10 : 0
+      },
+      carbs: {
+        percentage: calories > 0 ? Math.round(((carbsValue * 4) / calories) * 100) : 0,
+        grams: carbsValue,
+        gramsPerKg: weight > 0 ? Math.round((carbsValue / weight) * 10) / 10 : 0
+      },
+      fat: {
+        percentage: calories > 0 ? Math.round(((fatValue * 9) / calories) * 100) : 0,
+        grams: fatValue,
+        gramsPerKg: weight > 0 ? Math.round((fatValue / weight) * 10) / 10 : 0
+      }
+    };
+    
+    setMacroInputs(macroInputsData);
     setMacroSliders({ protein: proteinValue, carbs: carbsValue, fat: fatValue });
+    setFormSubmitted(false);
+    setTouchedFields({});
     setDialogOpen(true);
+    
+    // Recalculate calories after a short delay to ensure form data is set
+    setTimeout(() => {
+      const calculatedCalories = calculateMifflinStJeor(
+        formData.age,
+        formData.gender,
+        formData.weight_kg,
+        formData.height_cm,
+        formData.Activity_level,
+        formData.goal
+      );
+      
+      if (calculatedCalories && calculatedCalories > 0) {
+        setFormData(prev => ({ ...prev, dailyTotalCalories: calculatedCalories.toString() }));
+        
+        // Update macros to match the new calorie total
+        const currentPercentages = {
+          protein: macroInputsData.protein.percentage,
+          carbs: macroInputsData.carbs.percentage,
+          fat: macroInputsData.fat.percentage
+        };
+        
+        const weight = parseFloat(formData.weight_kg) || 0;
+        const updatedMacros = {
+          protein: {
+            percentage: currentPercentages.protein,
+            grams: Math.round(((currentPercentages.protein / 100) * calculatedCalories) / 4),
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.protein / 100) * calculatedCalories) / 4) / weight * 10) / 10 : 0
+          },
+          carbs: {
+            percentage: currentPercentages.carbs,
+            grams: Math.round(((currentPercentages.carbs / 100) * calculatedCalories) / 4),
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.carbs / 100) * calculatedCalories) / 4) / weight * 10) / 10 : 0
+          },
+          fat: {
+            percentage: currentPercentages.fat,
+            grams: Math.round(((currentPercentages.fat / 100) * calculatedCalories) / 9),
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.fat / 100) * calculatedCalories) / 9) / weight * 10) / 10 : 0
+          }
+        };
+        
+        setMacroInputs(updatedMacros);
+        setMacroSliders({
+          protein: updatedMacros.protein.grams,
+          carbs: updatedMacros.carbs.grams,
+          fat: updatedMacros.fat.grams
+        });
+      }
+    }, 100);
+  };
+
+  const handleDelete = async (client) => {
+    const clientName = client.full_name || client.user_code || 'this client';
+    const clientId = client.user_code || client.id;
+    
+    if (!clientId) {
+      setError('Cannot delete client without a valid identifier');
+      return;
+    }
+    
+    if (!window.confirm(`${translations.confirmDelete} "${clientName}"? ${translations.deleteWarning}`)) {
+      return;
+    }
+    
+    setDeleteLoading(clientId);
+    setError(null);
+    
+    try {
+      await ChatUser.delete(clientId);
+      await loadClients(); // Reload the clients list
+      
+      // Show success message
+      alert(`${translations.clientDeleted}: ${clientName}`);
+      
+    } catch (error) {
+      console.error('Error deleting client:', error);
+      setError(`${translations.failedToDeleteClient}: ${error.message}`);
+    } finally {
+      setDeleteLoading(null);
+    }
   };
 
   const parseJsonField = (value, fieldType = 'object') => {
@@ -466,15 +779,37 @@ export default function Clients() {
     return Object.keys(result).length > 0 ? result : null;
   };
 
+  // Check if all required fields are filled
+  const validateRequiredFields = () => {
+    const requiredFields = [
+      { field: 'full_name', label: translations.fullName },
+      { field: 'age', label: translations.age },
+      { field: 'gender', label: translations.gender },
+      { field: 'weight_kg', label: translations.weightKg },
+      { field: 'height_cm', label: translations.heightCm },
+      { field: 'Activity_level', label: translations.activityLevel },
+      { field: 'goal', label: translations.goal }
+    ];
+
+    for (const requiredField of requiredFields) {
+      if (!formData[requiredField.field] || formData[requiredField.field].toString().trim() === '') {
+        return `${requiredField.label} ${translations.isRequired}`;
+      }
+    }
+    return null;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setFormSubmitted(true); // Mark form as submitted to show validation errors
     setLoading(true);
     setError(null);
 
     try {
       // Validate required fields
-      if (!formData.full_name || formData.full_name.trim() === '') {
-        throw new Error('Full name is required');
+      const validationError = validateRequiredFields();
+      if (validationError) {
+        throw new Error(validationError);
       }
 
       const submitData = {
@@ -488,9 +823,10 @@ export default function Clients() {
         height_cm: formData.height_cm ? parseFloat(formData.height_cm) : null,
         dailyTotalCalories: formData.dailyTotalCalories ? parseInt(formData.dailyTotalCalories) : null,
         number_of_meals: formData.number_of_meals ? parseInt(formData.number_of_meals) : 5,
+        date_of_birth: formData.date_of_birth && formData.date_of_birth.trim() !== '' ? formData.date_of_birth : null,
         food_allergies: parseArrayField(formData.food_allergies),
         food_limitations: parseJsonField(formData.food_limitations, 'array'),
-        macros: parseMacrosField(macroSliders.protein, macroSliders.carbs, macroSliders.fat),
+        macros: parseMacrosField(macroInputs.protein.grams, macroInputs.carbs.grams, macroInputs.fat.grams),
         recommendations: parseJsonField(formData.recommendations, 'recommendations'),
         client_preference: parseJsonField(formData.client_preference, 'array')
       };
@@ -508,6 +844,8 @@ export default function Clients() {
       }
 
       setDialogOpen(false);
+      setFormSubmitted(false);
+      setTouchedFields({});
       loadClients();
       resetForm();
     } catch (error) {
@@ -964,9 +1302,9 @@ export default function Clients() {
                             )}
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline" className="text-xs">
+                            <div className="text-sm text-gray-600">
                               {client.region || '—'}
-                            </Badge>
+                            </div>
                           </TableCell>
                           <TableCell>
                             <Badge variant="secondary" className="text-xs">
@@ -974,14 +1312,31 @@ export default function Clients() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleEdit(client)}
-                              className="text-green-600 hover:text-green-700 hover:bg-green-50"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleEdit(client)}
+                                className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              {(client.user_code || client.id) && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleDelete(client)}
+                                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                  disabled={deleteLoading === (client.user_code || client.id)}
+                                >
+                                  {deleteLoading === (client.user_code || client.id) ? (
+                                    <div className="animate-spin h-4 w-4" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
@@ -1028,16 +1383,18 @@ export default function Clients() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="full_name">{translations.fullName} *</Label>
+                    <Label htmlFor="full_name" className="text-red-600">{translations.fullName} *</Label>
                     <Input
                       id="full_name"
                       value={formData.full_name}
                       onChange={(e) => setFormData({...formData, full_name: e.target.value})}
+                      onBlur={() => handleFieldBlur('full_name')}
                       required
+                      className={shouldShowError('full_name') ? 'border-red-500' : ''}
                     />
                   </div>
                   <div>
-                    <Label htmlFor="email">{translations.email}</Label>
+                    <Label htmlFor="email">{translations.email} <span className="text-gray-400">(optional)</span></Label>
                     <Input
                       id="email"
                       type="email"
@@ -1067,7 +1424,15 @@ export default function Clients() {
                       id="date_of_birth"
                       type="date"
                       value={formData.date_of_birth}
-                      onChange={(e) => setFormData({...formData, date_of_birth: e.target.value})}
+                      onChange={(e) => {
+                        const birthDate = e.target.value;
+                        const calculatedAge = calculateAgeFromBirthDate(birthDate);
+                        setFormData({
+                          ...formData, 
+                          date_of_birth: birthDate,
+                          age: calculatedAge
+                        });
+                      }}
                     />
                   </div>
                 </div>
@@ -1078,21 +1443,31 @@ export default function Clients() {
                 <h3 className="text-lg font-medium">{translations.physicalInformation}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <Label htmlFor="age">{translations.age}</Label>
+                    <Label htmlFor="age" className="text-red-600">{translations.age} *</Label>
                     <Input
                       id="age"
                       type="number"
                       value={formData.age}
                       onChange={(e) => setFormData({...formData, age: e.target.value})}
+                      onBlur={() => handleFieldBlur('age')}
+                      required
+                      className={`${shouldShowError('age') ? 'border-red-500' : ''} ${formData.date_of_birth ? 'bg-gray-50 cursor-not-allowed' : ''}`}
+                      readOnly={!!formData.date_of_birth}
+                      placeholder={formData.date_of_birth ? translations.ageCalculatedFromBirthDate : translations.enterAgeOrBirthDate}
                     />
+                    {formData.date_of_birth && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        {translations.ageCalculatedFromBirthDate}
+                      </p>
+                    )}
                   </div>
                   <div>
-                    <Label htmlFor="gender">{translations.gender}</Label>
+                    <Label htmlFor="gender" className="text-red-600">{translations.gender} *</Label>
                     <Select 
                       value={formData.gender} 
                       onValueChange={(value) => setFormData({...formData, gender: value})}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className={shouldShowError('gender') ? 'border-red-500' : ''}>
                         <SelectValue placeholder={translations.selectGender} />
                       </SelectTrigger>
                       <SelectContent>
@@ -1103,31 +1478,37 @@ export default function Clients() {
                     </Select>
                   </div>
                   <div>
-                    <Label htmlFor="weight_kg">{translations.weightKg}</Label>
+                    <Label htmlFor="weight_kg" className="text-red-600">{translations.weightKg} *</Label>
                     <Input
                       id="weight_kg"
                       type="number"
                       step="0.1"
                       value={formData.weight_kg}
                       onChange={(e) => setFormData({...formData, weight_kg: e.target.value})}
+                      onBlur={() => handleFieldBlur('weight_kg')}
+                      required
+                      className={shouldShowError('weight_kg') ? 'border-red-500' : ''}
                     />
                   </div>
                   <div>
-                    <Label htmlFor="height_cm">{translations.heightCm}</Label>
+                    <Label htmlFor="height_cm" className="text-red-600">{translations.heightCm} *</Label>
                     <Input
                       id="height_cm"
                       type="number"
                       value={formData.height_cm}
                       onChange={(e) => setFormData({...formData, height_cm: e.target.value})}
+                      onBlur={() => handleFieldBlur('height_cm')}
+                      required
+                      className={shouldShowError('height_cm') ? 'border-red-500' : ''}
                     />
                   </div>
                   <div>
-                    <Label htmlFor="Activity_level">{translations.activityLevel}</Label>
+                    <Label htmlFor="Activity_level" className="text-red-600">{translations.activityLevel} *</Label>
                     <Select 
                       value={formData.Activity_level} 
                       onValueChange={(value) => setFormData({...formData, Activity_level: value})}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className={shouldShowError('Activity_level') ? 'border-red-500' : ''}>
                         <SelectValue placeholder={translations.selectActivityLevel} />
                       </SelectTrigger>
                       <SelectContent>
@@ -1136,17 +1517,17 @@ export default function Clients() {
                         <SelectItem value="moderate">{translations.moderateActivity}</SelectItem>
                         <SelectItem value="very">{translations.veryActive}</SelectItem>
                         <SelectItem value="extra">{translations.extraActive}</SelectItem>
-                        <SelectItem value="extra">{translations.toning}</SelectItem>
+                        <SelectItem value="toning">{translations.toning}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div>
-                    <Label htmlFor="goal">{translations.goal}</Label>
+                    <Label htmlFor="goal" className="text-red-600">{translations.goal} *</Label>
                     <Select 
                       value={formData.goal} 
                       onValueChange={(value) => setFormData({...formData, goal: value})}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className={shouldShowError('goal') ? 'border-red-500' : ''}>
                         <SelectValue placeholder={translations.selectGoal} />
                       </SelectTrigger>
                       <SelectContent>
@@ -1166,79 +1547,135 @@ export default function Clients() {
                 <h3 className="text-lg font-medium">{translations.nutritionInformation}</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                   <div className="space-y-2">
-                    <Label htmlFor="dailyTotalCalories">{translations.dailyTotalCalories}</Label>
+                    <Label htmlFor="dailyTotalCalories" className="flex items-center gap-2">
+                      {translations.dailyTotalCalories}
+                      <Badge variant="secondary" className="text-xs">{translations.autoCalculated}</Badge>
+                    </Label>
                     <Input
                       id="dailyTotalCalories"
                       type="number"
                       value={formData.dailyTotalCalories}
-                      onChange={e => {
-                        setFormData({ ...formData, dailyTotalCalories: e.target.value });
-                        setMacroSliders({ protein: 0, carbs: 0, fat: 0 }); // Reset macros on calorie change
-                      }}
-                      placeholder="2000"
+                      readOnly
+                      className={`${hasRequiredFieldsForCalculation() ? 'bg-gray-50' : 'bg-yellow-50'} cursor-not-allowed`}
+                      placeholder={hasRequiredFieldsForCalculation() ? translations.autoCalculated : translations.fillRequiredFieldsToCalculate}
                     />
+                    <p className="text-xs text-gray-500">
+                      {translations.mifflinStJeorInfo}
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="number_of_meals">{translations.numberOfMeals}</Label>
-                    <Select 
-                      value={formData.number_of_meals} 
-                      onValueChange={(value) => setFormData({...formData, number_of_meals: value})}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder={translations.selectNumberOfMeals} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="3">3 {translations.meals}</SelectItem>
-                        <SelectItem value="4">4 {translations.meals}</SelectItem>
-                        <SelectItem value="5">5 {translations.meals}</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Input
+                      id="number_of_meals"
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={formData.number_of_meals}
+                      onChange={(e) => setFormData({...formData, number_of_meals: e.target.value})}
+                      placeholder="5"
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="region">{translations.region}</Label>
-                    <Select 
-                      value={formData.region} 
-                      onValueChange={(value) => setFormData({...formData, region: value})}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder={translations.selectRegion} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="israel">{translations.israel}</SelectItem>
-                        <SelectItem value="us">{translations.unitedStates}</SelectItem>
-                        <SelectItem value="uk">{translations.unitedKingdom}</SelectItem>
-                        <SelectItem value="canada">{translations.canada}</SelectItem>
-                        <SelectItem value="australia">{translations.australia}</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Input
+                      id="region"
+                      value={formData.region}
+                      onChange={(e) => setFormData({...formData, region: e.target.value})}
+                      placeholder="israel"
+                    />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>{translations.macrosGrams}</Label>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {['protein', 'carbs', 'fat'].map(macro => (
-                      <div key={macro}>
-                        <Label className="text-sm capitalize">{translations[macro]}</Label>
-                        <Slider
-                          min={macro === 'fat' ? 0 : 0}
-                          max={macro === 'protein' ? 300 : macro === 'carbs' ? 400 : 150}
-                          step={1}
-                          value={[macroSliders[macro]]}
-                          onValueChange={([val]) => {
-                            let cals = parseInt(formData.dailyTotalCalories) || 0;
-                            if (cals > 0) {
-                              setMacroSliders(prev => recalculateMacros(macro, val, cals, prev));
-                            }
-                          }}
-                        />
-                        <div className="text-xs text-gray-600 mt-1">{macroSliders[macro]}g</div>
+                <div className="space-y-3">
+                  <Label className="text-base font-medium">{translations.macrosGrams}</Label>
+                  
+                  {/* Macro Input Rows */}
+                  <div className="space-y-2">
+                    {[
+                      { key: 'protein', label: translations.protein, color: 'blue', maxGrams: 300 },
+                      { key: 'carbs', label: translations.carbs, color: 'purple', maxGrams: 400 },
+                      { key: 'fat', label: translations.fat, color: 'teal', maxGrams: 150 }
+                    ].map(macro => (
+                      <div key={macro.key} className="border rounded-md p-2 bg-gray-50">
+                        <div className="flex items-center justify-between mb-2">
+                          <Label className="text-xs font-medium capitalize">{macro.label}</Label>
+                          <div className="text-xs text-gray-500">
+                            {macroInputs[macro.key].grams}g
+                          </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-4 gap-2 items-center">
+                          {/* Percentage Input */}
+                          <div>
+                            <Label className="text-xs text-gray-600">%</Label>
+                            <Input
+                              type="number"
+                              value={macroInputs[macro.key].percentage}
+                              onChange={(e) => calculateMacrosFromInputs('percentage', parseFloat(e.target.value) || 0, macro.key)}
+                              className="text-xs h-8"
+                              min="0"
+                              max="100"
+                            />
+                          </div>
+                          
+                          {/* Grams Input */}
+                          <div>
+                            <Label className="text-xs text-gray-600">{translations.grams}</Label>
+                            <Input
+                              type="number"
+                              value={macroInputs[macro.key].grams}
+                              onChange={(e) => calculateMacrosFromInputs('grams', parseFloat(e.target.value) || 0, macro.key)}
+                              className="text-xs h-8"
+                              min="0"
+                              max={macro.maxGrams}
+                            />
+                          </div>
+                          
+                          {/* Grams per Kg Input */}
+                          <div>
+                            <Label className="text-xs text-gray-600">g/kg</Label>
+                            <Input
+                              type="number"
+                              value={macroInputs[macro.key].gramsPerKg}
+                              onChange={(e) => calculateMacrosFromInputs('gramsPerKg', parseFloat(e.target.value) || 0, macro.key)}
+                              className="text-xs h-8"
+                              min="0"
+                              step="0.1"
+                            />
+                          </div>
+                          
+                          {/* Slider */}
+                          <div className="flex-1">
+                            <Slider
+                              min={0}
+                              max={macro.maxGrams}
+                              step={1}
+                              value={[macroInputs[macro.key].grams]}
+                              onValueChange={([val]) => calculateMacrosFromInputs('grams', val, macro.key)}
+                              className={`[&>span]:bg-${macro.color}-500`}
+                            />
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {translations.macrosSumMatches} <br />
-                    <span className="font-mono">{translations.caloriesFormula}</span>
-                  </p>
+                  
+                  {/* Summary */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-md p-2">
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-gray-600">{translations.totalPercentages}: </span>
+                        <span className="font-medium">{calculateTotals().totalPercentage.toFixed(1)}%</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">{translations.totalCaloriesInTargets}: </span>
+                        <span className="font-medium">{calculateTotals().totalCalories}</span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {translations.macrosSumMatches} <br />
+                      <span className="font-mono">{translations.caloriesFormula}</span>
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -1302,7 +1739,11 @@ export default function Clients() {
               <Button 
                 type="button" 
                 variant="outline"
-                onClick={() => setDialogOpen(false)}
+                onClick={() => {
+                  setDialogOpen(false);
+                  setFormSubmitted(false);
+                  setTouchedFields({});
+                }}
                 disabled={loading}
               >
                 {translations.cancel}

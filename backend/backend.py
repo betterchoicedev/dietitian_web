@@ -638,7 +638,7 @@ def load_user_preferences(user_code=None):
                 }
 
         # Debug: Log the raw user data
-        logger.info(f"Raw user data from Supabase: {json.dumps(user_data, indent=2, default=str)}")
+        logger.info(f"Raw user data from Supabase: {json.dumps(user_data, indent=2, default=str, ensure_ascii=False)}")
 
         # Parse macros - handle both string and object formats
         macros = user_data.get("macros", {})
@@ -704,7 +704,7 @@ def load_user_preferences(user_code=None):
         }
 
         logger.info(f"✅ Loaded user preferences for user_code: {user_data.get('user_code')}")
-        logger.info(f"Final preferences: {json.dumps(preferences, indent=2)}")
+        logger.info(f"Final preferences: {json.dumps(preferences, indent=2, ensure_ascii=False)}")
         
         # Validate that essential fields are not None
         if preferences["calories_per_day"] is None:
@@ -890,28 +890,39 @@ def get_generated_menu():
 
 @app.route("/api/template", methods=["POST"])
 def api_template():
-    try:
-        data = request.get_json()
-        user_code = data.get("user_code") if data else None
-        preferences = load_user_preferences(user_code)
-        logger.info("🔹 Received user preferences for template:\n%s", json.dumps(preferences, indent=2))
+    max_retries = 4  # Build 4 templates before giving up
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"🔄 Attempt {attempt}/{max_retries} to generate template")
+            
+            data = request.get_json()
+            user_code = data.get("user_code") if data else None
+            preferences = load_user_preferences(user_code)
+            logger.info("🔹 Received user preferences for template:\n%s", json.dumps(preferences, indent=2, ensure_ascii=False))
 
-        region = preferences.get('region', 'israel').lower()
-        
-        # Region-specific ingredient instructions
-        region_instructions = {
-            'israel': "Focus on Israeli cuisine and products. Use Israeli brands (Tnuva, Osem, Strauss, Elite, Telma) and local foods (hummus, falafel, tahini, pita, sabich, shakshuka, jachnun). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 150g-200g containers, hummus in 400g containers, pita bread is typically 60-80g per piece, Israeli cheese slices are 20-25g each, Bamba comes in 80g bags, Bissli in 100g bags. Use realistic Israeli portion sizes.",
-            'us': "Focus on American cuisine and products. Use American brands (Kraft, General Mills, Kellogg's, Pepsi) and typical American foods (bagels, cereals, sandwiches, burgers, mac and cheese). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 16oz (454g) containers, yogurt in 6-8oz (170-227g) containers, cream cheese in 8oz (227g) packages, American cheese slices are 21g each, bagels are 95-105g each.",
-            'uk': "Focus on British cuisine and products. Use British brands (Tesco, Sainsbury's, Heinz UK, Cadbury) and typical British foods (beans on toast, fish and chips, bangers and mash). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 300g containers, yogurt in 150-170g pots, British cheese slices are 25g each, bread slices are 35-40g each.",
-            'canada': "Focus on Canadian cuisine and products. Use Canadian brands (Loblaws, President's Choice, Tim Hortons) and typical Canadian foods (maple syrup dishes, poutine elements). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 500g containers, yogurt in 175g containers, Canadian cheese slices are 22g each.",
-            'australia': "Focus on Australian cuisine and products. Use Australian brands (Woolworths, Coles, Arnott's, Vegemite) and typical Australian foods. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 170g tubs, Australian cheese slices are 25g each."
-        }
-        
-        region_instruction = region_instructions.get(region, region_instructions['israel'])
+            region = preferences.get('region', 'israel').lower()
+            
+            # Region-specific ingredient instructions
+            region_instructions = {
+                'israel': "Focus on Israeli cuisine and products. Use Israeli brands (Tnuva, Osem, Strauss, Elite, Telma) and local foods (hummus, falafel, tahini, pita, sabich, shakshuka, jachnun). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 150g-200g containers, hummus in 400g containers, pita bread is typically 60-80g per piece, Israeli cheese slices are 20-25g each, Bamba comes in 80g bags, Bissli in 100g bags. Use realistic Israeli portion sizes.",
+                'us': "Focus on American cuisine and products. Use American brands (Kraft, General Mills, Kellogg's, Pepsi) and typical American foods (bagels, cereals, sandwiches, burgers, mac and cheese). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 16oz (454g) containers, yogurt in 6-8oz (170-227g) containers, cream cheese in 8oz (227g) packages, American cheese slices are 21g each, bagels are 95-105g each.",
+                'uk': "Focus on British cuisine and products. Use British brands (Tesco, Sainsbury's, Heinz UK, Cadbury) and typical British foods (beans on toast, fish and chips, bangers and mash). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 300g containers, yogurt in 150-170g pots, British cheese slices are 25g each, bread slices are 35-40g each.",
+                'canada': "Focus on Canadian cuisine and products. Use Canadian brands (Loblaws, President's Choice, Tim Hortons) and typical Canadian foods (maple syrup dishes, poutine elements). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 500g containers, yogurt in 175g containers, Canadian cheese slices are 22g each.",
+                'australia': "Focus on Australian cuisine and products. Use Australian brands (Woolworths, Coles, Arnott's, Vegemite) and typical Australian foods. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 170g tubs, Australian cheese slices are 25g each."
+            }
+            
+            region_instruction = region_instructions.get(region, region_instructions['israel'])
 
-        system_prompt = f"""
+            system_prompt = f"""
 You are a professional dietitian AI specializing in personalized, practical meal planning.
 Your mission: generate a realistic meal template that a real person can cook and enjoy, while strictly hitting their daily calorie & macro targets and honoring every user's unique preferences, allergies, and dietary rules.
+
+**CRITICAL: ALWAYS GENERATE ALL MENU CONTENT IN ENGLISH ONLY.**
+- All meal names, ingredient names, and descriptions must be in English
+- Do not use Hebrew, Arabic, or any other language
+- Use English names for all foods, brands, and cooking terms
+- This applies regardless of the user's region or preferences
 
 CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fat)
 
@@ -921,7 +932,7 @@ CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fa
 ────────────────────────────────────────────  MEAL STRUCTURE  ────────────────────────────────────────────────
 • The user can request 3–5 meals.  
 • **When number_of_meals = 5 you MUST use these exact names, in this exact order**  
-  1 Breakfast 2 Morning Snack 3 Lunch 4 Afternoon Snack 5 Dinner  
+  1 Breakfast 2 Morning Snack 3 Lunch 4 Afternoon Snack 5 Dinner  
 • Never omit, rename, reorder, or merge a meal.  
 • If number_of_meals < 5, remove from the **end** of the list (Dinner is dropped last).
 
@@ -973,9 +984,16 @@ CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fa
     • **For low-fat diets (< 30g total fat):** Distribute fat very carefully - use lean proteins, minimal oils, fat-free dairy.
     • **For low-carb diets (< 100g total carbs):** Focus on protein and healthy fats, minimize grains and fruits.
 
-4. **Alternative match:** Main vs alternative within **±20 % calories & protein, ±30 % fat & carbs**.  
+4. **Alternative match:** Main vs alternative within **±30 % for all macros (calories, protein, fat, carbs)**.  
 
-5. **VERIFICATION:** Before responding, verify that your template sums to within ±5% of ALL daily targets.
+5. **CRITICAL VALIDATION REQUIREMENTS:** 
+   - Your template MUST pass validation with a 30% margin for all macros
+   - Both main AND alternative options must sum to within 30% of daily targets
+   - If either main or alternative fails the 30% validation, regenerate the entire template
+   - Pay special attention to protein targets - ensure both options have sufficient protein
+   - For high-protein diets (>150g), distribute protein more evenly across meals
+
+6. **VERIFICATION:** Before responding, verify that your template sums to within ±5% of ALL daily targets.
    If not, regenerate the entire template with more appropriate macro distribution.
 
 ────────────────────────────────────────────  FEASIBILITY  ──────────────────────────────────────────────────
@@ -1017,32 +1035,45 @@ If any meal is missing or fails a rule, silently self-correct and regenerate bef
 }}
 """
 
-        user_prompt = {
-            "role": "user",
-            "content": f"User preferences: {json.dumps(preferences)}"
-        }
+            user_prompt = {
+                "role": "user",
+                "content": f"User preferences: {json.dumps(preferences, ensure_ascii=False)}"
+            }
 
-        logger.info("🧠 Sending to OpenAI (/template):\nSystem: %s\nUser: %s", system_prompt, user_prompt["content"])
+            logger.info("🧠 Sending to OpenAI (/template):\nSystem: %s\nUser: %s", system_prompt, user_prompt["content"])
 
-        response = openai.ChatCompletion.create(
-            engine=deployment,
-            messages=[{"role": "system", "content": system_prompt}, user_prompt],
-            temperature=0.3
-        )
+            response = openai.ChatCompletion.create(
+                engine=deployment,
+                messages=[{"role": "system", "content": system_prompt}, user_prompt],
+                temperature=0.3
+            )
 
-        result = response["choices"][0]["message"]["content"]
-        logger.info("✅ Raw response from OpenAI (/template):\n%s", result)
+            result = response["choices"][0]["message"]["content"]
+            logger.info("✅ Raw response from OpenAI (/template):\n%s", result)
 
-        try:
-            parsed = json.loads(result)
-            logger.info("✅ Parsed template successfully.")
-            return jsonify(parsed)
-        except json.JSONDecodeError:
-            logger.error("❌ JSON decode error in /api/template:\n%s", result)
-            return jsonify({"error": "Invalid JSON from OpenAI", "raw": result}), 500
-    except Exception as e:
-        logger.error("❌ Exception in /api/template:\n%s", traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
+            try:
+                parsed = json.loads(result)
+                logger.info("✅ Parsed template successfully on attempt %d.", attempt)
+                return jsonify(parsed)
+            except json.JSONDecodeError:
+                logger.error("❌ JSON decode error in /api/template (attempt %d):\n%s", attempt, result)
+                if attempt == max_retries:
+                    return jsonify({"error": "Invalid JSON from OpenAI after all attempts", "raw": result}), 500
+                else:
+                    logger.info(f"🔄 Retrying template generation due to JSON decode error...")
+                    continue
+                    
+        except Exception as e:
+            logger.error("❌ Exception in /api/template (attempt %d):\n%s", attempt, traceback.format_exc())
+            if attempt == max_retries:
+                return jsonify({"error": str(e)}), 500
+            else:
+                logger.info(f"🔄 Retrying template generation due to exception...")
+                continue
+    
+    # If we get here, all attempts failed
+    logger.error("❌ All %d attempts to generate template failed", max_retries)
+    return jsonify({"error": f"Failed to generate template after {max_retries} attempts"}), 500
 
 def calculate_totals(meals):
     totals = {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
@@ -1051,241 +1082,288 @@ def calculate_totals(meals):
             option = meal.get(option_key)
             if option and option.get("nutrition"):
                 for macro in totals:
-                    value = option["nutrition"].get(macro)
+                    value = option["nutrition"].get(macro, 0)
+                    totals[macro] += float(value)
+    return totals
 
 @app.route("/api/build-menu", methods=["POST"])
 def api_build_menu():
-    try:
-        data = request.json
-        template = data.get("template")
-        user_code = data.get("user_code")
-        preferences = load_user_preferences(user_code)
-        if not template:
-            return jsonify({"error": "Missing template"}), 400
+    max_retries = 4  # Try 4 times before giving up
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"🔄 Attempt {attempt}/{max_retries} to build menu")
+            
+            data = request.json
+            template = data.get("template")
+            user_code = data.get("user_code")
+            preferences = load_user_preferences(user_code)
+            if not template:
+                return jsonify({"error": "Missing template"}), 400
 
-        # ✅ Validate the template before building meals
-        val_res = app.test_client().post("/api/validate-template", json={"template": template, "user_code": user_code})
-        val_data = val_res.get_json()
+            # ✅ Validate the template before building meals
+            val_res = app.test_client().post("/api/validate-template", json={"template": template, "user_code": user_code})
+            val_data = val_res.get_json()
 
-        if not val_data.get("is_valid"):
-            logger.warning("❌ Template validation failed before menu build: %s", {
-                "main": val_data.get("issues_main"),
-                "alternative": val_data.get("issues_alt"),
-            })
-            return jsonify({"error": "Template validation failed", "validation": val_data}), 400
-
-        logger.info("🔹 Building menu meal by meal, option by option...")
-        full_menu = []
-
-        for template_meal in template:
-            meal_name = template_meal.get("meal")
-
-            # Build MAIN option
-            main_built = None
-            main_feedback = None
-            main_macros = template_meal.get("main", {})
-            main_protein_source = main_macros.get("main_protein_source")
-            for attempt in range(6):
-                logger.info(f"🧠 Building MAIN for meal '{meal_name}', attempt {attempt + 1}")
-                # Get region-specific instructions
-                region = preferences.get('region', 'israel').lower()
-                region_instructions = {
-                    'israel': "Use Israeli products and brands (e.g., Tnuva, Osem, Strauss, Elite, Telma). Include local Israeli foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 150g-200g containers, hummus in 400g containers, pita bread is typically 60-80g per piece, Israeli cheese slices are 20-25g each, Bamba comes in 80g bags, Bissli in 100g bags. Use realistic Israeli portion sizes.",
-                    'us': "Use American products and brands (e.g., Kraft, General Mills, Kellogg's, Pepsi). Include typical American foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 16oz (454g) containers, yogurt in 6-8oz (170-227g) containers, cream cheese in 8oz (227g) packages, American cheese slices are 21g each, bagels are 95-105g each.",
-                    'uk': "Use British products and brands (e.g., Tesco, Sainsbury's, Heinz UK, Cadbury). Include typical British foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 300g containers, yogurt in 150-170g pots, British cheese slices are 25g each, bread slices are 35-40g each.",
-                    'canada': "Use Canadian products and brands (e.g., Loblaws, President's Choice, Tim Hortons). Include typical Canadian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 500g containers, yogurt in 175g containers, Canadian cheese slices are 22g each.",
-                    'australia': "Use Australian products and brands (e.g., Woolworths, Coles, Arnott's, Vegemite). Include typical Australian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 170g tubs, Australian cheese slices are 25g each."
-                }
-                region_instruction = region_instructions.get(region, region_instructions['israel'])
+            if not val_data.get("is_valid"):
+                logger.warning("❌ Template validation failed on attempt %d: %s", attempt, {
+                    "main": val_data.get("issues_main"),
+                    "alternative": val_data.get("issues_alt"),
+                })
                 
-                main_prompt = (
-                    "You are a professional dietitian AI. "
-                    "Given a meal template for one meal and user preferences, build the **main option only** for this meal. "
-                    "The meal you generate MUST have the EXACT name as provided in 'meal_name'. "
-                    f"REGION-SPECIFIC REQUIREMENTS: {region_instruction} "
-                    "PREFERENCE LOGIC: If user 'likes' or 'loves' any food, consider it but DON'T overuse it. "
-                    "Ensure variety across all meals - avoid repeating main ingredients multiple times. "
-                    "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences. "
-                    "If user has 'kosher' limitation, you MUST follow kosher dietary laws: "
-                    "- NEVER mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) in the same meal "
-                    "- Use only kosher-certified ingredients and brands "
-                    "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
-                    "Provide: `meal_name`, `meal_title`, `ingredients` (list of objects with keys "
-                    "`item`, `household_measure`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
-                    "and `nutrition` (sum of ingredients). "
-                    "IMPORTANT: For 'brand of pruduct', you MUST use real, specific brand names "
-                    "NEVER use 'Generic' or 'generic' as a brand name. "
-                    "CRITICAL: For 'household_measure', use realistic portion sizes that match the region's packaging standards. "
-                    "For Israeli products: cottage cheese 250g containers, yogurt 150-200g containers, hummus 400g containers, etc. "
-                    "Macros must match the template within ±40%. Respond only with valid JSON."
-                )
-                main_content = {
-                    "meal_name": meal_name,
-                    "macro_targets": {
-                        "calories": main_macros.get("calories"),
-                        "protein": main_macros.get("protein"),
-                        "fat": main_macros.get("fat"),
-                        "carbs": main_macros.get("carbs"),
-                    },
-                    "main_protein_source": main_protein_source,
-                    "preferences": preferences,
-                    "INSTRUCTIONS": "Build only the main option as specified above."
-                }
-                if main_feedback:
-                    main_content["feedback"] = main_feedback
-
-                response = openai.ChatCompletion.create(
-                    engine=deployment,
-                    messages=[
-                        {"role": "system", "content": main_prompt},
-                        {"role": "user", "content": json.dumps(main_content)}
-                    ],
-                    temperature=0.3
-                )
-                raw_main = response["choices"][0]["message"]["content"]
-                try:
-                    parsed = json.loads(raw_main)
-                    main_candidate = parsed.get("main") or parsed  # GPT might just return the main object
-                    logger.error(main_candidate)
-                except Exception:
-                    logger.error(f"❌ JSON parse error for MAIN '{meal_name}':\n{raw_main}")
-                    main_feedback = ["Invalid JSON from GPT"]
-                    continue
-
-                # Validate main
-                validate_payload = {
-                    "template": [{"main": main_macros}],
-                    "menu": [{"main": main_candidate}],
-                    "user_code": user_code
-                }
-                val_res = app.test_client().post(
-                    "/api/validate-menu",
-                    json=validate_payload
-                )
-                val_data = val_res.get_json()
-                is_valid = val_data.get("is_valid")
-                issues = val_data.get("issues", [])
-
-                if is_valid:
-                    logger.info(f"✅ MAIN for meal '{meal_name}' passed validation.")
-                    main_built = main_candidate
-                    break
+                # If this is not the last attempt, try to regenerate the template
+                if attempt < max_retries:
+                    logger.info(f"🔄 Template validation failed, regenerating template for attempt {attempt + 1}")
+                    try:
+                        # Call the template generation endpoint to get a new template
+                        template_res = app.test_client().post("/api/template", json={"user_code": user_code})
+                        if template_res.status_code == 200:
+                            template_data = template_res.get_json()
+                            if template_data.get("template"):
+                                template = template_data.get("template")
+                                logger.info(f"✅ Generated new template for attempt {attempt + 1}")
+                                continue  # Try again with the new template
+                            else:
+                                logger.error("❌ New template generation returned invalid data")
+                        else:
+                            logger.error(f"❌ Template regeneration failed with status {template_res.status_code}")
+                    except Exception as template_error:
+                        logger.error(f"❌ Error regenerating template: {template_error}")
+                
+                # If we've exhausted all attempts or template regeneration failed
+                if attempt == max_retries:
+                    return jsonify({"error": "Template validation failed after all attempts", "validation": val_data}), 400
                 else:
-                    logger.warning(f"❌ MAIN for meal '{meal_name}' failed validation: {issues}")
-                    main_feedback = issues
+                    continue  # Try the next attempt
 
-            if not main_built:
-                logger.error(f"❌ Could not build valid MAIN for '{meal_name}' after 6 attempts.")
-                main_built = {"name": "Error: Could not build main", "ingredients": [], "nutrition": {}}
+            logger.info("🔹 Building menu meal by meal, option by option...")
+            full_menu = []
 
-            # Build ALTERNATIVE option
-            alt_built = None
-            alt_feedback = None
-            alt_macros = template_meal.get("alternative", {})
-            alt_protein_source = alt_macros.get("main_protein_source")
-            for attempt in range(6):
-                logger.info(f"🧠 Building ALTERNATIVE for meal '{meal_name}', attempt {attempt + 1}")
-                alt_prompt = (
-                    "You are a professional dietitian AI. "
-                    "Given a meal template for one meal and user preferences, build the **alternative option only** for this meal. "
-                    "The meal you generate MUST have the EXACT name as provided in 'meal_name'. "
-                    f"REGION-SPECIFIC REQUIREMENTS: {region_instruction} "
-                    "PREFERENCE LOGIC: If user 'likes' or 'loves' any food, consider it but DON'T overuse it. "
-                    "Ensure variety across all meals - avoid repeating main ingredients multiple times. "
-                    "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences. "
-                    "If user has 'kosher' limitation, you MUST follow kosher dietary laws: "
-                    "- NEVER mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) in the same meal "
-                    "- Use only kosher-certified ingredients and brands "
-                    "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
-                    "Provide: `meal_name`, `meal_title`, `ingredients` (list of objects with keys "
-                    "`item`, `household_measure`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
-                    "and `nutrition` (sum of ingredients). "
-                    "IMPORTANT: For 'brand of pruduct', you MUST use real, specific brand names "
-                    "NEVER use 'Generic' or 'generic' as a brand name. "
-                    "CRITICAL: For 'household_measure', use realistic portion sizes that match the region's packaging standards. "
-                    "For Israeli products: cottage cheese 250g containers, yogurt 150-200g containers, hummus 400g containers, etc. "
-                    "Macros must match the template within ±40%. Respond only with valid JSON."
-                )
-                alt_content = {
-                    "meal_name": meal_name,
-                    "macro_targets": {
-                        "calories": alt_macros.get("calories"),
-                        "protein": alt_macros.get("protein"),
-                        "fat": alt_macros.get("fat"),
-                        "carbs": alt_macros.get("carbs"),
-                    },
-                    "main_protein_source": alt_protein_source,
-                    "preferences": preferences,
-                    "INSTRUCTIONS": "Build only the alternative option as specified above."
+            for template_meal in template:
+                meal_name = template_meal.get("meal")
+
+                # Build MAIN option
+                main_built = None
+                main_feedback = None
+                main_macros = template_meal.get("main", {})
+                main_protein_source = main_macros.get("main_protein_source")
+                for main_attempt in range(6):
+                    logger.info(f"🧠 Building MAIN for meal '{meal_name}', attempt {main_attempt + 1}")
+                    # Get region-specific instructions
+                    region = preferences.get('region', 'israel').lower()
+                    region_instructions = {
+                        'israel': "Use Israeli products and brands (e.g., Tnuva, Osem, Strauss, Elite, Telma). Include local Israeli foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 150g-200g containers, hummus in 400g containers, pita bread is typically 60-80g per piece, Israeli cheese slices are 20-25g each, Bamba comes in 80g bags, Bissli in 100g bags. Use realistic Israeli portion sizes.",
+                        'us': "Use American products and brands (e.g., Kraft, General Mills, Kellogg's, Pepsi). Include typical American foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 16oz (454g) containers, yogurt in 6-8oz (170-227g) containers, cream cheese in 8oz (227g) packages, American cheese slices are 21g each, bagels are 95-105g each.",
+                        'uk': "Use British products and brands (e.g., Tesco, Sainsbury's, Heinz UK, Cadbury). Include typical British foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 300g containers, yogurt in 150-170g pots, British cheese slices are 25g each, bread slices are 35-40g each.",
+                        'canada': "Use Canadian products and brands (e.g., Loblaws, President's Choice, Tim Hortons). Include typical Canadian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 500g containers, yogurt in 175g containers, Canadian cheese slices are 22g each.",
+                        'australia': "Use Australian products and brands (e.g., Woolworths, Coles, Arnott's, Vegemite). Include typical Australian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 170g tubs, Australian cheese slices are 25g each."
+                    }
+                    region_instruction = region_instructions.get(region, region_instructions['israel'])
+                    
+                    main_prompt = (
+                        "You are a professional dietitian AI. "
+                        "Given a meal template for one meal and user preferences, build the **main option only** for this meal. "
+                        "The meal you generate MUST have the EXACT name as provided in 'meal_name'. "
+                        f"REGION-SPECIFIC REQUIREMENTS: {region_instruction} "
+                        "**CRITICAL: ALWAYS GENERATE ALL CONTENT IN ENGLISH ONLY.** "
+                        "- All meal names, ingredient names, and descriptions must be in English "
+                        "- Do not use Hebrew, Arabic, or any other language "
+                        "- Use English names for all foods, brands, and cooking terms "
+                        "PREFERENCE LOGIC: If user 'likes' or 'loves' any food, consider it but DON'T overuse it. "
+                        "Ensure variety across all meals - avoid repeating main ingredients multiple times. "
+                        "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences. "
+                        "If user has 'kosher' limitation, you MUST follow kosher dietary laws: "
+                        "- NEVER mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) in the same meal "
+                        "- Use only kosher-certified ingredients and brands "
+                        "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
+                        "Provide: `meal_name`, `meal_title`, `ingredients` (list of objects with keys "
+                        "`item`, `household_measure`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
+                        "and `nutrition` (sum of ingredients). "
+                        "IMPORTANT: For 'brand of pruduct', you MUST use real, specific brand names "
+                        "NEVER use 'Generic' or 'generic' as a brand name. "
+                        "CRITICAL: For 'household_measure', use realistic portion sizes that match the region's packaging standards. "
+                        "For Israeli products: cottage cheese 250g containers, yogurt 150-200g containers, hummus 400g containers, etc. "
+                        "Macros must match the template within ±40%. Respond only with valid JSON."
+                    )
+                    main_content = {
+                        "meal_name": meal_name,
+                        "macro_targets": {
+                            "calories": main_macros.get("calories"),
+                            "protein": main_macros.get("protein"),
+                            "fat": main_macros.get("fat"),
+                            "carbs": main_macros.get("carbs"),
+                        },
+                        "main_protein_source": main_protein_source,
+                        "preferences": preferences,
+                        "INSTRUCTIONS": "Build only the main option as specified above."
+                    }
+                    if main_feedback:
+                        main_content["feedback"] = main_feedback
+
+                    response = openai.ChatCompletion.create(
+                        engine=deployment,
+                        messages=[
+                            {"role": "system", "content": main_prompt},
+                            {"role": "user", "content": json.dumps(main_content, ensure_ascii=False)}
+                        ],
+                        temperature=0.3
+                    )
+                    raw_main = response["choices"][0]["message"]["content"]
+                    try:
+                        parsed = json.loads(raw_main)
+                        main_candidate = parsed.get("main") or parsed  # GPT might just return the main object
+                        logger.error(main_candidate)
+                    except Exception:
+                        logger.error(f"❌ JSON parse error for MAIN '{meal_name}':\n{raw_main}")
+                        main_feedback = ["Invalid JSON from GPT"]
+                        continue
+
+                    # Validate main
+                    validate_payload = {
+                        "template": [{"main": main_macros}],
+                        "menu": [{"main": main_candidate}],
+                        "user_code": user_code
+                    }
+                    val_res = app.test_client().post(
+                        "/api/validate-menu",
+                        json=validate_payload
+                    )
+                    val_data = val_res.get_json()
+                    is_valid = val_data.get("is_valid")
+                    issues = val_data.get("issues", [])
+
+                    if is_valid:
+                        logger.info(f"✅ MAIN for meal '{meal_name}' passed validation.")
+                        main_built = main_candidate
+                        break
+                    else:
+                        logger.warning(f"❌ MAIN for meal '{meal_name}' failed validation: {issues}")
+                        main_feedback = issues
+
+                if not main_built:
+                    logger.error(f"❌ Could not build valid MAIN for '{meal_name}' after 6 attempts.")
+                    main_built = {"name": "Error: Could not build main", "ingredients": [], "nutrition": {}}
+
+                # Build ALTERNATIVE option
+                alt_built = None
+                alt_feedback = None
+                alt_macros = template_meal.get("alternative", {})
+                alt_protein_source = alt_macros.get("main_protein_source")
+                for alt_attempt in range(6):
+                    logger.info(f"🧠 Building ALTERNATIVE for meal '{meal_name}', attempt {alt_attempt + 1}")
+                    alt_prompt = (
+                        "You are a professional dietitian AI. "
+                        "Given a meal template for one meal and user preferences, build the **alternative option only** for this meal. "
+                        "The meal you generate MUST have the EXACT name as provided in 'meal_name'. "
+                        f"REGION-SPECIFIC REQUIREMENTS: {region_instruction} "
+                        "**CRITICAL: ALWAYS GENERATE ALL CONTENT IN ENGLISH ONLY.** "
+                        "- All meal names, ingredient names, and descriptions must be in English "
+                        "- Do not use Hebrew, Arabic, or any other language "
+                        "- Use English names for all foods, brands, and cooking terms "
+                        "PREFERENCE LOGIC: If user 'likes' or 'loves' any food, consider it but DON'T overuse it. "
+                        "Ensure variety across all meals - avoid repeating main ingredients multiple times. "
+                        "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences. "
+                        "If user has 'kosher' limitation, you MUST follow kosher dietary laws: "
+                        "- NEVER mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) in the same meal "
+                        "- Use only kosher-certified ingredients and brands "
+                        "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
+                        "Provide: `meal_name`, `meal_title`, `ingredients` (list of objects with keys "
+                        "`item`, `household_measure`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
+                        "and `nutrition` (sum of ingredients). "
+                        "IMPORTANT: For 'brand of pruduct', you MUST use real, specific brand names "
+                        "NEVER use 'Generic' or 'generic' as a brand name. "
+                        "CRITICAL: For 'household_measure', use realistic portion sizes that match the region's packaging standards. "
+                        "For Israeli products: cottage cheese 250g containers, yogurt 150-200g containers, hummus 400g containers, etc. "
+                        "Macros must match the template within ±40%. Respond only with valid JSON."
+                    )
+                    alt_content = {
+                        "meal_name": meal_name,
+                        "macro_targets": {
+                            "calories": alt_macros.get("calories"),
+                            "protein": alt_macros.get("protein"),
+                            "fat": alt_macros.get("fat"),
+                            "carbs": alt_macros.get("carbs"),
+                        },
+                        "main_protein_source": alt_protein_source,
+                        "preferences": preferences,
+                        "INSTRUCTIONS": "Build only the alternative option as specified above."
+                    }
+                    if alt_feedback:
+                        alt_content["feedback"] = alt_feedback
+
+                    response = openai.ChatCompletion.create(
+                        engine=deployment,
+                        messages=[
+                            {"role": "system", "content": alt_prompt},
+                            {"role": "user", "content": json.dumps(alt_content, ensure_ascii=False)}
+                        ],
+                        temperature=0.3
+                    )
+                    raw_alt = response["choices"][0]["message"]["content"]
+                    try:
+                        parsed = json.loads(raw_alt)
+                        alt_candidate = parsed.get("alternative") or parsed  # GPT might just return the alt object
+                        logger.error(alt_candidate)
+                    except Exception:
+                        logger.error(f"❌ JSON parse error for ALTERNATIVE '{meal_name}':\n{raw_alt}")
+                        alt_feedback = ["Invalid JSON from GPT"]
+                        continue
+
+                    # Validate alternative
+                    validate_payload = {
+                        "template": [{"alternative": alt_macros}],
+                        "menu": [{"alternative": alt_candidate}],
+                        "user_code": user_code
+                    }
+                    val_res = app.test_client().post(
+                        "/api/validate-menu",
+                        json=validate_payload
+                    )
+                    val_data = val_res.get_json()
+                    is_valid = val_data.get("is_valid")
+                    issues = val_data.get("issues", [])
+
+                    if is_valid:
+                        logger.info(f"✅ ALTERNATIVE for meal '{meal_name}' passed validation.")
+                        alt_built = alt_candidate
+                        break
+                    else:
+                        logger.warning(f"❌ ALTERNATIVE for meal '{meal_name}' failed validation: {issues}")
+                        alt_feedback = issues
+
+                if not alt_built:
+                    logger.error(f"❌ Could not build valid ALTERNATIVE for '{meal_name}' after 6 attempts.")
+                    alt_built = {"name": "Error: Could not build alternative", "ingredients": [], "nutrition": {}}
+
+                # Combine into meal entry
+                meal_obj = {
+                    "meal": meal_name,
+                    "main": main_built,
+                    "alternative": alt_built
                 }
-                if alt_feedback:
-                    alt_content["feedback"] = alt_feedback
+                full_menu.append(meal_obj)
 
-                response = openai.ChatCompletion.create(
-                    engine=deployment,
-                    messages=[
-                        {"role": "system", "content": alt_prompt},
-                        {"role": "user", "content": json.dumps(alt_content)}
-                    ],
-                    temperature=0.3
-                )
-                raw_alt = response["choices"][0]["message"]["content"]
-                try:
-                    parsed = json.loads(raw_alt)
-                    alt_candidate = parsed.get("alternative") or parsed  # GPT might just return the alt object
-                    logger.error(alt_candidate)
-                except Exception:
-                    logger.error(f"❌ JSON parse error for ALTERNATIVE '{meal_name}':\n{raw_alt}")
-                    alt_feedback = ["Invalid JSON from GPT"]
-                    continue
-
-                # Validate alternative
-                validate_payload = {
-                    "template": [{"alternative": alt_macros}],
-                    "menu": [{"alternative": alt_candidate}],
-                    "user_code": user_code
-                }
-                val_res = app.test_client().post(
-                    "/api/validate-menu",
-                    json=validate_payload
-                )
-                val_data = val_res.get_json()
-                is_valid = val_data.get("is_valid")
-                issues = val_data.get("issues", [])
-
-                if is_valid:
-                    logger.info(f"✅ ALTERNATIVE for meal '{meal_name}' passed validation.")
-                    alt_built = alt_candidate
-                    break
-                else:
-                    logger.warning(f"❌ ALTERNATIVE for meal '{meal_name}' failed validation: {issues}")
-                    alt_feedback = issues
-
-            if not alt_built:
-                logger.error(f"❌ Could not build valid ALTERNATIVE for '{meal_name}' after 6 attempts.")
-                alt_built = {"name": "Error: Could not build alternative", "ingredients": [], "nutrition": {}}
-
-            # Combine into meal entry
-            meal_obj = {
-                "meal": meal_name,
-                "main": main_built,
-                "alternative": alt_built
-            }
-            full_menu.append(meal_obj)
-
-        logger.info("✅ Finished building full menu.")
-        totals = calculate_totals(full_menu)
-        
-        # Clean ingredient names before returning
-        cleaned_menu = clean_ingredient_names(full_menu)
-        
-        # Return menu immediately without UPC codes
-        logger.info("Full menu built: %s", json.dumps({"menu": cleaned_menu, "totals": totals}, ensure_ascii=False, indent=2))
-        return jsonify({"menu": cleaned_menu, "totals": totals})
-
-    except Exception as e:
-        logger.error("❌ Exception in /api/build-menu:\n%s", traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
+            logger.info("✅ Finished building full menu.")
+            totals = calculate_totals(full_menu)
+            
+            # Clean ingredient names before returning
+            cleaned_menu = clean_ingredient_names(full_menu)
+            
+            # Return menu immediately without UPC codes
+            logger.info("Full menu built: %s", json.dumps({"menu": cleaned_menu, "totals": totals}, ensure_ascii=False, indent=2))
+            return jsonify({"menu": cleaned_menu, "totals": totals})
+            
+        except Exception as e:
+            logger.error("❌ Exception in /api/build-menu (attempt %d):\n%s", attempt, traceback.format_exc())
+            if attempt == max_retries:
+                return jsonify({"error": f"Menu build failed after {max_retries} attempts: {str(e)}"}), 500
+            else:
+                logger.info(f"🔄 Retrying menu build due to exception...")
+                continue
+    
+    # If we get here, all attempts failed
+    logger.error("❌ All %d attempts to build menu failed", max_retries)
+    return jsonify({"error": f"Menu build failed after {max_retries} attempts"}), 500
 
 @app.route("/api/validate-menu", methods=["POST"])
 def api_validate_menu():
@@ -1838,6 +1916,10 @@ def generate_alternative_meal():
         "You are a professional dietitian AI. Given a main meal, an existing alternative, and user preferences, generate a new, distinct alternative meal option. "
         "The new alternative should have similar calories and macros, but use different main ingredients than both the main and the current alternative. "
         f"REGION-SPECIFIC REQUIREMENTS: {region_instruction} "
+        "**CRITICAL: ALWAYS GENERATE ALL CONTENT IN ENGLISH ONLY.** "
+        "- All meal names, ingredient names, and descriptions must be in English "
+        "- Do not use Hebrew, Arabic, or any other language "
+        "- Use English names for all foods, brands, and cooking terms "
         "PREFERENCE LOGIC: If user 'likes' or 'loves' any food, consider it but DON'T overuse it. "
         "Ensure variety - avoid repeating main ingredients that already appear in other meals. "
         "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences. "

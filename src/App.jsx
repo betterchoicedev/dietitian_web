@@ -58,48 +58,20 @@ function App() {
             <Route path="/" element={<Navigate to="/login" replace />} />
             
             {/* Protected Routes - All wrapped in Layout */}
-            <Route element={<Layout />}>
-              <Route path="/dashboard" element={
-                <ProtectedRoute>
-                  <Dashboard />
-                </ProtectedRoute>
-              } />
-              <Route path="/users" element={
-                <ProtectedRoute>
-                  <Users />
-                </ProtectedRoute>
-              } />
-              <Route path="/chat" element={
-                <ProtectedRoute>
-                  <Chat />
-                </ProtectedRoute>
-              } />
-              <Route path="/data-generator" element={
-                <ProtectedRoute>
-                  <DataGenerator />
-                </ProtectedRoute>
-              } />
-              <Route path="/nutrition-plan" element={
-                <ProtectedRoute>
-                  <NutritionPlan />
-                </ProtectedRoute>
-              } />
-              <Route path="/MenuCreate" element={
-                <ProtectedRoute>
-                  <MenuCreate />
-                </ProtectedRoute>
-              } />
-              <Route path="/MenuLoad" element={
-                <ProtectedRoute>
-                  <MenuLoad />
-                </ProtectedRoute>
-              } />
-              <Route path="/menuload" element={<Navigate to="/MenuLoad" replace />} />
-              <Route path="/recipes" element={
-                <ProtectedRoute>
-                  <RecipesPage />
-                </ProtectedRoute>
-              } />
+            <Route path="/*" element={
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            }>
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="users" element={<Users />} />
+              <Route path="chat" element={<Chat />} />
+              <Route path="data-generator" element={<DataGenerator />} />
+              <Route path="nutrition-plan" element={<NutritionPlan />} />
+              <Route path="MenuCreate" element={<MenuCreate />} />
+              <Route path="MenuLoad" element={<MenuLoad />} />
+              <Route path="menuload" element={<Navigate to="/MenuLoad" replace />} />
+              <Route path="recipes" element={<RecipesPage />} />
             </Route>
           </Routes>
         </LanguageProvider>

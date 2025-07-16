@@ -377,7 +377,7 @@ const fallbackImage = '/logo-placeholder.png';
 // Translation function for recipes using backend API
 const translateRecipes = async (recipes, targetLang = 'he') => {
   try {
-    const response = await fetch('https://dietitian-web-backend.onrender.com/api/translate-recipes', {
+    const response = await fetch('http://127.0.0.1:8000/api/translate-recipes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ recipes, targetLang }),

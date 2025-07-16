@@ -601,11 +601,11 @@ const MenuCreate = () => {
       setLoadingUserTargets(true);
       console.log('🎯 Fetching nutritional targets for user:', userCode);
 
-      const { data, error } = await supabase
-        .from('chat_users')
-        .select('dailyTotalCalories, macros, region, food_allergies, food_limitations')
-        .eq('user_code', userCode)
-        .single();
+              const { data, error } = await supabase
+          .from('chat_users')
+          .select('dailyTotalCalories, macros, region, food_allergies, food_limitations, age, gender, weight_kg, height_cm, client_preference')
+          .eq('user_code', userCode)
+          .single();
 
       if (error) {
         console.error('❌ Error fetching user targets:', error);
@@ -648,7 +648,12 @@ const MenuCreate = () => {
         },
         region: data.region || 'israel',
         allergies: parseArrayField(data.food_allergies),
-        limitations: parseArrayField(data.food_limitations)
+        limitations: parseArrayField(data.food_limitations),
+        age: data.age,
+        gender: data.gender,
+        weight_kg: data.weight_kg,
+        height_cm: data.height_cm,
+        client_preference: parseArrayField(data.client_preference)
       });
 
     } catch (err) {
@@ -753,7 +758,7 @@ const MenuCreate = () => {
       setProgressStep(`🔍 Looking up ${uniqueIngredients.length} new ingredients (${cacheHits} found in cache, ${cacheHitRate}% hit rate)...`);
 
       // Step 2: Batch UPC lookup for all ingredients
-      const batchResponse = await fetch("http://127.0.0.1:5000/api/batch-upc-lookup", {
+      const batchResponse = await fetch("https://dietitian-web-backend.onrender.com/api/batch-upc-lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -817,7 +822,7 @@ const MenuCreate = () => {
     try {
       setProgressStep('🔄 Using fallback UPC lookup...');
 
-      const enrichRes = await fetch("http://127.0.0.1:5000/api/enrich-menu-with-upc", {
+      const enrichRes = await fetch("https://dietitian-web-backend.onrender.com/api/enrich-menu-with-upc", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -875,7 +880,7 @@ const MenuCreate = () => {
       setProgress(5);
       setProgressStep('🎯 Analyzing client preferences...');
 
-      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      const templateRes = await fetch("https://dietitian-web-backend.onrender.com/api/template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_code: selectedUser.user_code })
@@ -891,7 +896,7 @@ const MenuCreate = () => {
       setProgress(30);
       setProgressStep('🍽️ Creating personalized meals...');
 
-      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      const buildRes = await fetch("https://dietitian-web-backend.onrender.com/api/build-menu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template, user_code: selectedUser.user_code }),
@@ -1205,15 +1210,23 @@ const MenuCreate = () => {
   const handleAddAlternative = async (mealIdx) => {
     setGeneratingAlt((prev) => ({ ...prev, [mealIdx]: true }));
     try {
-      setMenu((prevMenu) => {
-        const meal = prevMenu.meals[mealIdx];
-        if (!meal || !meal.main || !meal.alternative) return prevMenu;
-        return prevMenu;
-      });
       const meal = menu.meals[mealIdx];
+      if (!meal || !meal.main || !meal.alternative) return;
+      
       const newAlt = await generateAlternativeMeal(meal.main, meal.alternative);
+      
+      // Update both current menu and original menu to maintain consistency
       setMenu((prevMenu) => {
         const updated = { ...prevMenu };
+        if (!updated.meals[mealIdx].alternatives) updated.meals[mealIdx].alternatives = [];
+        updated.meals[mealIdx].alternatives.push(newAlt);
+        return { ...updated };
+      });
+      
+      // Also update the original menu (English source of truth)
+      setOriginalMenu((prevOriginal) => {
+        if (!prevOriginal) return prevOriginal;
+        const updated = { ...prevOriginal };
         if (!updated.meals[mealIdx].alternatives) updated.meals[mealIdx].alternatives = [];
         updated.meals[mealIdx].alternatives.push(newAlt);
         return { ...updated };
@@ -1598,6 +1611,57 @@ const MenuCreate = () => {
       </Card>
 
       {/* User Targets Display */}
+      {/* Menu Generation Section */}
+      {selectedUser && userTargets && (
+        <Card className="border-green-200 bg-green-50/30 mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-green-800">
+              <span>🍽️</span>
+              {translations.generateMenu || 'Generate Menu'}
+            </CardTitle>
+            <CardDescription className="text-green-600">
+              {translations.generateMenuFor ? `${translations.generateMenuFor} ${selectedUser.full_name}` : `Generate personalized menu for ${selectedUser.full_name}`}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-4">
+                <Button
+                  onClick={fetchMenu}
+                  disabled={loading || !selectedUser}
+                  className="bg-green-600 hover:bg-green-700 text-white px-6 py-3"
+                >
+                  {loading ? (
+                    <Loader className="animate-spin h-5 w-5 mr-2" />
+                  ) : (
+                    <span className="text-lg">🎯</span>
+                  )}
+                  {loading ? (translations.generating || 'Generating...') : (translations.generateMenu || 'Generate Menu')}
+                </Button>
+                
+                {menu && (
+                  <Button
+                    onClick={() => setMenu(null)}
+                    variant="outline"
+                    className="border-red-300 text-red-700 hover:bg-red-50"
+                  >
+                    <span className="mr-2">🗑️</span>
+                    {translations.clearMenu || 'Clear Menu'}
+                  </Button>
+                )}
+              </div>
+              
+              {error && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-red-700 text-sm">{error}</p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Nutrition Targets Display */}
       {selectedUser && (
         <Card className="border-blue-200 bg-blue-50/30">
           <CardHeader>
@@ -1619,29 +1683,29 @@ const MenuCreate = () => {
               <div className="space-y-4">
                 {/* Target Macros */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200">
-                    <p className="text-sm text-blue-600 font-medium">{translations.targetCalories || 'Target Calories'}</p>
+                  <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200 text-center">
+                    <p className="text-sm text-blue-600 font-medium mb-2">{translations.calories || 'Calories'}</p>
                     <p className="text-2xl font-bold text-blue-700">
                       {userTargets.calories}
                       <span className="text-sm font-normal text-blue-600 ml-1">{translations.calories || 'kcal'}</span>
                     </p>
                   </div>
-                  <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200">
-                    <p className="text-sm text-blue-600 font-medium">{translations.proteinTarget || 'Target Protein'}</p>
+                  <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200 text-center">
+                    <p className="text-sm text-blue-600 font-medium mb-2">{translations.protein || 'Protein'}</p>
                     <p className="text-2xl font-bold text-blue-700">
                       {userTargets.macros.protein}
                       <span className="text-sm font-normal text-blue-600 ml-1">g</span>
                     </p>
                   </div>
-                  <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200">
-                    <p className="text-sm text-blue-600 font-medium">{translations.fatTarget || 'Target Fat'}</p>
+                  <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200 text-center">
+                    <p className="text-sm text-blue-600 font-medium mb-2">{translations.fat || 'Fat'}</p>
                     <p className="text-2xl font-bold text-blue-700">
                       {userTargets.macros.fat}
                       <span className="text-sm font-normal text-blue-600 ml-1">g</span>
                     </p>
                   </div>
-                  <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200">
-                    <p className="text-sm text-blue-600 font-medium">{translations.carbsTarget || 'Target Carbs'}</p>
+                  <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200 text-center">
+                    <p className="text-sm text-blue-600 font-medium mb-2">{translations.carbs || 'Carbs'}</p>
                     <p className="text-2xl font-bold text-blue-700">
                       {userTargets.macros.carbs}
                       <span className="text-sm font-normal text-blue-600 ml-1">g</span>
@@ -1649,55 +1713,126 @@ const MenuCreate = () => {
                   </div>
                 </div>
 
-                {/* Additional Info */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-blue-200">
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium text-blue-700">{translations.region || 'Region'}</p>
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">🌍</span>
-                      <span className="capitalize text-blue-600">{userTargets.region}</span>
-                    </div>
-                  </div>
-
-                  {userTargets.allergies.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium text-red-700">{translations.dietaryAllergies || 'Food Allergies'}</p>
-                      <div className="flex flex-wrap gap-1">
-                        {userTargets.allergies.map((allergy, idx) => (
-                          <Badge key={idx} variant="outline" className="bg-red-50 border-red-200 text-red-700 text-xs">
-                            {allergy}
-                          </Badge>
-                        ))}
+                {/* User Info Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-blue-200">
+                  {userTargets.region && (
+                    <div className="p-3 bg-white rounded-lg shadow-sm border border-blue-200 text-center">
+                      <p className="text-xs text-blue-600 font-medium mb-1">{translations.region || 'Region'}</p>
+                      <div className="flex items-center justify-center gap-1">
+                        <span>🌍</span>
+                        <span className="capitalize text-blue-700 font-medium text-sm">{userTargets.region}</span>
                       </div>
                     </div>
                   )}
 
-                  {userTargets.limitations.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium text-orange-700">{translations.dietaryRestrictions || 'Dietary Limitations'}</p>
-                      <div className="flex flex-wrap gap-1">
-                        {userTargets.limitations.map((limitation, idx) => (
-                          <Badge key={idx} variant="outline" className="bg-orange-50 border-orange-200 text-orange-700 text-xs">
-                            {limitation}
-                          </Badge>
-                        ))}
+                  {userTargets.age && (
+                    <div className="p-3 bg-white rounded-lg shadow-sm border border-blue-200 text-center">
+                      <p className="text-xs text-blue-600 font-medium mb-1">{translations.age || 'Age'}</p>
+                      <div className="flex items-center justify-center gap-1">
+                        <span>👤</span>
+                        <span className="text-blue-700 font-medium text-sm">{userTargets.age} {translations.years || 'years'}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {userTargets.gender && (
+                    <div className="p-3 bg-white rounded-lg shadow-sm border border-blue-200 text-center">
+                      <p className="text-xs text-blue-600 font-medium mb-1">{translations.gender || 'Gender'}</p>
+                      <div className="flex items-center justify-center gap-1">
+                        <span>⚧</span>
+                        <span className="capitalize text-blue-700 font-medium text-sm">{userTargets.gender}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {userTargets.weight_kg && (
+                    <div className="p-3 bg-white rounded-lg shadow-sm border border-blue-200 text-center">
+                      <p className="text-xs text-blue-600 font-medium mb-1">{translations.weight || 'Weight'}</p>
+                      <div className="flex items-center justify-center gap-1">
+                        <span>⚖️</span>
+                        <span className="text-blue-700 font-medium text-sm">{userTargets.weight_kg} kg</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {userTargets.height_cm && (
+                    <div className="p-3 bg-white rounded-lg shadow-sm border border-blue-200 text-center">
+                      <p className="text-xs text-blue-600 font-medium mb-1">{translations.height || 'Height'}</p>
+                      <div className="flex items-center justify-center gap-1">
+                        <span>📏</span>
+                        <span className="text-blue-700 font-medium text-sm">{userTargets.height_cm} cm</span>
                       </div>
                     </div>
                   )}
                 </div>
 
-                {/* Comparison with Generated Menu */}
+                {/* Dietary Info */}
+                <div className="space-y-3 pt-4 border-t border-blue-200">
+                  {userTargets.client_preference && userTargets.client_preference.length > 0 && (
+                    <div className="p-3 bg-white rounded-lg shadow-sm border border-green-200">
+                      <p className="text-sm text-green-700 font-medium mb-2 flex items-center gap-2">
+                        <span>❤️</span>
+                        {translations.clientPreferences || 'Client Preferences'}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {userTargets.client_preference.map((pref, idx) => (
+                          <Badge key={idx} variant="outline" className="bg-green-50 border-green-200 text-green-700 text-sm">
+                            {pref}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {(userTargets.allergies.length > 0 || userTargets.limitations.length > 0) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {userTargets.allergies.length > 0 && (
+                        <div className="p-3 bg-white rounded-lg shadow-sm border border-red-200">
+                          <p className="text-sm text-red-700 font-medium mb-2 flex items-center gap-2">
+                            <span>⚠️</span>
+                            {translations.dietaryAllergies || 'Food Allergies'}
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {userTargets.allergies.map((allergy, idx) => (
+                              <Badge key={idx} variant="outline" className="bg-red-50 border-red-200 text-red-700 text-xs">
+                                {allergy}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {userTargets.limitations.length > 0 && (
+                        <div className="p-3 bg-white rounded-lg shadow-sm border border-orange-200">
+                          <p className="text-sm text-orange-700 font-medium mb-2 flex items-center gap-2">
+                            <span>🚫</span>
+                            {translations.dietaryRestrictions || 'Dietary Restrictions'}
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {userTargets.limitations.map((limitation, idx) => (
+                              <Badge key={idx} variant="outline" className="bg-orange-50 border-orange-200 text-orange-700 text-xs">
+                                {limitation}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Menu Comparison */}
                 {menu && menu.totals && (
                   <div className="pt-4 border-t border-blue-200">
-                    <h4 className="text-lg font-semibold text-blue-800 mb-3 flex items-center gap-2">
+                    <h4 className="text-lg font-semibold text-blue-800 mb-4 flex items-center gap-2">
                       <span>📊</span>
                       {translations.targetVsGenerated || 'Target vs Generated Menu Comparison'}
                     </h4>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       {/* Calories Comparison */}
-                      <div className="p-3 bg-white rounded-lg border">
-                        <p className="text-xs text-gray-500 mb-1">{translations.calories || 'Calories'}</p>
-                        <div className="space-y-1">
+                      <div className="p-4 bg-white rounded-lg border border-blue-200">
+                        <p className="text-sm text-gray-600 font-medium mb-2">{translations.calories || 'Calories'}</p>
+                        <div className="space-y-2">
                           <div className="flex justify-between items-center">
                             <span className="text-sm text-blue-600">{translations.target || 'Target'}:</span>
                             <span className="font-bold text-blue-700">{userTargets.calories}</span>
@@ -1706,14 +1841,14 @@ const MenuCreate = () => {
                             <span className="text-sm text-green-600">{translations.generated || 'Generated'}:</span>
                             <span className="font-bold text-green-700">{menu.totals.calories}</span>
                           </div>
-                          <div className="flex justify-between items-center">
+                          <div className="flex justify-between items-center pt-1 border-t border-gray-100">
                             <span className="text-xs text-gray-500">{translations.difference || 'Difference'}:</span>
-                            <span className={`text-xs font-medium ${Math.abs(menu.totals.calories - userTargets.calories) <= userTargets.calories * 0.05
+                            <span className={`text-sm font-medium ${Math.abs(menu.totals.calories - userTargets.calories) <= userTargets.calories * 0.05
                                 ? 'text-green-600'
                                 : 'text-red-600'
                               }`}>
                               {`${menu.totals.calories - userTargets.calories > 0 ? '+' : ''}${((menu.totals.calories - userTargets.calories) / userTargets.calories * 100)
-                                  .toFixed(2)
+                                  .toFixed(1)
                                 }%`}
                             </span>
                           </div>
@@ -1721,9 +1856,9 @@ const MenuCreate = () => {
                       </div>
 
                       {/* Protein Comparison */}
-                      <div className="p-3 bg-white rounded-lg border">
-                        <p className="text-xs text-gray-500 mb-1">{translations.protein || 'Protein'} (g)</p>
-                        <div className="space-y-1">
+                      <div className="p-4 bg-white rounded-lg border border-blue-200">
+                        <p className="text-sm text-gray-600 font-medium mb-2">{translations.protein || 'Protein'} (g)</p>
+                        <div className="space-y-2">
                           <div className="flex justify-between items-center">
                             <span className="text-sm text-blue-600">Target:</span>
                             <span className="font-bold text-blue-700">{userTargets.macros.protein}</span>
@@ -1732,16 +1867,16 @@ const MenuCreate = () => {
                             <span className="text-sm text-green-600">Generated:</span>
                             <span className="font-bold text-green-700">{menu.totals.protein}</span>
                           </div>
-                          <div className="flex justify-between items-center">
+                          <div className="flex justify-between items-center pt-1 border-t border-gray-100">
                             <span className="text-xs text-gray-500">Difference:</span>
-                            <span className={`text-xs font-medium ${Math.abs(menu.totals.protein - userTargets.macros.protein) <= userTargets.macros.protein * 0.05
+                            <span className={`text-sm font-medium ${Math.abs(menu.totals.protein - userTargets.macros.protein) <= userTargets.macros.protein * 0.05
                                 ? 'text-green-600'
                                 : 'text-red-600'
                               }`}>
                               {`${menu.totals.protein - userTargets.macros.protein > 0 ? '+' : ''}${((menu.totals.protein - userTargets.macros.protein)
                                   / userTargets.macros.protein
                                   * 100
-                                ).toFixed(2)
+                                ).toFixed(1)
                                 }%`}
                             </span>
                           </div>
@@ -1749,9 +1884,9 @@ const MenuCreate = () => {
                       </div>
 
                       {/* Fat Comparison */}
-                      <div className="p-3 bg-white rounded-lg border">
-                        <p className="text-xs text-gray-500 mb-1">{translations.fat || 'Fat'} (g)</p>
-                        <div className="space-y-1">
+                      <div className="p-4 bg-white rounded-lg border border-blue-200">
+                        <p className="text-sm text-gray-600 font-medium mb-2">{translations.fat || 'Fat'} (g)</p>
+                        <div className="space-y-2">
                           <div className="flex justify-between items-center">
                             <span className="text-sm text-blue-600">{translations.target || 'Target'}:</span>
                             <span className="font-bold text-blue-700">{userTargets.macros.fat}</span>
@@ -1760,16 +1895,16 @@ const MenuCreate = () => {
                             <span className="text-sm text-green-600">{translations.generated || 'Generated'}:</span>
                             <span className="font-bold text-green-700">{menu.totals.fat}</span>
                           </div>
-                          <div className="flex justify-between items-center">
+                          <div className="flex justify-between items-center pt-1 border-t border-gray-100">
                             <span className="text-xs text-gray-500">{translations.difference || 'Difference'}:</span>
-                            <span className={`text-xs font-medium ${Math.abs(menu.totals.fat - userTargets.macros.fat) <= userTargets.macros.fat * 0.05
+                            <span className={`text-sm font-medium ${Math.abs(menu.totals.fat - userTargets.macros.fat) <= userTargets.macros.fat * 0.05
                                 ? 'text-green-600'
                                 : 'text-red-600'
                               }`}>
                               {`${menu.totals.fat - userTargets.macros.fat > 0 ? '+' : ''}${((menu.totals.fat - userTargets.macros.fat)
                                   / userTargets.macros.fat
                                   * 100
-                                ).toFixed(2)
+                                ).toFixed(1)
                                 }%`}
                             </span>
                           </div>
@@ -1777,9 +1912,9 @@ const MenuCreate = () => {
                       </div>
 
                       {/* Carbs Comparison */}
-                      <div className="p-3 bg-white rounded-lg border">
-                        <p className="text-xs text-gray-500 mb-1">{translations.carbs || 'Carbs'} (g)</p>
-                        <div className="space-y-1">
+                      <div className="p-4 bg-white rounded-lg border border-blue-200">
+                        <p className="text-sm text-gray-600 font-medium mb-2">{translations.carbs || 'Carbs'} (g)</p>
+                        <div className="space-y-2">
                           <div className="flex justify-between items-center">
                             <span className="text-sm text-blue-600">{translations.target || 'Target'}:</span>
                             <span className="font-bold text-blue-700">{userTargets.macros.carbs}</span>
@@ -1788,17 +1923,16 @@ const MenuCreate = () => {
                             <span className="text-sm text-green-600">{translations.generated || 'Generated'}:</span>
                             <span className="font-bold text-green-700">{menu.totals.carbs}</span>
                           </div>
-                          <div className="flex justify-between items-center">
+                          <div className="flex justify-between items-center pt-1 border-t border-gray-100">
                             <span className="text-xs text-gray-500">{translations.difference || 'Difference'}:</span>
-                            <span className={`text-xs font-medium ${Math.abs(menu.totals.carbs - userTargets.macros.carbs) <= userTargets.macros.carbs * 0.05
+                            <span className={`text-sm font-medium ${Math.abs(menu.totals.carbs - userTargets.macros.carbs) <= userTargets.macros.carbs * 0.05
                                 ? 'text-green-600'
                                 : 'text-red-600'
                               }`}>
-                              {`${menu.totals.carbs - userTargets.macros.carbs > 0 ? '+' : ''}${(
-                                  (menu.totals.carbs - userTargets.macros.carbs)
+                              {`${menu.totals.carbs - userTargets.macros.carbs > 0 ? '+' : ''}${((menu.totals.carbs - userTargets.macros.carbs)
                                   / userTargets.macros.carbs
                                   * 100
-                                ).toFixed(2)
+                                ).toFixed(1)
                                 }%`}
                             </span>
                           </div>
@@ -1807,29 +1941,41 @@ const MenuCreate = () => {
                     </div>
 
                     {/* Overall Accuracy Indicator */}
-                    <div className="mt-4 p-3 rounded-lg bg-gradient-to-r from-blue-50 to-green-50 border border-blue-200">
+                    <div className="mt-6 p-4 rounded-lg bg-gradient-to-r from-blue-50 to-green-50 border border-blue-200">
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-700">{translations.menuAccuracy || 'Menu Accuracy'}:</span>
-                        <div className="flex items-center gap-2">
+                        <span className="text-base font-medium text-gray-700">{translations.menuAccuracy || 'Menu Accuracy'}:</span>
+                        <div className="flex items-center gap-3">
                           {(() => {
-                            const caloriesAccurate = Math.abs(menu.totals.calories - userTargets.calories) <= userTargets.calories * 0.05;
-                            const proteinAccurate = Math.abs(menu.totals.protein - userTargets.macros.protein) <= userTargets.macros.protein * 0.05;
-                            const fatAccurate = Math.abs(menu.totals.fat - userTargets.macros.fat) <= userTargets.macros.fat * 0.05;
-                            const carbsAccurate = Math.abs(menu.totals.carbs - userTargets.macros.carbs) <= userTargets.macros.carbs * 0.05;
+                            // Calculate percentage differences for each metric
+                            const caloriesDiff = Math.abs((menu.totals.calories - userTargets.calories) / userTargets.calories * 100);
+                            const proteinDiff = Math.abs((menu.totals.protein - userTargets.macros.protein) / userTargets.macros.protein * 100);
+                            const fatDiff = Math.abs((menu.totals.fat - userTargets.macros.fat) / userTargets.macros.fat * 100);
+                            const carbsDiff = Math.abs((menu.totals.carbs - userTargets.macros.carbs) / userTargets.macros.carbs * 100);
 
-                            const accurateCount = [caloriesAccurate, proteinAccurate, fatAccurate, carbsAccurate].filter(Boolean).length;
-                            const accuracy = (accurateCount / 4) * 100;
+                            // Calculate accuracy based on how close each value is to target
+                            // Perfect accuracy (100%) when all differences are 0%
+                            // 0% accuracy when any difference is 50% or more
+                            const maxDiff = Math.max(caloriesDiff, proteinDiff, fatDiff, carbsDiff);
+                            const avgDiff = (caloriesDiff + proteinDiff + fatDiff + carbsDiff) / 4;
+                            
+                            // Calculate accuracy: 100% - (average difference * 2) to make it more sensitive
+                            // Cap at 100% and floor at 0%
+                            const accuracy = Math.max(0, Math.min(100, 100 - (avgDiff * 1.5)));
+
+                            // Count how many are within acceptable ranges
+                            const within5Percent = [caloriesDiff <= 5, proteinDiff <= 5, fatDiff <= 5, carbsDiff <= 5].filter(Boolean).length;
+                            const within10Percent = [caloriesDiff <= 10, proteinDiff <= 10, fatDiff <= 10, carbsDiff <= 10].filter(Boolean).length;
 
                             return (
                               <>
-                                <div className={`px-3 py-1 rounded-full text-sm font-medium ${accuracy >= 75 ? 'bg-green-100 text-green-700 border border-green-200' :
-                                    accuracy >= 50 ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
+                                <div className={`px-4 py-2 rounded-full text-base font-medium ${accuracy >= 80 ? 'bg-green-100 text-green-700 border border-green-200' :
+                                    accuracy >= 60 ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
                                       'bg-red-100 text-red-700 border border-red-200'
                                   }`}>
                                   {Math.round(accuracy)}% {translations.accurate || 'Accurate'}
                                 </div>
-                                <span className="text-xs text-gray-500">
-                                  ({accurateCount}/4 {translations.within5Percent || 'within ±5%'})
+                                <span className="text-sm text-gray-500">
+                                  ({within5Percent}/4 {translations.within5Percent || 'within ±5%'}, {within10Percent}/4 within ±10%)
                                 </span>
                               </>
                             );
@@ -1847,27 +1993,7 @@ const MenuCreate = () => {
         </Card>
       )}
 
-              <Card>
-          <CardHeader>
-            <CardTitle>{translations.generateMenu || 'Generate a New Menu Plan'}</CardTitle>
-            <CardDescription>
-              {translations.generateMenuDescription || 'Click the button below to generate a personalized menu plan based on your preferences.'}
-            </CardDescription>
-          </CardHeader>
-        <CardContent className="flex flex-col items-center py-6">
-          <Button
-            onClick={fetchMenu}
-            disabled={loading || !selectedUser}
-            className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400"
-          >
-            {loading ? (translations.generating || 'Generating...') : (translations.generateMenu || 'Generate Menu')}
-          </Button>
-
-          {/* Water Bar Loading Animation */}
-          {loading && <WaterBarLoading />}
-        </CardContent>
-      </Card>
-
+             
       {menu && menu.meals && menu.meals.length > 0 && (
         <>
           {enrichingUPC && (

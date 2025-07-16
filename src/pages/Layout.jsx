@@ -47,7 +47,13 @@ export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
-  
+  const [hasOpenDialog, setHasOpenDialog] = useState(false);
+  const [clients, setClients] = useState([]);
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [error, setError] = useState(null);
+  const [userData, setUserData] = useState(null);
+  const dataLoadedRef = React.useRef(false);
+
   // Debug sidebar state changes
   React.useEffect(() => {
     console.log('Sidebar state changed to:', sidebarOpen, 'isMobile:', isMobile, 'language:', language);
@@ -63,11 +69,38 @@ export default function Layout() {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
-  const [clients, setClients] = useState([]);
-  const [selectedClient, setSelectedClient] = useState(null);
-  const [error, setError] = useState(null);
-  const [userData, setUserData] = useState(null);
-  const dataLoadedRef = React.useRef(false);
+
+  // Check if any dialog is open and close sidebar if needed
+  React.useEffect(() => {
+    const checkForDialogs = () => {
+      const dialogs = document.querySelectorAll('[role="dialog"], .dialog, [data-state="open"]');
+      const hasOpenDialog = Array.from(dialogs).some(dialog => {
+        const rect = dialog.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+      
+      setHasOpenDialog(hasOpenDialog);
+      
+      if (hasOpenDialog && sidebarOpen) {
+        console.log('Dialog detected, closing sidebar');
+        setSidebarOpen(false);
+      }
+    };
+
+    // Check immediately
+    checkForDialogs();
+    
+    // Set up observer to watch for dialog changes
+    const observer = new MutationObserver(checkForDialogs);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style', 'data-state']
+    });
+
+    return () => observer.disconnect();
+  }, [sidebarOpen]);
 
   // Add visibility change listener
   React.useEffect(() => {
@@ -270,9 +303,9 @@ export default function Layout() {
       <div className={cn(
         "fixed inset-y-0 w-64 md:w-72 glass-premium bg-white/90 border-r border-border/40 shadow-xl backdrop-blur-2xl z-[60] transition-transform duration-300 ease-out mobile-sidebar",
         {
-          'translate-x-0': sidebarOpen || !isMobile, // Show on desktop or when open on mobile
-          '-translate-x-full': !sidebarOpen && isMobile && language === 'en', // Hide on mobile when closed (LTR)
-          'translate-x-full': !sidebarOpen && isMobile && language === 'he', // Hide on mobile when closed (RTL)
+          'translate-x-0': (sidebarOpen || !isMobile) && !hasOpenDialog, // Show on desktop or when open on mobile, but not when dialog is open
+          '-translate-x-full': (!sidebarOpen && isMobile && language === 'en') || (hasOpenDialog && language === 'en'), // Hide on mobile when closed (LTR) or when dialog is open (LTR)
+          'translate-x-full': (!sidebarOpen && isMobile && language === 'he') || (hasOpenDialog && language === 'he'), // Hide on mobile when closed (RTL) or when dialog is open (RTL)
           'left-0': language === 'en',
           'right-0': language === 'he',
           'border-r': language === 'en',
