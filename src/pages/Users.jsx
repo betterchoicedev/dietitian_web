@@ -97,7 +97,8 @@ export default function Clients() {
     Activity_level: '',
     goal: '',
     number_of_meals: '',
-    client_preference: ''
+    client_preference: '',
+    region: 'israel'
   });
 
   // Add macro slider state
@@ -323,7 +324,8 @@ export default function Clients() {
       Activity_level: '',
       goal: '',
       number_of_meals: '5',
-      client_preference: ''
+      client_preference: '',
+      region: 'israel'
     });
     // Reset macro sliders to 0 when adding new user
     setMacroSliders({ protein: 0, carbs: 0, fat: 0 });
@@ -368,7 +370,8 @@ export default function Clients() {
       Activity_level: client.Activity_level || '',
       goal: client.goal || '',
       number_of_meals: client.number_of_meals?.toString() || '5',
-      client_preference: typeof client.client_preference === 'object' ? JSON.stringify(client.client_preference, null, 2) : client.client_preference || ''
+      client_preference: typeof client.client_preference === 'object' ? JSON.stringify(client.client_preference, null, 2) : client.client_preference || '',
+      region: client.region || 'israel'
     });
     
     // Set macro sliders to match the client's macros
@@ -844,6 +847,8 @@ export default function Clients() {
                         {getSortIcon('dailyTotalCalories')}
                       </div>
                     </TableHead>
+                    <TableHead>{translations.region}</TableHead>
+                    <TableHead>{translations.meals}</TableHead>
                     <TableHead className="text-right">{translations.actions}</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -958,6 +963,16 @@ export default function Clients() {
                               <span className="text-gray-400 text-sm">{translations.noMacrosSet}</span>
                             )}
                           </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-xs">
+                              {client.region || '—'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="secondary" className="text-xs">
+                              {client.number_of_meals || '—'} {translations.meals}
+                            </Badge>
+                          </TableCell>
                           <TableCell className="text-right">
                             <Button
                               variant="ghost"
@@ -973,7 +988,7 @@ export default function Clients() {
                     })
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-6 text-gray-500">
+                      <TableCell colSpan={10} className="text-center py-6 text-gray-500">
                         {searchTerm ? translations.noClientsFound : translations.noClientsFoundGeneral}
                       </TableCell>
                     </TableRow>
@@ -1147,10 +1162,10 @@ export default function Clients() {
               </div>
 
               {/* Nutrition Information */}
-              <div className="space-y-4">
+              <div className="space-y-6">
                 <h3 className="text-lg font-medium">{translations.nutritionInformation}</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  <div className="space-y-2">
                     <Label htmlFor="dailyTotalCalories">{translations.dailyTotalCalories}</Label>
                     <Input
                       id="dailyTotalCalories"
@@ -1160,7 +1175,42 @@ export default function Clients() {
                         setFormData({ ...formData, dailyTotalCalories: e.target.value });
                         setMacroSliders({ protein: 0, carbs: 0, fat: 0 }); // Reset macros on calorie change
                       }}
+                      placeholder="2000"
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="number_of_meals">{translations.numberOfMeals}</Label>
+                    <Select 
+                      value={formData.number_of_meals} 
+                      onValueChange={(value) => setFormData({...formData, number_of_meals: value})}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder={translations.selectNumberOfMeals} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="3">3 {translations.meals}</SelectItem>
+                        <SelectItem value="4">4 {translations.meals}</SelectItem>
+                        <SelectItem value="5">5 {translations.meals}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="region">{translations.region}</Label>
+                    <Select 
+                      value={formData.region} 
+                      onValueChange={(value) => setFormData({...formData, region: value})}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder={translations.selectRegion} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="israel">{translations.israel}</SelectItem>
+                        <SelectItem value="us">{translations.unitedStates}</SelectItem>
+                        <SelectItem value="uk">{translations.unitedKingdom}</SelectItem>
+                        <SelectItem value="canada">{translations.canada}</SelectItem>
+                        <SelectItem value="australia">{translations.australia}</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <div className="space-y-2">

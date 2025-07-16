@@ -419,7 +419,7 @@ const MenuCreate = () => {
 
 
   async function downloadPdf(menu) {
-    const response = await fetch('http://127.0.0.1:5000/api/menu-pdf', {
+    const response = await fetch('https://dietitian-be.azurewebsites.net/api/menu-pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ menu })
