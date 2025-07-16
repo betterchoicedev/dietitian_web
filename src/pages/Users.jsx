@@ -238,8 +238,9 @@ export default function Clients() {
   useEffect(() => {
     let cals = parseInt(formData.dailyTotalCalories) || 0;
     if (cals > 0) {
-      // If all macros are empty, initialize to 30% protein, 40% carbs, 30% fat
-      if (!macroSliders.protein && !macroSliders.carbs && !macroSliders.fat) {
+      // If all macros are empty or 0, initialize to 30% protein, 40% carbs, 30% fat
+      if ((!macroSliders.protein && !macroSliders.carbs && !macroSliders.fat) || 
+          (macroSliders.protein === 0 && macroSliders.carbs === 0 && macroSliders.fat === 0)) {
         let p = Math.round((0.3 * cals) / 4);
         let c = Math.round((0.4 * cals) / 4);
         let f = Math.round((0.3 * cals) / 9);
@@ -261,6 +262,13 @@ export default function Clients() {
   useEffect(() => {
     setFormData(fd => ({ ...fd, macros: macroSliders }));
   }, [macroSliders]);
+
+  // Reset macro sliders when dialog opens for new user
+  useEffect(() => {
+    if (dialogOpen && !currentClient) {
+      setMacroSliders({ protein: 0, carbs: 0, fat: 0 });
+    }
+  }, [dialogOpen, currentClient]);
 
   const loadClients = async () => {
     setLoading(true);
@@ -317,6 +325,8 @@ export default function Clients() {
       number_of_meals: '5',
       client_preference: ''
     });
+    // Reset macro sliders to 0 when adding new user
+    setMacroSliders({ protein: 0, carbs: 0, fat: 0 });
   };
 
   const handleAdd = () => {
@@ -327,6 +337,12 @@ export default function Clients() {
 
   const handleEdit = (client) => {
     setCurrentClient(client);
+    
+    // Parse macros for sliders
+    const proteinValue = client.macros?.protein ? parseInt(client.macros.protein.toString().replace('g', '')) || 0 : 0;
+    const carbsValue = client.macros?.carbs ? parseInt(client.macros.carbs.toString().replace('g', '')) || 0 : 0;
+    const fatValue = client.macros?.fat ? parseInt(client.macros.fat.toString().replace('g', '')) || 0 : 0;
+    
     setFormData({
       user_code: client.user_code || generateUniqueCode(),
       full_name: client.full_name || '',
@@ -354,6 +370,9 @@ export default function Clients() {
       number_of_meals: client.number_of_meals?.toString() || '5',
       client_preference: typeof client.client_preference === 'object' ? JSON.stringify(client.client_preference, null, 2) : client.client_preference || ''
     });
+    
+    // Set macro sliders to match the client's macros
+    setMacroSliders({ protein: proteinValue, carbs: carbsValue, fat: fatValue });
     setDialogOpen(true);
   };
 
@@ -410,18 +429,37 @@ export default function Clients() {
 
   const parseMacrosField = (protein, carbs, fat) => {
     const result = {};
-    if (protein && typeof protein === 'string' && protein.trim()) {
-      const p = protein.trim();
-      result.protein = p.endsWith('g') ? p : `${p}g`;
+    
+    // Handle protein
+    if (protein) {
+      if (typeof protein === 'number' && protein > 0) {
+        result.protein = `${protein}g`;
+      } else if (typeof protein === 'string' && protein.trim()) {
+        const p = protein.trim();
+        result.protein = p.endsWith('g') ? p : `${p}g`;
+      }
     }
-    if (carbs && typeof carbs === 'string' && carbs.trim()) {
-      const c = carbs.trim();
-      result.carbs = c.endsWith('g') ? c : `${c}g`;
+    
+    // Handle carbs
+    if (carbs) {
+      if (typeof carbs === 'number' && carbs > 0) {
+        result.carbs = `${carbs}g`;
+      } else if (typeof carbs === 'string' && carbs.trim()) {
+        const c = carbs.trim();
+        result.carbs = c.endsWith('g') ? c : `${c}g`;
+      }
     }
-    if (fat && typeof fat === 'string' && fat.trim()) {
-      const f = fat.trim();
-      result.fat = f.endsWith('g') ? f : `${f}g`;
+    
+    // Handle fat
+    if (fat) {
+      if (typeof fat === 'number' && fat > 0) {
+        result.fat = `${fat}g`;
+      } else if (typeof fat === 'string' && fat.trim()) {
+        const f = fat.trim();
+        result.fat = f.endsWith('g') ? f : `${f}g`;
+      }
     }
+    
     return Object.keys(result).length > 0 ? result : null;
   };
 
@@ -449,10 +487,16 @@ export default function Clients() {
         number_of_meals: formData.number_of_meals ? parseInt(formData.number_of_meals) : 5,
         food_allergies: parseArrayField(formData.food_allergies),
         food_limitations: parseJsonField(formData.food_limitations, 'array'),
-        macros: parseMacrosField(formData.macros.protein, formData.macros.carbs, formData.macros.fat),
+        macros: parseMacrosField(macroSliders.protein, macroSliders.carbs, macroSliders.fat),
         recommendations: parseJsonField(formData.recommendations, 'recommendations'),
         client_preference: parseJsonField(formData.client_preference, 'array')
       };
+
+      console.log('Submitting macros:', {
+        macroSliders,
+        parsedMacros: parseMacrosField(macroSliders.protein, macroSliders.carbs, macroSliders.fat),
+        submitDataMacros: submitData.macros
+      });
 
       if (currentClient) {
         await ChatUser.update(currentClient.user_code, submitData);
