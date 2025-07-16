@@ -46,6 +46,23 @@ export default function Layout() {
   const { language, toggleLanguage, translations } = useLanguage();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
+  
+  // Debug sidebar state changes
+  React.useEffect(() => {
+    console.log('Sidebar state changed to:', sidebarOpen, 'isMobile:', isMobile);
+  }, [sidebarOpen, isMobile]);
+  
+  // Check if mobile
+  React.useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
   const [clients, setClients] = useState([]);
   const [selectedClient, setSelectedClient] = useState(null);
   const [error, setError] = useState(null);
@@ -159,7 +176,11 @@ export default function Layout() {
             variant="ghost"
             className="md:hidden hover:bg-primary/10 mr-2"
             size="icon"
-            onClick={() => setSidebarOpen(true)}
+            onClick={() => {
+              console.log('Open button clicked, current sidebarOpen:', sidebarOpen);
+              setSidebarOpen(true);
+              console.log('setSidebarOpen(true) called');
+            }}
           >
             <MenuIcon className="h-5 w-5" />
           </Button>
@@ -237,19 +258,20 @@ export default function Layout() {
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/60 z-40 md:hidden backdrop-blur-sm animate-scale-in"
-          onClick={() => setSidebarOpen(false)}
-          onTouchStart={(e) => e.preventDefault()}
+          className="fixed inset-0 bg-black/60 z-50 md:hidden backdrop-blur-sm"
+          onClick={() => {
+            console.log('Overlay clicked, closing sidebar');
+            setSidebarOpen(false);
+          }}
         />
       )}
 
       {/* Sidebar */}
       <div className={cn(
-        "fixed inset-y-0 w-64 md:w-72 glass-premium bg-white/90 border-r border-border/40 shadow-xl backdrop-blur-2xl z-50 transition-transform duration-300 ease-out",
+        "fixed inset-y-0 w-64 md:w-72 glass-premium bg-white/90 border-r border-border/40 shadow-xl backdrop-blur-2xl z-[60] transition-transform duration-300 ease-out",
         {
-          'translate-x-0': sidebarOpen,
-          '-translate-x-full': !sidebarOpen,
-          'md:translate-x-0': true,
+          'translate-x-0': sidebarOpen || !isMobile, // Show on desktop or when open on mobile
+          '-translate-x-full': !sidebarOpen && isMobile, // Hide on mobile when closed
           'left-0': language === 'en',
           'right-0': language === 'he',
           'border-r': language === 'en',
@@ -268,14 +290,17 @@ export default function Layout() {
               <p className="text-xs text-muted-foreground/60">Professional Platform</p>
             </div>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="md:hidden hover:bg-destructive/10 hover:text-destructive rounded-lg w-10 h-10"
-            onClick={() => setSidebarOpen(false)}
+          <button
+            className="md:hidden p-2 rounded-lg hover:bg-red-100 hover:text-red-600 transition-colors duration-200"
+            onClick={() => {
+              console.log('Close button clicked, current sidebarOpen:', sidebarOpen);
+              setSidebarOpen(false);
+              console.log('setSidebarOpen(false) called');
+            }}
+            aria-label="Close sidebar"
           >
             <X className="h-5 w-5" />
-          </Button>
+          </button>
         </div>
         
         <nav className="space-y-1 p-4 pb-8 md:pb-4">
