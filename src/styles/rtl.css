@@ -40,11 +40,7 @@
   transform-origin: top right;
 }
 
-/* Remove any transform overrides that might affect the sidebar */
-[dir="rtl"] .md\:translate-x-0,
-[dir="ltr"] .md\:translate-x-0 {
-  transform: translateX(0) !important;
-}
+/* Sidebar transforms handled in React component */
 
 /* Ensure proper sidebar positioning in both directions */
 [dir="rtl"] .right-0 {

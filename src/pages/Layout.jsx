@@ -50,8 +50,8 @@ export default function Layout() {
   
   // Debug sidebar state changes
   React.useEffect(() => {
-    console.log('Sidebar state changed to:', sidebarOpen, 'isMobile:', isMobile);
-  }, [sidebarOpen, isMobile]);
+    console.log('Sidebar state changed to:', sidebarOpen, 'isMobile:', isMobile, 'language:', language);
+  }, [sidebarOpen, isMobile, language]);
   
   // Check if mobile
   React.useEffect(() => {
@@ -268,10 +268,11 @@ export default function Layout() {
 
       {/* Sidebar */}
       <div className={cn(
-        "fixed inset-y-0 w-64 md:w-72 glass-premium bg-white/90 border-r border-border/40 shadow-xl backdrop-blur-2xl z-[60] transition-transform duration-300 ease-out",
+        "fixed inset-y-0 w-64 md:w-72 glass-premium bg-white/90 border-r border-border/40 shadow-xl backdrop-blur-2xl z-[60] transition-transform duration-300 ease-out mobile-sidebar",
         {
           'translate-x-0': sidebarOpen || !isMobile, // Show on desktop or when open on mobile
-          '-translate-x-full': !sidebarOpen && isMobile, // Hide on mobile when closed
+          '-translate-x-full': !sidebarOpen && isMobile && language === 'en', // Hide on mobile when closed (LTR)
+          'translate-x-full': !sidebarOpen && isMobile && language === 'he', // Hide on mobile when closed (RTL)
           'left-0': language === 'en',
           'right-0': language === 'he',
           'border-r': language === 'en',
@@ -293,7 +294,7 @@ export default function Layout() {
           <button
             className="md:hidden p-2 rounded-lg hover:bg-red-100 hover:text-red-600 transition-colors duration-200"
             onClick={() => {
-              console.log('Close button clicked, current sidebarOpen:', sidebarOpen);
+              console.log('Close button clicked, current sidebarOpen:', sidebarOpen, 'language:', language, 'isMobile:', isMobile);
               setSidebarOpen(false);
               console.log('setSidebarOpen(false) called');
             }}
@@ -364,6 +365,10 @@ export default function Layout() {
           'md:pr-64 xl:pr-72': language === 'he'
         }
       )}>
+        {/* Mobile content overlay when sidebar is open */}
+        {sidebarOpen && isMobile && (
+          <div className="fixed inset-0 bg-black/20 z-30 md:hidden" onClick={() => setSidebarOpen(false)} />
+        )}
         <div className="container mx-auto p-4 md:p-6 max-w-7xl">
           <div className="animate-slide-up">
             <Outlet />
