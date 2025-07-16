@@ -131,7 +131,6 @@ export async function getIngredientSuggestions(query) {
     return result.recordset.map(row => ({
       english: row.english_name,
       hebrew: row.hebrew_name,
-      household_measure: '',
       Energy: row.Energy,
       Protein: row.Protein,
       Total_lipid__fat_: row.Total_lipid__fat_,

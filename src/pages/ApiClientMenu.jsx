@@ -44,7 +44,7 @@ export default function ApiClientMenu() {
       const client = clients[0];
       
       // Find all menus for this client, sorted by created date (newest first)
-      const menus = await Menu.filter({ user_code: client.code }, '-created_date');
+      const menus = await Menu.filter({ user_code: client.code }, '-created_at');
       
       if (menus.length === 0) {
         setError(`No menu plans found for client ${client.full_name} (${client.code})`);
@@ -106,7 +106,7 @@ export default function ApiClientMenu() {
       const client = clients[0];
       
       // Find all menus for this client, sorted by created date (newest first)
-      const menus = await Menu.filter({ user_code: client.code }, '-created_date');
+      const menus = await Menu.filter({ user_code: client.code }, '-created_at');
       
       if (menus.length === 0) {
         return {

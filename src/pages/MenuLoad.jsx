@@ -168,7 +168,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
       
       // Check if this is from the enhanced API (MenuCreate style)
       if (suggestion.hebrew && suggestion.english) {
-        const response = await fetch(`http://127.0.0.1:5000/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`);
+        const response = await fetch(`https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`);
         if (response.ok) {
           const nutritionData = await response.json();
           updatedValues = {
@@ -301,6 +301,16 @@ const MenuLoad = () => {
   const [filterUserCode, setFilterUserCode] = useState('all');
   const [userCodes, setUserCodes] = useState([]);
   const [isEditing, setIsEditing] = useState(false);
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [selectedMenuForStatus, setSelectedMenuForStatus] = useState(null);
+  const [statusForm, setStatusForm] = useState({
+    status: 'draft',
+    active_from: '',
+    active_until: ''
+  });
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [checkingExpired, setCheckingExpired] = useState(false);
+  const [expiredCheckResult, setExpiredCheckResult] = useState(null);
   const navigate = useNavigate();
   const { translations } = useLanguage();
 
@@ -438,11 +448,14 @@ const MenuLoad = () => {
     setLoadingMenus(true);
     setError(null);
     try {
+      // First, check and update any expired menus
+      await checkAndUpdateExpiredMenus();
+      
       let loadedMenus = [];
       try {
         loadedMenus = await Menu.filter({ 
           record_type: 'meal_plan'
-        }, '-created_date');
+        }, '-created_at');
       } catch (fetchError) {
         console.error("Error loading menus:", fetchError);
         const allMenus = await Menu.list();
@@ -470,7 +483,6 @@ const MenuLoad = () => {
   const filteredMenus = menus.filter(menu => {
     const matchesSearch = 
       (menu.meal_plan_name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-       menu.menu_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
        menu.user_code?.toLowerCase().includes(searchTerm.toLowerCase()));
     
     const matchesUserCode = filterUserCode === 'all' || menu.user_code === filterUserCode;
@@ -486,6 +498,8 @@ const MenuLoad = () => {
         return 'bg-blue-100 text-blue-800 border-blue-200';
       case 'draft':
         return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      case 'expired':
+        return 'bg-red-100 text-red-800 border-red-200';
       default:
         return 'bg-gray-100 text-gray-800 border-gray-200';
     }
@@ -648,6 +662,152 @@ const MenuLoad = () => {
       setError('Failed to save menu: ' + error.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleStatusChange = (menu) => {
+    setSelectedMenuForStatus(menu);
+    setStatusForm({
+      status: menu.status || 'draft',
+      active_from: menu.active_from ? new Date(menu.active_from).toISOString().split('T')[0] : '',
+      active_until: menu.active_until ? new Date(menu.active_until).toISOString().split('T')[0] : ''
+    });
+    setShowStatusModal(true);
+  };
+
+  const handleUpdateStatus = async () => {
+    if (!selectedMenuForStatus) return;
+
+    try {
+      setUpdatingStatus(true);
+      setError(null);
+
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !user) {
+        setError('You must be logged in to update menu status');
+        return;
+      }
+
+      const updateData = {
+        status: statusForm.status,
+        ...(statusForm.active_from && { active_from: statusForm.active_from }),
+        ...(statusForm.active_until && { active_until: statusForm.active_until })
+      };
+
+      // If status is being set to draft or expired, clear active dates
+      if (statusForm.status === 'draft' || statusForm.status === 'expired') {
+        updateData.active_from = null;
+        updateData.active_until = null;
+      }
+
+      const result = await Menu.update(selectedMenuForStatus.id, updateData);
+      console.log('✅ Menu status updated successfully:', result);
+      
+      alert('Menu status updated successfully!');
+      setShowStatusModal(false);
+      setSelectedMenuForStatus(null);
+      loadMenus(); // Refresh the list
+      
+    } catch (error) {
+      console.error('Error updating menu status:', error);
+      setError('Failed to update menu status: ' + error.message);
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      return 'Invalid Date';
+    }
+  };
+
+  // Check and update expired menus
+  const checkAndUpdateExpiredMenus = async () => {
+    try {
+      setCheckingExpired(true);
+      setExpiredCheckResult(null);
+      setError(null);
+      
+      const now = new Date().toISOString();
+      
+      // Find all active menus that have expired
+      const { data: expiredMenus, error } = await supabase
+        .from('meal_plans_and_schemas')
+        .select('id, meal_plan_name, active_until')
+        .eq('status', 'active')
+        .not('active_until', 'is', null)
+        .lt('active_until', now);
+
+      if (error) {
+        console.error('Error checking for expired menus:', error);
+        setError('Failed to check for expired menus: ' + error.message);
+        return;
+      }
+
+      if (expiredMenus && expiredMenus.length > 0) {
+        console.log(`Found ${expiredMenus.length} expired menus:`, expiredMenus);
+        
+        let updatedCount = 0;
+        let errorCount = 0;
+        
+        // Update each expired menu to 'expired' status
+        for (const menu of expiredMenus) {
+          const updateData = {
+            status: 'expired',
+            active_until: null, // Clear the active_until date
+            updated_at: new Date().toISOString()
+          };
+
+          const { error: updateError } = await supabase
+            .from('meal_plans_and_schemas')
+            .update(updateData)
+            .eq('id', menu.id);
+
+          if (updateError) {
+            console.error(`Error updating expired menu ${menu.id}:`, updateError);
+            errorCount++;
+          } else {
+            console.log(`✅ Updated expired menu: ${menu.meal_plan_name}`);
+            updatedCount++;
+          }
+        }
+
+        // Set result message
+        setExpiredCheckResult({
+          found: expiredMenus.length,
+          updated: updatedCount,
+          errors: errorCount,
+          menus: expiredMenus.map(m => m.meal_plan_name)
+        });
+
+        // Refresh the menu list to show updated statuses
+        if (updatedCount > 0) {
+          loadMenus();
+        }
+      } else {
+        setExpiredCheckResult({
+          found: 0,
+          updated: 0,
+          errors: 0,
+          menus: []
+        });
+      }
+    } catch (error) {
+      console.error('Error in checkAndUpdateExpiredMenus:', error);
+      setError('Failed to check expired menus: ' + error.message);
+    } finally {
+      setCheckingExpired(false);
     }
   };
 
@@ -867,11 +1027,42 @@ const MenuLoad = () => {
         </Alert>
       )}
 
+      {expiredCheckResult && (
+        <Alert variant={expiredCheckResult.found > 0 ? "default" : "secondary"}>
+          <AlertTitle>
+            {expiredCheckResult.found > 0 ? 'Expired Menus Found' : 'No Expired Menus'}
+          </AlertTitle>
+          <AlertDescription>
+            {expiredCheckResult.found > 0 ? (
+              <div className="space-y-2">
+                <p>Found {expiredCheckResult.found} expired menu(s).</p>
+                <p>Successfully updated {expiredCheckResult.updated} menu(s) to expired status.</p>
+                {expiredCheckResult.errors > 0 && (
+                  <p className="text-red-600">Failed to update {expiredCheckResult.errors} menu(s).</p>
+                )}
+                {expiredCheckResult.menus.length > 0 && (
+                  <div>
+                    <p className="font-medium">Updated menus:</p>
+                    <ul className="list-disc list-inside text-sm">
+                      {expiredCheckResult.menus.map((name, idx) => (
+                        <li key={idx}>{name}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p>No expired menus found. All active menus are still within their active period.</p>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-4">
         <div className="flex items-center space-x-2 w-full sm:w-auto">
           <Search className="w-5 h-5 text-gray-400" />
           <Input
-            placeholder={translations.searchMenus || "Search by name, menu code, or client code..."}
+            placeholder={translations.searchMenus || "Search by name or client code..."}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="flex-1"
@@ -892,6 +1083,20 @@ const MenuLoad = () => {
             </SelectContent>
           </Select>
         </div>
+
+        <Button
+          variant="outline"
+          onClick={checkAndUpdateExpiredMenus}
+          disabled={checkingExpired}
+          className="border-orange-300 text-orange-700 hover:bg-orange-50"
+        >
+          {checkingExpired ? (
+            <Loader className="animate-spin h-4 w-4 mr-2" />
+          ) : (
+            <span className="text-sm mr-2">⏰</span>
+          )}
+          {checkingExpired ? (translations.checking || 'Checking...') : (translations.checkExpiredMenus || 'Check Expired Menus')}
+        </Button>
       </div>
 
       {loadingMenus ? (
@@ -924,14 +1129,16 @@ const MenuLoad = () => {
                   className={getStatusColor(menu.status)}
                 >
                   {menu.status === 'published' ? (translations.published || 'Published') : 
-                   menu.status === 'active' ? (translations.active || 'Active') : (translations.draft || 'Draft')}
+                   menu.status === 'active' ? (translations.active || 'Active') : 
+                   menu.status === 'expired' ? (translations.expired || 'Expired') :
+                   (translations.draft || 'Draft')}
                 </Badge>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
-                                      <p className="text-gray-500">{translations.targetCalories || 'Total Calories'}</p>
-                  <p className="font-medium">{menu.daily_total_calories || 0} {translations.calories || 'kcal'}</p>
+                    <p className="text-gray-500">{translations.targetCalories || 'Total Calories'}</p>
+                    <p className="font-medium">{menu.daily_total_calories || 0} {translations.calories || 'kcal'}</p>
                   </div>
                   <div>
                     <p className="text-gray-500">{translations.protein || 'Protein'}</p>
@@ -947,16 +1154,41 @@ const MenuLoad = () => {
                   </div>
                 </div>
 
-                <div className="pt-2 border-t">
+                {/* Timestamps */}
+                <div className="pt-2 border-t space-y-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500">{translations.menuCode || 'Menu Code'}:</span>
-                    <span className="text-xs font-mono bg-gray-100 px-2 py-1 rounded">
-                      {menu.menu_code || (translations.notAvailable || 'N/A')}
+                    <span className="text-xs text-gray-500">{translations.created || 'Created'}:</span>
+                    <span className="text-xs font-medium">
+                      {formatDate(menu.created_at)}
                     </span>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500">{translations.updated || 'Updated'}:</span>
+                    <span className="text-xs font-medium">
+                      {formatDate(menu.updated_at)}
+                    </span>
+                  </div>
+                  {menu.active_from && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">{translations.activeFrom || 'Active From'}:</span>
+                      <span className="text-xs font-medium text-green-600">
+                        {formatDate(menu.active_from)}
+                      </span>
+                    </div>
+                  )}
+                  {menu.active_until && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">{translations.activeUntil || 'Active Until'}:</span>
+                      <span className="text-xs font-medium text-orange-600">
+                        {formatDate(menu.active_until)}
+                      </span>
+                    </div>
+                  )}
                 </div>
+
+
                 
-                <div className="pt-2">
+                <div className="pt-2 space-y-2">
                   <Button 
                     className="w-full bg-green-600 hover:bg-green-700"
                     onClick={(e) => {
@@ -966,6 +1198,18 @@ const MenuLoad = () => {
                   >
                     <Edit className="h-4 w-4 mr-2" />
                     {translations.loadAndEditMenu || 'Load & Edit Menu'}
+                  </Button>
+                  
+                  <Button 
+                    variant="outline"
+                    className="w-full border-blue-300 text-blue-700 hover:bg-blue-50"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleStatusChange(menu);
+                    }}
+                  >
+                    <span className="text-sm">⚙️</span>
+                    {translations.manageStatus || 'Manage Status'}
                   </Button>
                 </div>
               </CardContent>
@@ -986,6 +1230,101 @@ const MenuLoad = () => {
               </Card>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Status Management Modal */}
+      {showStatusModal && selectedMenuForStatus && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold mb-4">
+              {translations.manageMenuStatus || 'Manage Menu Status'}
+            </h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {translations.menuName || 'Menu Name'}
+                </label>
+                <p className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
+                  {selectedMenuForStatus.meal_plan_name}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {translations.status || 'Status'}
+                </label>
+                <Select 
+                  value={statusForm.status} 
+                  onValueChange={(value) => setStatusForm(prev => ({ ...prev, status: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="draft">{translations.draft || 'Draft'}</SelectItem>
+                    <SelectItem value="active">{translations.active || 'Active'}</SelectItem>
+                    <SelectItem value="published">{translations.published || 'Published'}</SelectItem>
+                    <SelectItem value="expired">{translations.expired || 'Expired'}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {statusForm.status === 'active' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      {translations.activeFrom || 'Active From'}
+                    </label>
+                    <Input
+                      type="date"
+                      value={statusForm.active_from}
+                      onChange={(e) => setStatusForm(prev => ({ ...prev, active_from: e.target.value }))}
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      {translations.activeUntil || 'Active Until'} ({translations.optional || 'Optional'})
+                    </label>
+                    <Input
+                      type="date"
+                      value={statusForm.active_until}
+                      onChange={(e) => setStatusForm(prev => ({ ...prev, active_until: e.target.value }))}
+                      className="w-full"
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="flex gap-3 pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowStatusModal(false);
+                    setSelectedMenuForStatus(null);
+                  }}
+                  className="flex-1"
+                >
+                  {translations.cancel || 'Cancel'}
+                </Button>
+                <Button
+                  onClick={handleUpdateStatus}
+                  disabled={updatingStatus}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700"
+                >
+                  {updatingStatus ? (
+                    <Loader className="animate-spin h-4 w-4 mr-2" />
+                  ) : (
+                    <span className="text-sm">💾</span>
+                  )}
+                  {updatingStatus ? (translations.updating || 'Updating...') : (translations.updateStatus || 'Update Status')}
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

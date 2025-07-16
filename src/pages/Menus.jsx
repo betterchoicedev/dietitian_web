@@ -95,7 +95,7 @@ export default function Menus() {
         loadedMenus = await Menu.filter({ 
           record_type: 'meal_plan',
           dietitian_id: userData.id 
-        }, '-created_date');
+        }, '-created_at');
       } catch (fetchError) {
         console.error("Error in initial menu fetch:", fetchError);
         try {

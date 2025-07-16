@@ -102,8 +102,8 @@ export default function Clients() {
             : b.full_name.localeCompare(a.full_name);
         } else if (sortBy === 'date') {
           return sortDirection === 'asc'
-            ? new Date(a.created_date) - new Date(b.created_date)
-            : new Date(b.created_date) - new Date(a.created_date);
+                    ? new Date(a.created_at) - new Date(b.created_at)
+        : new Date(b.created_at) - new Date(a.created_at);
         }
         return 0;
       });

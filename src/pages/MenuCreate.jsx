@@ -109,7 +109,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
     setIsLoading(true);
     try {
-      const url = `sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/suggestions?query=${encodeURIComponent(query)}`;
+      const url = `https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/suggestions?query=${encodeURIComponent(query)}`;
       console.log('🔍 Fetching suggestions from:', url);
       
       const response = await fetch(url);
@@ -171,7 +171,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
   const handleSelect = async (suggestion) => {
     console.log('🔍 handleSelect called with suggestion:', suggestion);
     try {
-      const url = `sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`;
+      const url = `https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`;
       console.log('🌐 Fetching from URL:', url);
       
       const response = await fetch(url);
@@ -758,7 +758,7 @@ const MenuCreate = () => {
       setProgressStep(`🔍 Looking up ${uniqueIngredients.length} new ingredients (${cacheHits} found in cache, ${cacheHitRate}% hit rate)...`);
 
       // Step 2: Batch UPC lookup for all ingredients
-      const batchResponse = await fetch("https://dietitian-web-backend.onrender.com/api/batch-upc-lookup", {
+      const batchResponse = await fetch("https://dietitian-be.azurewebsites.net/api/batch-upc-lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -822,7 +822,7 @@ const MenuCreate = () => {
     try {
       setProgressStep('🔄 Using fallback UPC lookup...');
 
-      const enrichRes = await fetch("https://dietitian-web-backend.onrender.com/api/enrich-menu-with-upc", {
+      const enrichRes = await fetch("https://dietitian-be.azurewebsites.net/api/enrich-menu-with-upc", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -880,7 +880,7 @@ const MenuCreate = () => {
       setProgress(5);
       setProgressStep('🎯 Analyzing client preferences...');
 
-      const templateRes = await fetch("https://dietitian-web-backend.onrender.com/api/template", {
+      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_code: selectedUser.user_code })
@@ -896,7 +896,7 @@ const MenuCreate = () => {
       setProgress(30);
       setProgressStep('🍽️ Creating personalized meals...');
 
-      const buildRes = await fetch("https://dietitian-web-backend.onrender.com/api/build-menu", {
+      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template, user_code: selectedUser.user_code }),
@@ -1191,7 +1191,7 @@ const MenuCreate = () => {
 
 
   async function generateAlternativeMeal(main, alternative) {
-    const response = await fetch('https://dietitian-web-backend.onrender.com/api/generate-alternative-meal', {
+    const response = await fetch('https://dietitian-be.azurewebsites.net/api/generate-alternative-meal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

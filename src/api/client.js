@@ -153,11 +153,21 @@ export const entities = {
           }
         });
         
-        // Apply ordering
+        // Apply ordering - handle both created_at and created_date for backward compatibility
+        let orderColumn = orderBy;
         if (orderBy.startsWith('-')) {
-          supabaseQuery = supabaseQuery.order(orderBy.substring(1), { ascending: false });
+          orderColumn = orderBy.substring(1);
+        }
+        
+        // Map created_date to created_at if needed
+        if (orderColumn === 'created_date') {
+          orderColumn = 'created_at';
+        }
+        
+        if (orderBy.startsWith('-')) {
+          supabaseQuery = supabaseQuery.order(orderColumn, { ascending: false });
         } else {
-          supabaseQuery = supabaseQuery.order(orderBy, { ascending: true });
+          supabaseQuery = supabaseQuery.order(orderColumn, { ascending: true });
         }
         
         const { data, error } = await supabaseQuery;
@@ -187,9 +197,19 @@ export const entities = {
           details: data
         };
         
-        // Get existing change log
-        const existing = await this.get(id);
-        const existingChangeLog = existing.change_log || [];
+        // Get existing change log directly from Supabase
+        const { data: existing, error: getError } = await supabase
+          .from('meal_plans_and_schemas')
+          .select('change_log')
+          .eq('id', id)
+          .single();
+        
+        if (getError) {
+          console.error('❌ Error getting existing menu for change log:', getError);
+          // Continue without change log if we can't get it
+        }
+        
+        const existingChangeLog = existing?.change_log || [];
         existingChangeLog.push(logEntry);
         
         const updateData = {
@@ -483,7 +503,8 @@ export const entities = {
             goal,
             number_of_meals,
             client_preference,
-            macros
+            macros,
+            user_context
           `)
           .eq('user_code', userCode)
           .single();

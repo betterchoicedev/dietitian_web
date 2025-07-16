@@ -81,8 +81,8 @@ export default function AllChats() {
       
       // Sort by most recent message
       chatList.sort((a, b) => {
-        const aDate = new Date(a.updated_date || a.created_date);
-        const bDate = new Date(b.updated_date || b.created_date);
+            const aDate = new Date(a.updated_at || a.created_at);
+    const bDate = new Date(b.updated_at || b.created_at);
         return bDate - aDate;
       });
       
@@ -101,9 +101,9 @@ export default function AllChats() {
   
   const getLastMessageDate = (chat) => {
     if (!chat.messages || chat.messages.length === 0) {
-      return new Date(chat.created_date);
+      return new Date(chat.created_at);
     }
-    return new Date(chat.updated_date);
+          return new Date(chat.updated_at);
   };
   
   const selectChat = async (chat) => {

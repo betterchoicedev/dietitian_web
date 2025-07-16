@@ -179,6 +179,9 @@ export default function Chat() {
         ...(client.client_preference && { client_preference: client.client_preference }),
         ...(client.recommendations && { recommendations: client.recommendations }),
         
+        // Chat history from other platforms
+        ...(client.user_context && { user_context: client.user_context }),
+        
         // Legacy fields for backward compatibility
         ...(client.height && { height: client.height }),
         ...(client.weight && { weight: client.weight }),
@@ -228,6 +231,11 @@ ${clientProfile.macros ? `- Macro Targets: ${typeof clientProfile.macros === 'st
 CHAT HISTORY (most recent messages are last):
 ${chatHistoryForPrompt}
 
+${clientProfile.user_context ? `
+PREVIOUS CHAT HISTORY FROM OTHER PLATFORMS:
+${clientProfile.user_context}
+` : ''}
+
 CURRENT MEAL PLAN DETAILS:
 ${mealPlanContext ? `
 Your personalized meal plan includes:
@@ -275,6 +283,11 @@ Your task is to respond to the user's message below, taking into account their s
 
       // Default fallback response in case AI fails
       let aiResponse = `Hi ${client.full_name.split(' ')[0]}! Thank you for your message${userMessage.image_url ? ' and the food image' : ''}. \n\n`;
+      
+      // Include previous chat context if available
+      if (clientProfile.user_context) {
+        aiResponse += `I can see from our previous conversations that we've discussed your nutrition journey. I'm here to continue supporting you with your health goals.\n\n`;
+      }
       
       // Include personalized information from client profile
       if (clientProfile.daily_total_calories || clientProfile.macros || clientProfile.goal) {

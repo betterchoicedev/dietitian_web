@@ -91,11 +91,11 @@ export default function ClientMenu() {
       
       // Get menus for this client using user_code
       if (clientData.user_code) {
-        const clientMenus = await Menu.filter({ user_code: clientData.user_code }, '-created_date');
+        const clientMenus = await Menu.filter({ user_code: clientData.user_code }, '-created_at');
         setMenus(clientMenus);
         
         // Get chats for this client
-        const clientChats = await Chat.filter({ user_code: clientData.user_code }, '-created_date');
+        const clientChats = await Chat.filter({ user_code: clientData.user_code }, '-created_at');
         setChats(clientChats);
       }
       
@@ -506,7 +506,7 @@ export default function ClientMenu() {
                     <div className="flex justify-between">
                       <CardTitle>Chat Session</CardTitle>
                       <Badge className="bg-blue-100 text-blue-800">
-                        {format(new Date(chat.created_date), 'PPP')}
+                        {format(new Date(chat.created_at), 'PPP')}
                       </Badge>
                     </div>
                     <CardDescription>
