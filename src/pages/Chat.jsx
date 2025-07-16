@@ -96,8 +96,14 @@ export default function Chat() {
       setClient(clientData);
       
       // Get meal plan data from meal_plans_and_schemas table
-      const mealPlan = await ChatUser.getMealPlanByUserCode(userCode);
-      setMealPlanData(mealPlan);
+      let mealPlan = null;
+      try {
+        mealPlan = await ChatUser.getMealPlanByUserCode(userCode);
+        setMealPlanData(mealPlan);
+      } catch (mealPlanError) {
+        console.warn('No meal plan found for user:', userCode, mealPlanError);
+        setMealPlanData(null);
+      }
       
       console.log("Client data loaded:", clientData);
       console.log("Meal plan data loaded:", mealPlan);

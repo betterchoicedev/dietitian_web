@@ -558,17 +558,19 @@ export const entities = {
           .from('meal_plans_and_schemas')
           .select('meal_plan, daily_total_calories, macros_target, recommendations, dietary_restrictions')
           .eq('user_code', userCode)
+          .eq('record_type', 'meal_plan')
           .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
+          .limit(1);
         
         if (error) {
           console.error('❌ Supabase meal plan get error:', error);
           throw new Error(`Supabase error: ${error.message}`);
         }
         
-        console.log('✅ Retrieved meal plan from Supabase:', data);
-        return data;
+        // Return the first (most recent) meal plan, or null if none found
+        const mealPlan = data && data.length > 0 ? data[0] : null;
+        console.log('✅ Retrieved meal plan from Supabase:', mealPlan);
+        return mealPlan;
         
       } catch (err) {
         console.error('❌ Error in ChatUser.getMealPlanByUserCode:', err);
