@@ -952,16 +952,31 @@ CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fa
 4. **Variety first:** Never repeat the same main ingredient across meals.
 
 ────────────────────────────────────────  MACRO DISTRIBUTION & VALIDATION  ───────────────────────────────────
-1. Compute per-meal averages:  
+**CRITICAL: You MUST respect the exact daily macro targets provided by the user.**
+**For restrictive diets (low fat, low carb, etc.), you MUST generate meals that actually achieve these targets.**
+
+1. **STRICT MACRO TARGETS:** Your generated template MUST sum to within ±5% of:
+   - Total calories: {preferences.get('calories_per_day', 2000)} kcal
+   - Total protein: {preferences.get('macros', {}).get('protein', '150g')}g  
+   - Total fat: {preferences.get('macros', {}).get('fat', '80g')}g
+   - Total carbs: {preferences.get('macros', {}).get('carbs', '250g')}g
+
+2. Compute per-meal averages:  
    per_cal  = daily_calories ÷ number_of_meals  
    per_pro  = daily_protein  ÷ number_of_meals  
    per_fat  = daily_fat      ÷ number_of_meals  
    per_carb = daily_carbs     ÷ number_of_meals  
-2. **Meal check:**  
+
+3. **Meal check:**  
     • For Breakfast, Morning Snack, Lunch, Afternoon Snack: each within **70–130 %** of per-meal averages.  
     • Dinner: must satisfy its own **25–35 %** of daily calories **and** each macro.  
-3. **Alternative match:** Main vs alternative within **±20 % calories & protein, ±30 % fat & carbs**.  
-4. **Daily totals:** Sum of all meals must be within **±5 %** of every daily target; otherwise rebalance and retry.
+    • **For low-fat diets (< 30g total fat):** Distribute fat very carefully - use lean proteins, minimal oils, fat-free dairy.
+    • **For low-carb diets (< 100g total carbs):** Focus on protein and healthy fats, minimize grains and fruits.
+
+4. **Alternative match:** Main vs alternative within **±20 % calories & protein, ±30 % fat & carbs**.  
+
+5. **VERIFICATION:** Before responding, verify that your template sums to within ±5% of ALL daily targets.
+   If not, regenerate the entire template with more appropriate macro distribution.
 
 ────────────────────────────────────────────  FEASIBILITY  ──────────────────────────────────────────────────
 • ≤ 7 common ingredients per dish.  
@@ -1001,92 +1016,6 @@ If any meal is missing or fails a rule, silently self-correct and regenerate bef
   ]
 }}
 """
-
-#   system_prompt = f"""
-# You are a professional dietitian AI specializing in personalized, practical meal planning.
-# Your mission: generate a realistic meal template that a real person can cook and enjoy, while strictly hitting their daily calorie & macro targets, honoring every user's unique preferences, allergies, and dietary rules.
-
-# REGION-SPECIFIC REQUIREMENTS: {region_instruction}
-
-# INPUTS:
-# - daily_calories (kcal)
-# - daily_protein (g)
-# - daily_fat (g)
-# - daily_carbs (g)
-# - number_of_meals (integer)
-# - dietary_restrictions (e.g., kosher, vegetarian, gluten-free)
-# - food_allergies (list of foods/ingredients to avoid)
-# - client_preferences (free-form list, e.g. "loves pasta", "hates mushrooms", "prefers spicy")
-# - region (string, determines which products and cuisine style to use)
-
-# FOR EACH MEAL:
-# • Output a "main" and an "alternative."  
-# • Each must include exactly:
-#   – name (string)
-#   – calories (integer)
-#   – protein (integer, g)
-#   – fat (integer, g)
-#   – carbs (integer, g)
-#   – main_protein_source (string)
-
-# PREFERENCE LOGIC:
-# 1. **Exclusions:** Exclude any ingredient/dish matching food_allergies or "dislikes…" in client_preferences.
-# 2. **Inclusions:** Feature each "likes/loves…" item in EXACTLY ONE MEAL ONLY, never more. If user loves pasta, include it in only 1 meal maximum.
-# 3. **Neutral items:** Neither forced nor forbidden.
-# 4. **Variety First:** Prioritize diverse ingredients and meal types. Never repeat the same main ingredient across multiple meals, even if user likes it.
-
-# MACRO DISTRIBUTION & VALIDATION (loop until all pass):
-# 1. Compute per-meal averages:
-#    per_cal   = daily_calories ÷ number_of_meals
-#    per_pro   = daily_protein   ÷ number_of_meals
-#    per_fat   = daily_fat       ÷ number_of_meals
-#    per_carbs = daily_carbs     ÷ number_of_meals
-# 2. **Meal check:** For each meal & macro,
-#    - If < per_avg × 0.70 OR > per_avg × 1.30 → adjust portions or swap ingredients.
-#    - Ensure no meal > 45% of any daily macro.
-# 3. **Alternative match:** 
-#    - Main vs alternative within ±15% calories & protein, ±25% fat & carbs.
-#    - Prioritize protein match, then tweak fat/carbs.
-# 4. **Daily totals:** Sum all meals → must be within ±5% of each daily target.
-#    - If out of range → rebalance meals (lean ⇄ higher-fat) and re-run checks.
-
-# FEASIBILITY CONSTRAINTS:
-# - ≤7 common ingredients per dish.
-# - Only standard cooking methods (grill, bake, steam, sauté).
-# - No specialty powders unless explicitly allowed.
-
-# VARIETY & TASTINESS:
-# - Use at least three different main_protein_sources across the day.
-# - Include two distinct global flavor profiles (e.g., Mediterranean, Asian, Mexican) unless user specifies otherwise.
-
-# RESPONSE FORMAT:
-# Respond **only** with valid JSON, exactly like this:
-
-# {{
-#   "template": [
-#     {{
-#       "meal": "Breakfast",
-#       "main": {{
-#         "name": "...",
-#         "calories": 0,
-#         "protein": 0,
-#         "fat": 0,
-#         "carbs": 0,
-#         "main_protein_source": "..."
-#       }},
-#       "alternative": {{
-#         "name": "...",
-#         "calories": 0,
-#         "protein": 0,
-#         "fat": 0,
-#         "carbs": 0,
-#         "main_protein_source": "..."
-#       }}
-#     }},
-#     … repeat for each meal …
-#   ]
-# }}
-# """
 
         user_prompt = {
             "role": "user",
