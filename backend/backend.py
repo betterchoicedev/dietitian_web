@@ -1291,7 +1291,16 @@ def api_build_menu():
                 
                 # If we've exhausted all attempts or template regeneration failed
                 if attempt == max_retries:
-                    return jsonify({"error": "Template validation failed after all attempts", "validation": val_data}), 400
+                    return jsonify({
+                        "error": "Template validation failed after all attempts",
+                        "validation": val_data,
+                        "attempts_made": max_retries,
+                        "failure_type": "template_validation_failed",
+                        "main_issues": val_data.get("issues_main", []),
+                        "alternative_issues": val_data.get("issues_alt", []),
+                        "main_alt_issues": val_data.get("issues_main_alt", []),
+                        "suggestion": "Try regenerating the template with different parameters"
+                    }), 400
                 else:
                     continue  # Try the next attempt
 
@@ -1371,10 +1380,14 @@ def api_build_menu():
                     try:
                         parsed = json.loads(raw_main)
                         main_candidate = parsed.get("main") or parsed  # GPT might just return the main object
-                        logger.error(main_candidate)
-                    except Exception:
-                        logger.error(f"❌ JSON parse error for MAIN '{meal_name}':\n{raw_main}")
-                        main_feedback = ["Invalid JSON from GPT"]
+                        logger.info(f"✅ Successfully parsed JSON for MAIN '{meal_name}'")
+                    except json.JSONDecodeError as e:
+                        logger.error(f"❌ JSON parse error for MAIN '{meal_name}': {e}\n{raw_main}")
+                        main_feedback = [f"Invalid JSON from GPT: {str(e)}"]
+                        continue
+                    except Exception as e:
+                        logger.error(f"❌ Unexpected error parsing JSON for MAIN '{meal_name}': {e}\n{raw_main}")
+                        main_feedback = [f"Unexpected error parsing JSON: {str(e)}"]
                         continue
 
                     # Validate main
@@ -1401,7 +1414,15 @@ def api_build_menu():
 
                 if not main_built:
                     logger.error(f"❌ Could not build valid MAIN for '{meal_name}' after 6 attempts.")
-                    main_built = {"name": "Error: Could not build main", "ingredients": [], "nutrition": {}}
+                    # Return detailed feedback about the failure
+                    return jsonify({
+                        "error": f"Failed to build main option for '{meal_name}' after 6 attempts",
+                        "meal_name": meal_name,
+                        "target_macros": main_macros,
+                        "last_feedback": main_feedback,
+                        "attempts": 6,
+                        "failure_type": "main_option_build_failed"
+                    }), 400
 
                 # Build ALTERNATIVE option
                 alt_built = None
@@ -1462,10 +1483,14 @@ def api_build_menu():
                     try:
                         parsed = json.loads(raw_alt)
                         alt_candidate = parsed.get("alternative") or parsed  # GPT might just return the alt object
-                        logger.error(alt_candidate)
-                    except Exception:
-                        logger.error(f"❌ JSON parse error for ALTERNATIVE '{meal_name}':\n{raw_alt}")
-                        alt_feedback = ["Invalid JSON from GPT"]
+                        logger.info(f"✅ Successfully parsed JSON for ALTERNATIVE '{meal_name}'")
+                    except json.JSONDecodeError as e:
+                        logger.error(f"❌ JSON parse error for ALTERNATIVE '{meal_name}': {e}\n{raw_alt}")
+                        alt_feedback = [f"Invalid JSON from GPT: {str(e)}"]
+                        continue
+                    except Exception as e:
+                        logger.error(f"❌ Unexpected error parsing JSON for ALTERNATIVE '{meal_name}': {e}\n{raw_alt}")
+                        alt_feedback = [f"Unexpected error parsing JSON: {str(e)}"]
                         continue
 
                     # Validate alternative
@@ -1492,7 +1517,15 @@ def api_build_menu():
 
                 if not alt_built:
                     logger.error(f"❌ Could not build valid ALTERNATIVE for '{meal_name}' after 6 attempts.")
-                    alt_built = {"name": "Error: Could not build alternative", "ingredients": [], "nutrition": {}}
+                    # Return detailed feedback about the failure
+                    return jsonify({
+                        "error": f"Failed to build alternative option for '{meal_name}' after 6 attempts",
+                        "meal_name": meal_name,
+                        "target_macros": alt_macros,
+                        "last_feedback": alt_feedback,
+                        "attempts": 6,
+                        "failure_type": "alternative_option_build_failed"
+                    }), 400
 
                 # Combine into meal entry
                 meal_obj = {
@@ -1515,14 +1548,26 @@ def api_build_menu():
         except Exception as e:
             logger.error("❌ Exception in /api/build-menu (attempt %d):\n%s", attempt, traceback.format_exc())
             if attempt == max_retries:
-                return jsonify({"error": f"Menu build failed after {max_retries} attempts: {str(e)}"}), 500
+                return jsonify({
+                    "error": f"Menu build failed after {max_retries} attempts",
+                    "exception": str(e),
+                    "attempt": attempt,
+                    "max_retries": max_retries,
+                    "failure_type": "exception_during_build",
+                    "traceback": traceback.format_exc()
+                }), 500
             else:
                 logger.info(f"🔄 Retrying menu build due to exception...")
                 continue
     
     # If we get here, all attempts failed
     logger.error("❌ All %d attempts to build menu failed", max_retries)
-    return jsonify({"error": f"Menu build failed after {max_retries} attempts"}), 500
+    return jsonify({
+        "error": f"Menu build failed after {max_retries} attempts",
+        "attempts_made": max_retries,
+        "failure_type": "all_attempts_exhausted",
+        "suggestion": "Try regenerating the template or adjusting user preferences"
+    }), 500
 
 @app.route("/api/validate-menu", methods=["POST"])
 def api_validate_menu():
