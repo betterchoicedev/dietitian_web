@@ -10,7 +10,13 @@ A React application for nutritionists to manage their clients and meal plans.
 npm install
 ```
 
-3. Start the development server:
+3. Set up environment variables:
+   Create a `.env` file in the root directory with the following variables:
+   ```
+   VITE_AZURE_OPENAI_API_KEY=your_azure_openai_api_key_here
+   ```
+
+4. Start the development server:
 ```bash
 npm run dev
 ```

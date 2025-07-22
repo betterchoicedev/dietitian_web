@@ -5,7 +5,7 @@ import { Send } from 'lucide-react';
 const endpoint = "https://ai-hubfooddata915979189829.openai.azure.com";  // Removed trailing slash
 const apiVersion = "2024-02-15-preview";  // Updated API version
 const deployment = "forObi4-mini";
-const apiKey = "7GE7Tuq2qHvKvTHjS6oqkZ3zQuROcPwgFt5VHHbaPhGnGxLIJBZRJQQJ99BBACYeBjFXJ3w3AAAAACOGgNEZ";
+const apiKey = import.meta.env.VITE_AZURE_OPENAI_API_KEY || process.env.AZURE_OPENAI_API_KEY;
 
 const ChatBot = () => {
   const [messages, setMessages] = useState([
