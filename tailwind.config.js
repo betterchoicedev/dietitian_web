@@ -60,6 +60,11 @@ module.exports = {
           lighter: 'hsl(var(--info-lighter))',
           bg: 'hsl(var(--info-bg))'
         },
+        purple: {
+          DEFAULT: 'hsl(var(--purple))',
+          lighter: 'hsl(var(--purple-lighter))',
+          bg: 'hsl(var(--purple-bg))'
+        },
   			muted: {
   				DEFAULT: 'hsl(var(--muted))',
   				foreground: 'hsl(var(--muted-foreground))'

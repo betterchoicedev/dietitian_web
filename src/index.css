@@ -36,6 +36,11 @@
     --info-lighter: 188 94% 47%; /* #06B6D4 */
     --info-bg: 188 94% 96%; /* Light info background */
     
+    /* Purple */
+    --purple: 262 83% 58%; /* #8B5CF6 */
+    --purple-lighter: 262 83% 63%; /* #A78BFA */
+    --purple-bg: 262 83% 96%; /* Light purple background */
+    
     /* Neutral Professional Palette */
     --background: 0 0% 100%; /* Pure white */
     --foreground: 220 39% 11%; /* Very dark blue-gray #0F172A */

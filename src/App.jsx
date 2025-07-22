@@ -13,6 +13,7 @@ import '@/styles/rtl.css';
 import MenuCreate from './pages/MenuCreate';
 import MenuLoad from './pages/MenuLoad';
 import RecipesPage from './pages/RecipesPage';
+import UserWeightLogs from './pages/UserWeightLogs';
 
 // Protected Route component
 function ProtectedRoute({ children }) {
@@ -72,6 +73,7 @@ function App() {
               <Route path="MenuLoad" element={<MenuLoad />} />
               <Route path="menuload" element={<Navigate to="/MenuLoad" replace />} />
               <Route path="recipes" element={<RecipesPage />} />
+              <Route path="weight-logs" element={<UserWeightLogs />} />
             </Route>
           </Routes>
         </LanguageProvider>

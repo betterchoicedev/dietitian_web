@@ -3,7 +3,7 @@ import { Link, useNavigate, Outlet } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { 
+import {
   FileText, 
   Users, 
   MessageSquare,
@@ -16,7 +16,8 @@ import {
   ListChecks,
   Activity,
   ClipboardList,
-  Globe
+  Globe,
+  Scale
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -366,6 +367,12 @@ export default function Layout() {
             <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-warning/8 hover:text-warning transition-all duration-300 group">
               <FileText className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
               <span className="font-medium">{translations.recipes}</span>
+            </Button>
+          </Link>
+          <Link to="/weight-logs" onClick={() => setSidebarOpen(false)}>
+            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-purple/8 hover:text-purple transition-all duration-300 group">
+              <Scale className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+              <span className="font-medium">{translations.weightLogs || 'Weight Logs'}</span>
             </Button>
           </Link>
           <Link to="/menuload" onClick={() => setSidebarOpen(false)}>

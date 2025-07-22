@@ -640,6 +640,134 @@ export const entities = {
       }
     }
   },
+  WeightLogs: {
+    // Get all weight logs for a specific user
+    getByUserCode: async (userCode) => {
+      try {
+        console.log('⚖️ Getting weight logs for user_code:', userCode);
+        
+        const { data, error } = await supabase
+          .from('weight_logs')
+          .select(`
+            user_code,
+            measurement_date,
+            weight_kg,
+            body_fat_percentage,
+            general_measurements,
+            body_composition,
+            central_measurements,
+            hip_measurements,
+            limb_measurements,
+            waist_circumference_cm,
+            hip_circumference_cm,
+            arm_circumference_cm
+          `)
+          .eq('user_code', userCode)
+          .order('measurement_date', { ascending: true });
+        
+        if (error) {
+          console.error('❌ Supabase weight logs get error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        console.log('✅ Retrieved weight logs from Supabase:', data?.length || 0, 'records');
+        console.log('📊 Sample data structure:', data?.[0]);
+        return data || [];
+        
+      } catch (err) {
+        console.error('❌ Error in WeightLogs.getByUserCode:', err);
+        throw err;
+      }
+    },
+    
+    // Get all weight logs (for debugging)
+    list: async () => {
+      try {
+        console.log('⚖️ Getting all weight logs');
+        
+        const { data, error } = await supabase
+          .from('weight_logs')
+          .select(`
+            user_code,
+            measurement_date,
+            weight_kg,
+            body_fat_percentage,
+            general_measurements,
+            body_composition,
+            central_measurements,
+            hip_measurements,
+            limb_measurements,
+            waist_circumference_cm,
+            hip_circumference_cm,
+            arm_circumference_cm
+          `)
+          .order('measurement_date', { ascending: false });
+        
+        if (error) {
+          console.error('❌ Supabase weight logs list error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        console.log('✅ Retrieved all weight logs from Supabase:', data?.length || 0, 'records');
+        console.log('📊 Sample data structure:', data?.[0]);
+        return data || [];
+        
+      } catch (err) {
+        console.error('❌ Error in WeightLogs.list:', err);
+        throw err;
+      }
+    },
+    
+    // Get unique user codes that have weight logs
+    getUniqueUserCodes: async () => {
+      try {
+        console.log('⚖️ Getting unique user codes with weight logs');
+        
+        const { data, error } = await supabase
+          .from('weight_logs')
+          .select('user_code')
+          .not('user_code', 'is', null);
+        
+        if (error) {
+          console.error('❌ Supabase weight logs user codes error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        const uniqueUserCodes = [...new Set(data.map(item => item.user_code))];
+        console.log('✅ Retrieved unique user codes with weight logs:', uniqueUserCodes);
+        return uniqueUserCodes;
+        
+      } catch (err) {
+        console.error('❌ Error in WeightLogs.getUniqueUserCodes:', err);
+        throw err;
+      }
+    },
+    
+    // Create a new weight log entry
+    create: async (data) => {
+      try {
+        console.log('⚖️ Creating weight log entry:', JSON.stringify(data, null, 2));
+        
+        const { data: result, error } = await supabase
+          .from('weight_logs')
+          .insert([data])
+          .select()
+          .single();
+        
+        if (error) {
+          console.error('❌ Supabase weight log create error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        console.log('✅ Created weight log entry in Supabase:', result);
+        return result;
+        
+      } catch (err) {
+        console.error('❌ Error in WeightLogs.create:', err);
+        throw err;
+      }
+    }
+  },
   Client: {
     create: async (data) => {
       return { id: `client-${Date.now()}`, ...data };
