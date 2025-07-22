@@ -75,3 +75,4 @@ CHECK (
 -- ALTER TABLE public.meal_plans_and_schemas 
 -- ADD CONSTRAINT fk_user_code 
 -- FOREIGN KEY (user_code) REFERENCES public.chat_users(user_code);
+

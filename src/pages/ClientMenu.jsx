@@ -116,7 +116,16 @@ export default function ClientMenu() {
 
   const handleStatusChange = async (menuId, newStatus) => {
     try {
-      await Menu.update(menuId, { status: newStatus });
+      // Get the menu to find its user_code
+      const menu = menus.find(m => m.id === menuId);
+      if (!menu) {
+        throw new Error('Menu not found');
+      }
+      
+      await Menu.update(menuId, { 
+        status: newStatus,
+        user_code: menu.user_code // Include user_code for backend validation
+      });
       await loadData(); // Reload the data to reflect changes
       
       // Show success message
@@ -129,7 +138,7 @@ export default function ClientMenu() {
       console.error("Error updating menu status:", error);
       toast({
         title: "Error",
-        description: "Failed to update menu status",
+        description: error.message || "Failed to update menu status",
         variant: "destructive",
         duration: 2000
       });

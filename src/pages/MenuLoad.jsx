@@ -832,6 +832,7 @@ const MenuLoad = () => {
 
       const updateData = {
         status: statusForm.status,
+        user_code: selectedMenuForStatus.user_code, // Include user_code for backend validation
         ...(statusForm.active_from && { active_from: statusForm.active_from }),
         ...(statusForm.active_until && { active_until: statusForm.active_until })
       };

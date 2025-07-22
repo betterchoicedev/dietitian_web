@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChatUser } from '@/api/entities';
+import { ChatUser, ChatMessage, ChatConversation } from '@/api/entities';
 import { Menu } from '@/api/entities';
 import { Client } from '@/api/entities';
 import { User } from '@/api/entities';
@@ -26,8 +26,14 @@ export default function Chat() {
   const [error, setError] = useState(null);
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
+  const scrollAreaRef = useRef(null);
   const [imageFile, setImageFile] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [messages, setMessages] = useState([]);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [conversationId, setConversationId] = useState(null);
+  const [firstMessageId, setFirstMessageId] = useState(null); // for pagination
 
   const toBase64 = file =>
     new Promise(resolve => {
@@ -35,7 +41,7 @@ export default function Chat() {
       reader.readAsDataURL(file);
       reader.onload = () => resolve(reader.result.split(',')[1]);
     });
-  
+
 
 
   const handleRefresh = () => {
@@ -46,15 +52,56 @@ export default function Chat() {
     loadData();
   }, [refreshKey]);
 
+  // Fetch conversation and initial messages when client is selected
   useEffect(() => {
     if (selectedClientUserCode) {
       loadClientData(selectedClientUserCode);
+      loadConversationAndMessages(selectedClientUserCode);
     }
   }, [selectedClientUserCode]);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [selectedChat?.messages]);
+  // Fetch conversation by user_code, then fetch latest 20 messages
+  const loadConversationAndMessages = async (userCode) => {
+    setIsFetchingData(true);
+    setError(null);
+    try {
+      const conversation = await ChatConversation.getByUserCode(userCode);
+      setConversationId(conversation.id);
+      // Fetch latest 20 messages (descending order)
+      const msgs = await ChatMessage.listByConversation(conversation.id, { limit: 20 });
+      setMessages(msgs.reverse()); // reverse to show oldest at top
+      setFirstMessageId(msgs.length > 0 ? msgs[0].id : null);
+      setHasMoreMessages(msgs.length === 20);
+    } catch (err) {
+      setError(translations.failedToLoadClientData);
+      setMessages([]);
+      setConversationId(null);
+      setHasMoreMessages(false);
+    } finally {
+      setIsFetchingData(false);
+    }
+  };
+
+  // Infinite scroll: load more messages when scrolled to top
+  const handleScroll = async (e) => {
+    if (e.target.scrollTop === 0 && hasMoreMessages && !isLoadingMore && conversationId && firstMessageId) {
+      setIsLoadingMore(true);
+      try {
+        const olderMsgs = await ChatMessage.listByConversation(conversationId, { limit: 20, beforeMessageId: firstMessageId });
+        if (olderMsgs.length > 0) {
+          setMessages(prev => [...olderMsgs.reverse(), ...prev]);
+          setFirstMessageId(olderMsgs[0].id);
+          setHasMoreMessages(olderMsgs.length === 20);
+        } else {
+          setHasMoreMessages(false);
+        }
+      } catch (err) {
+        setError(translations.failedToLoadClientData);
+      } finally {
+        setIsLoadingMore(false);
+      }
+    }
+  };
 
   const handleClientSelect = (userCode) => {
     setSelectedClientUserCode(userCode);
@@ -64,16 +111,16 @@ export default function Chat() {
   const loadData = async () => {
     setIsFetchingData(true);
     setError(null);
-    
+
     try {
       console.log("Loading available clients from Supabase...");
-      
+
       // Load all available clients from chat_users table
       const clients = await ChatUser.list();
       setAvailableClients(clients);
-      
+
       console.log("Available clients loaded:", clients);
-      
+
     } catch (error) {
       console.error("Error loading clients:", error);
       setError(translations.failedToLoadClients);
@@ -84,17 +131,17 @@ export default function Chat() {
 
   const loadClientData = async (userCode) => {
     if (!userCode) return;
-    
+
     setIsFetchingData(true);
     setError(null);
-    
+
     try {
       console.log("Loading client data for user_code:", userCode);
-      
+
       // Get client data from chat_users table
       const clientData = await ChatUser.getByUserCode(userCode);
       setClient(clientData);
-      
+
       // Get meal plan data from meal_plans_and_schemas table
       let mealPlan = null;
       try {
@@ -104,10 +151,10 @@ export default function Chat() {
         console.warn('No meal plan found for user:', userCode, mealPlanError);
         setMealPlanData(null);
       }
-      
+
       console.log("Client data loaded:", clientData);
       console.log("Meal plan data loaded:", mealPlan);
-      
+
       // Create a new temporary chat for this client (in memory only)
       const newChat = {
         id: `temp-${userCode}-${Date.now()}`,
@@ -124,6 +171,7 @@ export default function Chat() {
     }
   };
 
+  // When sending a message, after success, reload the latest 20 messages
   const handleSend = async () => {
     if ((!message.trim() && !imageFile) || !client) return;
 
@@ -165,23 +213,23 @@ export default function Chat() {
         ...(client.weight_kg && { weight_kg: client.weight_kg }),
         ...(client.height_cm && { height_cm: client.height_cm }),
         ...(client.user_language && { user_language: client.user_language }),
-        
+
         // Health and dietary information
         ...(client.food_allergies && { food_allergies: client.food_allergies }),
         ...(client.food_limitations && { food_limitations: client.food_limitations }),
         ...(client.Activity_level && { activity_level: client.Activity_level }),
         ...(client.goal && { goal: client.goal }),
-        
+
         // Nutrition targets and preferences
         ...(client.dailyTotalCalories && { daily_total_calories: client.dailyTotalCalories }),
         ...(client.number_of_meals && { number_of_meals: client.number_of_meals }),
         ...(client.macros && { macros: client.macros }),
         ...(client.client_preference && { client_preference: client.client_preference }),
         ...(client.recommendations && { recommendations: client.recommendations }),
-        
+
         // Chat history from other platforms
         ...(client.user_context && { user_context: client.user_context }),
-        
+
         // Legacy fields for backward compatibility
         ...(client.height && { height: client.height }),
         ...(client.weight && { weight: client.weight }),
@@ -283,16 +331,16 @@ Your task is to respond to the user's message below, taking into account their s
 
       // Default fallback response in case AI fails
       let aiResponse = `Hi ${client.full_name.split(' ')[0]}! Thank you for your message${userMessage.image_url ? ' and the food image' : ''}. \n\n`;
-      
+
       // Include previous chat context if available
       if (clientProfile.user_context) {
         aiResponse += `I can see from our previous conversations that we've discussed your nutrition journey. I'm here to continue supporting you with your health goals.\n\n`;
       }
-      
+
       // Include personalized information from client profile
       if (clientProfile.daily_total_calories || clientProfile.macros || clientProfile.goal) {
         aiResponse += `Based on your profile:\n\n`;
-        
+
         if (clientProfile.daily_total_calories) {
           aiResponse += `• Your daily calorie target: ${clientProfile.daily_total_calories} calories\n`;
         }
@@ -309,7 +357,7 @@ Your task is to respond to the user's message below, taking into account their s
         if (clientProfile.number_of_meals) {
           aiResponse += `• Your meal plan: ${clientProfile.number_of_meals} meals per day\n`;
         }
-        
+
         // Add dietary considerations
         if (clientProfile.food_allergies || clientProfile.food_limitations) {
           aiResponse += `\nDietary considerations:\n`;
@@ -323,10 +371,10 @@ Your task is to respond to the user's message below, taking into account their s
           }
         }
       }
-      
+
       if (mealPlanContext && mealPlanContext.meals && mealPlanContext.meals.length > 0) {
         aiResponse += `\nYour personalized meal plan includes:\n\n`;
-        
+
         // Daily totals
         if (mealPlanContext.totals) {
           aiResponse += `📊 Daily Totals:\n`;
@@ -335,7 +383,7 @@ Your task is to respond to the user's message below, taking into account their s
           aiResponse += `• Fat: ${mealPlanContext.totals.fat || 'Not specified'}g\n`;
           aiResponse += `• Carbs: ${mealPlanContext.totals.carbs || 'Not specified'}g\n\n`;
         }
-        
+
         // Meals overview
         aiResponse += `🍽️ Your Meals:\n`;
         mealPlanContext.meals.forEach((meal, index) => {
@@ -347,7 +395,7 @@ Your task is to respond to the user's message below, taking into account their s
             aiResponse += `   Alternative: ${meal.alternative.meal_title} (${meal.alternative.nutrition?.calories || 'N/A'} kcal)\n`;
           }
         });
-        
+
         aiResponse += `\nYou can ask me specific questions about any meal, ingredient, or nutrition values in your plan!\n`;
       } else if (mealPlanContext) {
         aiResponse += `\nYour current meal plan details:\n`;
@@ -372,14 +420,14 @@ Your task is to respond to the user's message below, taking into account their s
           aiResponse += `4. Keep your health goal in mind: ${clientProfile.goal}\n`;
         }
       }
-      
+
       if (userMessage.image_url) {
         aiResponse += `\n\nRegarding the food in your image:\n`;
         aiResponse += `- This appears to be a meal you've shared for analysis\n`;
         aiResponse += `- Consider how it fits into your daily nutrition goals\n`;
         aiResponse += `- Feel free to ask specific questions about the nutritional content\n`;
       }
-      
+
       aiResponse += `\n\nWould you like more specific advice about your meal plan or nutrition goals?`;
 
       // Try to get AI response, use fallback if it fails
@@ -402,7 +450,7 @@ Your task is to respond to the user's message below, taking into account their s
         if (lastBracketIndex !== -1) {
           const potentialJson = aiResponse.substring(0, lastBracketIndex + 1);
           const remainingText = aiResponse.substring(lastBracketIndex + 1).trim();
-          
+
           try {
             // Only strip the JSON if there is text following it.
             if (remainingText) {
@@ -438,14 +486,14 @@ Your task is to respond to the user's message below, taking into account their s
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files.length > 0) {
-  const file = e.target.files[0];
-  if (file instanceof File) {
-    setImageFile(file);
-  } else {
-    console.error("Selected file is not a valid File object.");
-  }
-}
-};
+      const file = e.target.files[0];
+      if (file instanceof File) {
+        setImageFile(file);
+      } else {
+        console.error("Selected file is not a valid File object.");
+      }
+    }
+  };
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -454,6 +502,40 @@ Your task is to respond to the user's message below, taking into account their s
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  };
+
+  useEffect(() => {
+    // Only scroll to bottom if not loading more (i.e., after initial load or sending)
+    if (!isLoadingMore && messages.length > 0) {
+      chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
+  }, [messages, isLoadingMore]);
+
+  const handleLoadMore = async () => {
+    if (!conversationId || !firstMessageId || isLoadingMore) return;
+    const scrollArea = scrollAreaRef.current;
+    const prevScrollHeight = scrollArea ? scrollArea.scrollHeight : 0;
+    setIsLoadingMore(true);
+    try {
+      const olderMsgs = await ChatMessage.listByConversation(conversationId, { limit: 20, beforeMessageId: firstMessageId });
+      if (olderMsgs.length > 0) {
+        setMessages(prev => [...olderMsgs, ...prev]);
+        setFirstMessageId(olderMsgs[0].id);
+        setHasMoreMessages(olderMsgs.length === 20);
+      } else {
+        setHasMoreMessages(false);
+      }
+      // After messages update, restore scroll position
+      setTimeout(() => {
+        if (scrollArea) {
+          scrollArea.scrollTop = scrollArea.scrollHeight - prevScrollHeight;
+        }
+      }, 0);
+    } catch (err) {
+      setError(translations.failedToLoadClientData);
+    } finally {
+      setIsLoadingMore(false);
     }
   };
 
@@ -531,27 +613,45 @@ Your task is to respond to the user's message below, taking into account their s
             </CardHeader>
           </Card>
         )}
-        
+
         {/* Chat Area - only show when client is selected */}
         {client ? (
           <>
             <Card className="flex-1 flex flex-col mb-4">
               <CardContent className="flex-1 p-4 overflow-hidden">
-                <ScrollArea className="h-full pr-4">
-                  {selectedChat?.messages?.length > 0 ? (
-                    selectedChat.messages.map((msg, index) => (
+                <ScrollArea className="h-full pr-4" ref={scrollAreaRef}>
+                  {hasMoreMessages && (
+                    <div className="flex justify-center py-2">
+                      <Button
+                        onClick={handleLoadMore}
+                        disabled={isLoadingMore}
+                        className={`
+                          bg-gradient-to-r from-blue-500 to-indigo-600
+                          text-white font-semibold
+                          py-2 px-6
+                          rounded-lg
+                          shadow-lg
+                          transition duration-300 ease-in-out
+                          hover:from-blue-600 hover:to-indigo-700 hover:shadow-xl
+                          focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-opacity-50
+                          disabled:opacity-50 disabled:cursor-not-allowed
+                        `}
+                      >
+                        {isLoadingMore ? translations.loadingMore : translations.loadMore}
+                      </Button>
+                    </div>
+                  )}
+                  {messages.length > 0 ? (
+                    messages.map((msg, index) => (
                       <div
-                        key={index}
-                        className={`mb-4 flex ${
-                          msg.role === 'user' ? 'justify-end' : 'justify-start'
-                        }`}
+                        key={msg.id || index}
+                        className={`mb-4 flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                       >
                         <div
-                          className={`rounded-lg px-4 py-2 max-w-[80%] ${
-                            msg.role === 'user'
+                          className={`rounded-lg px-4 py-2 max-w-[80%] ${msg.role === 'user'
                               ? 'bg-green-600 text-white'
                               : 'bg-gray-100 text-gray-900'
-                          }`}
+                            }`}
                         >
                           {msg.image_url && (
                             <img

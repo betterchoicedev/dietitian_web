@@ -753,6 +753,8 @@ export const translations = {
     sendImage: 'Send Image',
     voiceMessage: 'Voice Message',
     videoCall: 'Video Call',
+    loadingMore: 'Loading more messages...',
+    loadMore: 'Load more messages',
 
     // Profile & Professional Info
     specialization: 'Specialization',
@@ -1304,6 +1306,8 @@ export const translations = {
     saveSchemaAndMenu: "שמור סכמה ותוכנית תפריט",
     showShoppingList: "הצג רשימת קניות",
     hideShoppingList: "הסתר רשימת קניות",
+    loadingMore: 'טוען הודעות נוספות...',
+    loadMore: 'טען עוד הודעות',
   }
 };
 

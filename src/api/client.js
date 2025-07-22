@@ -50,6 +50,25 @@ export const entities = {
     create: async (data) => {
       console.log('🏪 Menu.create called with data:', JSON.stringify(data, null, 2));
       
+      // Check if user already has an active menu before creating any new menu
+      if (data.user_code) {
+        const { data: existingActiveMenus, error: activeError } = await supabase
+          .from('meal_plans_and_schemas')
+          .select('id')
+          .eq('user_code', data.user_code)
+          .eq('record_type', 'meal_plan')
+          .eq('status', 'active');
+        
+        if (activeError) {
+          console.error('❌ Error checking for existing active menus:', activeError);
+          throw new Error('Failed to check for existing active menus.');
+        }
+        
+        if (existingActiveMenus && existingActiveMenus.length > 0) {
+          throw new Error('Cannot create menu: this user already has an active menu. Please deactivate the existing active menu first.');
+        }
+      }
+      
       try {
         // Log the creation
         const logEntry = {
@@ -186,6 +205,27 @@ export const entities = {
       }
     },
     update: async (id, data) => {
+      // Check if user already has an active menu before setting status to active
+      if (data.status === 'active' && data.user_code) {
+        const { data: existingActiveMenus, error: activeError } = await supabase
+          .from('meal_plans_and_schemas')
+          .select('id')
+          .eq('user_code', data.user_code)
+          .eq('record_type', 'meal_plan')
+          .eq('status', 'active');
+        
+        if (activeError) {
+          console.error('❌ Error checking for existing active menus:', activeError);
+          throw new Error('Failed to check for existing active menus.');
+        }
+        
+        // Exclude the current menu from the check
+        const otherActiveMenus = (existingActiveMenus || []).filter(menu => menu.id !== id);
+        if (otherActiveMenus.length > 0) {
+          throw new Error('Cannot set this menu to active: another active menu already exists for this user.');
+        }
+      }
+      
       try {
         console.log('✏️ Updating menu with id:', id, 'data:', data);
         
@@ -649,7 +689,58 @@ export const entities = {
     delete: async (id) => {
       return true;
     }
-  }
+  },
+  ChatMessage: {
+    // Fetch messages for a conversation, paginated (oldest first)
+    listByConversation: async (conversation_id, { limit = 20, beforeMessageId = null } = {}) => {
+      let query = supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('conversation_id', conversation_id)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (beforeMessageId) {
+        query = query.lt('id', beforeMessageId);
+      }
+      const { data, error } = await query;
+      if (error) throw new Error(error.message);
+      return data || [];
+    },
+  },
+  ChatConversation: {
+    // Get conversation by user_id
+    getByUserId: async (user_id) => {
+      const { data, error } = await supabase
+        .from('chat_conversations')
+        .select('*')
+        .eq('user_id', user_id)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .single();
+      if (error) throw new Error(error.message);
+      return data;
+    },
+    // Get conversation by user_code (via chat_users)
+    getByUserCode: async (user_code) => {
+      // First get user by user_code
+      const { data: user, error: userError } = await supabase
+        .from('chat_users')
+        .select('id')
+        .eq('user_code', user_code)
+        .single();
+      if (userError) throw new Error(userError.message);
+      // Then get conversation by user_id
+      const { data, error } = await supabase
+        .from('chat_conversations')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .single();
+      if (error) throw new Error(error.message);
+      return data;
+    },
+  },
 };
 
 // Azure OpenAI Configuration

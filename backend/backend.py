@@ -17,7 +17,8 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
 from flask import send_file
 import datetime
-
+from dotenv import load_dotenv
+load_dotenv()
 # Import libraries for Hebrew text support
 try:
     from bidi.algorithm import get_display
@@ -810,157 +811,7 @@ def require_api_key(f):
         return f(*args, **kwargs)
     return decorated_function
 
-def generate_menu_with_azure(user_preferences):
-    try:
-        region = user_preferences.get('region', 'israel').lower()
-        
-        # Region-specific ingredient instructions
-        region_instructions = {
-            'israel': "Use Israeli products and brands (e.g., Tnuva, Osem, Strauss, Elite, Telma, Bamba, Bissli). Include local Israeli foods like hummus, falafel, tahini, pita bread, sabich, shakshuka when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 150g-200g containers, hummus in 400g containers, pita bread is typically 60-80g per piece, Israeli cheese slices are 20-25g each, Bamba comes in 80g bags, Bissli in 100g bags. Use realistic Israeli portion sizes.",
-            'us': "Use American products and brands (e.g., Kraft, General Mills, Kellogg's, Pepsi, Coca-Cola, Walmart Great Value). Include typical American foods like bagels, cereals, sandwiches, burgers when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 16oz (454g) containers, yogurt in 6-8oz (170-227g) containers, cream cheese in 8oz (227g) packages, American cheese slices are 21g each, bagels are 95-105g each.",
-            'uk': "Use British products and brands (e.g., Tesco, Sainsbury's, ASDA, Heinz UK, Cadbury, McVitie's). Include typical British foods like beans on toast, tea, fish and chips elements when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 300g containers, yogurt in 150-170g pots, British cheese slices are 25g each, bread slices are 35-40g each.",
-            'canada': "Use Canadian products and brands (e.g., Loblaws, Metro, Sobeys, President's Choice, No Name). Include typical Canadian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 500g containers, yogurt in 175g containers, Canadian cheese slices are 22g each.",
-            'australia': "Use Australian products and brands (e.g., Woolworths, Coles, Arnott's, Vegemite). Include typical Australian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 170g tubs, Australian cheese slices are 25g each."
-        }
-        
-        region_instruction = region_instructions.get(region, region_instructions['israel'])
-        
-        system_prompt = (
-    f"You are a professional dietitian AI. Generate a 1-day meal plan with meals: Breakfast, Morning Snack, Lunch, Afternoon Snack, Dinner.\n\n"
-    "Requirements:\n"
-    "- Total daily calories must be within ±5% of the user's target.\n"
-    "- Total protein, fat, and carbs must each be within ±5% of target.\n"
-    "- Each meal must include both `main` and `alternative` options.\n"
-    "- Each option must contain:\n"
-    "   - `name`\n"
-    "   - `ingredients`: list of ingredients, where each ingredient includes:\n"
-    "       - `item`, `quantity`, `unit`, AND:\n"
-    "       - `calories`, `protein`, `fat`, and `carbs` — specific to that ingredient.\n"
-    "   - `nutrition`: total for the meal, automatically calculated by summing the ingredients' values.\n"
-    f"REGION-SPECIFIC REQUIREMENTS: {region_instruction}\n"
-    "PREFERENCE LOGIC:\n"
-    "- If user 'likes' or 'loves' any food (pasta, chicken, etc.), include it in EXACTLY ONE MEAL ONLY, never more.\n"
-    "- Prioritize VARIETY over preferences. Each meal should have different main ingredients.\n"
-    "- Never repeat the same main ingredient/protein across multiple meals.\n"
-    "CRITICAL: You MUST strictly follow ALL dietary restrictions and limitations in the user preferences.\n"
-    "If user has 'kosher' limitation, you MUST follow kosher dietary laws:\n"
-    "- NEVER mix meat (chicken, beef, lamb, etc.) with dairy (milk, cream, cheese, yogurt, etc.) in the same meal\n"
-    "- Use only kosher-certified ingredients and brands\n"
-    "- Avoid non-kosher ingredients (pork, shellfish, etc.)\n\n"
-    "After generating all meals, VERIFY that the daily totals (calories, protein, fat, carbs) are within ±5% of the user's goal.\n"
-    "If not, regenerate until it is correct.\n\n"
-    "Respond ONLY with valid JSON:\n"
-    "- `meal_plan`: 5 meals with full details.\n"
-    "- `totals`: {calories, protein, fat, carbs} — summed across the day.\n"
-    "- `note`: general advice or note to the user.\n"
-    "- `recommendations`: include any dietary recommendations based on the user's profile.\n"
-)
 
-
-
-        user_prompt = {
-    "role": "user",
-    "content": f"""
-Generate a daily meal plan with exactly {user_preferences['meal_count']} meals.
-
-Strictly follow these nutritional goals:
-- ✅ Total Calories: {user_preferences['calories_per_day']} kcal (must be within ±5%)
-- ✅ Protein: {user_preferences['macros']['protein']}g (±5%)
-- ✅ Fat: {user_preferences['macros']['fat']}g (±5%)
-- ✅ Carbs: {user_preferences['macros']['carbs']}g (±5%)
-
-Dietary restrictions:
-- Allergies: {', '.join(user_preferences['allergies']) if user_preferences['allergies'] else 'None'}
-- Food Limitations: {', '.join(user_preferences['limitations']) if user_preferences['limitations'] else 'None'}
-"""
-}
-
-
-
-        response = openai.ChatCompletion.create(
-            engine=deployment,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                user_prompt
-            ],
-            temperature=0.7
-        )
-
-        return response["choices"][0]["message"]["content"]
-    except Exception as e:
-        logger.error(f"Error generating menu: {str(e)}")
-        raise
-
-@app.route("/api/menu", methods=["GET", "POST"])
-@require_api_key
-def get_generated_menu():
-    try:
-        # Get user_code from query params (GET) or request body (POST)
-        user_code = None
-        if request.method == "POST":
-            data = request.get_json()
-            user_code = data.get("user_code") if data else None
-        else:
-            user_code = request.args.get("user_code")
-        
-        user_preferences = load_user_preferences(user_code)
-        print("user_preferences:\n", user_preferences)
-        result = generate_menu_with_azure(user_preferences)
-        print("Azure response:\n", result)  # 👈 for debugging
-        
-        # Try to parse and clean the result if it's a JSON string containing menu data
-        try:
-            parsed_result = json.loads(result) if isinstance(result, str) else result
-            if isinstance(parsed_result, dict) and any(key in parsed_result for key in ["meals", "menu", "meal_plan"]):
-                cleaned_result = clean_ingredient_names(parsed_result)
-                
-                # Add recommendations from Supabase if user_code is provided
-                if user_code:
-                    try:
-                        # Fetch recommendations from Supabase
-                        response = supabase.table('chat_users').select('recommendations').eq('user_code', user_code).execute()
-                        if response.data:
-                            user_data = response.data[0]
-                            supabase_recommendations = user_data.get('recommendations', {})
-                            
-                            # Handle different recommendation formats
-                            if isinstance(supabase_recommendations, str):
-                                try:
-                                    supabase_recommendations = json.loads(supabase_recommendations)
-                                except:
-                                    supabase_recommendations = {"general": supabase_recommendations}
-                            
-                            # Merge with AI-generated recommendations
-                            if 'recommendations' not in cleaned_result:
-                                cleaned_result['recommendations'] = {}
-                            
-                            # Convert to array format if needed
-                            if isinstance(supabase_recommendations, dict):
-                                recommendations_array = []
-                                for key, value in supabase_recommendations.items():
-                                    if value:  # Only add non-empty recommendations
-                                        recommendations_array.append({
-                                            "recommendation_key": key,
-                                            "recommendation_value": value
-                                        })
-                                cleaned_result['recommendations'] = recommendations_array
-                            else:
-                                cleaned_result['recommendations'] = supabase_recommendations
-                            
-                            logger.info(f"✅ Added Supabase recommendations to menu: {cleaned_result['recommendations']}")
-                    except Exception as rec_error:
-                        logger.warning(f"Failed to fetch recommendations from Supabase: {rec_error}")
-                
-                return jsonify({"generated_menu": json.dumps(cleaned_result) if isinstance(result, str) else cleaned_result})
-        except:
-            # If parsing fails, return original result
-            pass
-            
-        return jsonify({"generated_menu": result})
-    except Exception as e:
-        logger.error(f"Error in /api/menu endpoint: {str(e)}")
-        print("❌ Error generating menu:", str(e))  # 👈 this will print the real cause
-        return jsonify({"error": "Failed to generate menu"}), 500
 
 @app.route("/api/template", methods=["POST"])
 def api_template():
@@ -1029,6 +880,11 @@ CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fa
   - For 3 meals: Breakfast, Lunch, Dinner
 • Never omit, rename, reorder, or merge a meal.  
 • Always use the exact meal names listed above for the specified number of meals.
+
+───────────────────────────────  MAIN MEALS VS SNACKS CALORIE DISTRIBUTION  ────────────────────────────────
+• **CRITICAL: The main meals (Breakfast, Lunch, Dinner) must each have significantly more calories, protein, fat, and carbs than the snacks (Morning Snack, Afternoon Snack).**
+• **Snacks should always be much lighter in calories and macros than the main meals.**
+• **Never allow a snack to have as many or more calories/macros as a main meal.**
 
 ─────────────────────────────────────────────  DINNER RULES  ────────────────────────────────────────────────
 2. **Macro share** – Dinner supplies **25–35 %** of daily calories *and* of each macro (protein, fat, carbs).  
@@ -1104,6 +960,8 @@ CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fa
 ────────────────────────────────────────────  RESPONSE FORMAT  ─────────────────────────────────────────────
 Respond **only** with valid JSON in this exact shape.  
 If any meal is missing or fails a rule, silently self-correct and regenerate before sending.
+
+• **CRITICAL: For each meal, the main protein source in the main meal must be different from the main protein source in the alternative meal. Never use the same main protein source for both.**
 
 {{
   "template": [
@@ -1190,7 +1048,9 @@ If any meal is missing or fails a rule, silently self-correct and regenerate bef
                         # Collect issues for next attempt
                         main_issues = val_data.get("issues_main", [])
                         alt_issues = val_data.get("issues_alt", [])
-                        new_issues = main_issues + alt_issues
+                        main_vs_snack_issues = val_data.get("issues_main_vs_snack", [])
+                        main_alt_issues = val_data.get("issues_main_alt", [])
+                        new_issues = main_issues + alt_issues + main_vs_snack_issues + main_alt_issues
                         
                         if new_issues:
                             previous_issues = new_issues
@@ -1345,7 +1205,7 @@ def api_build_menu():
                         "- Use only kosher-certified ingredients and brands "
                         "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
                         "Provide: `meal_name`, `meal_title`, `ingredients` (list of objects with keys "
-                        "`item`, `household_measure`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
+                        "`item`, `portionSI(gram)`, `household_measure`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
                         "and `nutrition` (sum of ingredients). "
                         "IMPORTANT: For 'brand of pruduct', you MUST use real, specific brand names "
                         "NEVER use 'Generic' or 'generic' as a brand name. "
@@ -1448,7 +1308,7 @@ def api_build_menu():
                         "- Use only kosher-certified ingredients and brands "
                         "- Avoid non-kosher ingredients (pork, shellfish, etc.) "
                         "Provide: `meal_name`, `meal_title`, `ingredients` (list of objects with keys "
-                        "`item`, `household_measure`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
+                        "`item`, `portionSI(gram)`, `household_measure`, `calories`, `protein`, `fat`, `carbs`,`brand of pruduct`), "
                         "and `nutrition` (sum of ingredients). "
                         "IMPORTANT: For 'brand of pruduct', you MUST use real, specific brand names "
                         "NEVER use 'Generic' or 'generic' as a brand name. "
@@ -1826,14 +1686,50 @@ def api_validate_template():
         else:
             logger.info("✅ Template validation PASSED for both main and alternative with perfect equality.")
 
+        # --- Main meals vs Snacks calorie/macros distribution validation ---
+        # Define meal types
+        main_meal_names = {"Breakfast", "Lunch", "Dinner"}
+        snack_names = {"Morning Snack", "Afternoon Snack"}
+
+        # Helper to extract macro values for main and snacks
+        def extract_macro_lists(template, macro):
+            main_vals = []
+            snack_vals = []
+            for meal in template:
+                meal_name = meal.get("meal", "")
+                for variant in ["main", "alternative"]:
+                    val = float(meal.get(variant, {}).get(macro, 0))
+                    if meal_name in main_meal_names:
+                        main_vals.append(val)
+                    elif meal_name in snack_names:
+                        snack_vals.append(val)
+            return main_vals, snack_vals
+
+        # For each macro, check that all main meals > all snacks
+        main_vs_snack_issues = []
+        for macro in ["calories", "protein", "fat", "carbs"]:
+            main_vals, snack_vals = extract_macro_lists(template, macro)
+            if main_vals and snack_vals:
+                min_main = min(main_vals)
+                max_snack = max(snack_vals)
+                if max_snack >= min_main:
+                    main_vs_snack_issues.append(
+                        f"Main meals vs Snacks: For {macro}, max snack ({max_snack}) >= min main meal ({min_main}) - Snacks must always be lighter than main meals."
+                    )
+
+        is_valid_main_vs_snack = len(main_vs_snack_issues) == 0
+        is_valid = is_valid and is_valid_main_vs_snack
+
         return jsonify({
             "is_valid": is_valid,
             "is_valid_main": is_valid_main,
             "is_valid_alt": is_valid_alt,
             "is_valid_main_alt": is_valid_main_alt,
+            "is_valid_main_vs_snack": is_valid_main_vs_snack,
             "issues_main": issues_main,
             "issues_alt": issues_alt,
             "issues_main_alt": main_alt_issues,
+            "issues_main_vs_snack": main_vs_snack_issues,
             "totals_main": {k: round(v, 1) for k, v in total_main.items()},
             "totals_alt": {k: round(v, 1) for k, v in total_alt.items()},
             "targets": target_macros
@@ -1843,27 +1739,7 @@ def api_validate_template():
         logger.error("❌ Exception in /api/validate-template:\n%s", traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
-def is_israeli_brand(brand):
-    """
-    Check if a brand is Israeli based on a list of known Israeli brands.
-    """
-    if not brand:
-        return False
-    
-    israeli_brands = [
-        "tnuva", "osem", "strauss", "elite", "telma", "bamba", "bissli", "krembo",
-        "lechem eretz", "angel", "bagel bagel", "achla", "taboon", "dan cake",
-        "kibutz galuyot", "shufersals", "machsanei hashuk", "tara", "shamir salads",
-        "meshek tzuriel", "gad", "priniv", "yotvata", "shimrit", "tenuva",
-        "emek", "milko", "para", "shoko", "cottage", "gamadim", "hashachar",
-        "zoglovek", "wilke", "galil mountain", "carmel", "barkan", "golan heights",
-        "dalton", "recanati", "tabor", "tulip", "yarden", "vita", "primor",
-        "meshulam", "golden star", "kfar shaul", "hazirim", "hatzbani",
-        "aviv", "masuah", "shemen", "mizra", "tivall", "achva", "halva kingdom"
-    ]
-    
-    brand_lower = brand.lower().strip()
-    return any(israeli_brand in brand_lower for israeli_brand in israeli_brands)
+
 
 def prepare_upc_lookup_params(brand, name, region="israel"):
     """
@@ -2107,6 +1983,12 @@ def batch_upc_lookup():
 
 @app.route('/api/generate-alternative-meal', methods=['POST'])
 def generate_alternative_meal():
+
+#     {
+#     "user_code": "BZSJUY",
+#     "id": "593fceba-6051-40ff-a37e-2147ed8cdc7c",
+#     "meal_name": "Breakfast"
+#   }
     data = request.get_json()
     main = data.get('main')
     alternative = data.get('alternative')
@@ -2144,8 +2026,8 @@ def generate_alternative_meal():
         "- Do not use Hebrew, Arabic, or any other language "
         "- Use English names for all foods, brands, and cooking terms "
         "DIETARY RESTRICTIONS: "
-        "- STRICTLY AVOID all foods in user allergies: {', '.join(preferences.get('allergies', []))} "
-        "- STRICTLY FOLLOW all dietary limitations: {', '.join(preferences.get('limitations', []))} "
+        f"- STRICTLY AVOID all foods in user allergies: {', '.join(preferences.get('allergies', []))} "
+        f"- STRICTLY FOLLOW all dietary limitations: {', '.join(preferences.get('limitations', []))} "
         "- If user has 'kosher' limitation, NEVER mix meat with dairy in the same meal "
         "- Use only kosher-certified ingredients and brands if kosher is required "
         "HUMAN-LIKE MEAL REQUIREMENTS: "
@@ -2188,7 +2070,9 @@ def generate_alternative_meal():
             parsed = json.loads(raw)
             # Clean ingredient names in the generated alternative meal
             cleaned_alternative = clean_ingredient_names({"alternative": parsed}).get("alternative", parsed)
-            return jsonify(cleaned_alternative)
+            # Enrich with UPC codes
+            enriched = enrich_alternative_with_upc(cleaned_alternative, user_code, region)
+            return jsonify(enriched)
         except Exception:
             logger.error(f"❌ JSON parse error for new alternative meal:\n{raw}")
             return jsonify({"error": "Invalid JSON from OpenAI", "raw": raw}), 500
@@ -2196,200 +2080,52 @@ def generate_alternative_meal():
         logger.error(f"Error generating alternative meal: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/test-hebrew-pdf', methods=['GET'])
-def test_hebrew_pdf():
-    """Test endpoint to verify Hebrew font support in PDF generation"""
-    try:
-        from io import BytesIO
-        buffer = BytesIO()
-        c = canvas.Canvas(buffer, pagesize=letter)
-        width, height = letter
-        
-        # Test Hebrew text
-        hebrew_text = "שלום עולם - בדיקת גופן עברי"
-        english_text = "Hello World - Hebrew Font Test"
-        
-        # Register fonts (simplified version of the main function)
-        hebrew_font = 'Helvetica'
+# Helper function to enrich a single alternative meal with UPC codes
+def enrich_alternative_with_upc(alternative, user_code, region):
+    # This function mimics the logic in enrich_menu_with_upc but for a single alternative dict
+    import requests
+    block = alternative.copy()
+    enriched_ingredients = []
+    access_token = get_azure_access_token()
+    headers = {"Authorization": f"Bearer {access_token}"} if access_token else {}
+    for ing in block.get("ingredients", []):
+        enriched_ing = ing.copy()
+        brand = enriched_ing.get("brand of pruduct", "")
+        name = enriched_ing.get("item", "")
         try:
-            # Try to register DejaVu Sans
-            pdfmetrics.registerFont(TTFont('TestHebrewFont', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
-            hebrew_font = 'TestHebrewFont'
-            logger.info("✅ Successfully registered DejaVu Sans for test")
-        except:
-            try:
-                # Try downloading font for test
-                import urllib.request
-                import tempfile
-                import os
-                temp_dir = tempfile.gettempdir()
-                font_path = os.path.join(temp_dir, 'TestDejaVuSans.ttf')
-                
-                if not os.path.exists(font_path):
-                    urllib.request.urlretrieve(
-                        'https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf',
-                        font_path
-                    )
-                
-                pdfmetrics.registerFont(TTFont('TestHebrewFont', font_path))
-                hebrew_font = 'TestHebrewFont'
-                logger.info("✅ Successfully downloaded DejaVu Sans for test")
-            except Exception as e:
-                logger.warning(f"Could not register Hebrew font for test: {e}")
-        
-        # Process Hebrew text
-        if BIDI_SUPPORT:
-            try:
-                processed_hebrew = get_display(reshape(hebrew_text))
-            except:
-                processed_hebrew = hebrew_text
-        else:
-            processed_hebrew = hebrew_text
-        
-        # Draw test text
-        c.setFont(hebrew_font, 16)
-        c.drawString(50, height - 100, english_text)
-        c.drawString(50, height - 130, f"Hebrew font: {hebrew_font}")
-        c.drawString(50, height - 160, f"BIDI support: {BIDI_SUPPORT}")
-        c.drawString(50, height - 190, f"Original: {hebrew_text}")
-        c.drawString(50, height - 220, f"Processed: {processed_hebrew}")
-        
-        # Try to draw Hebrew text
-        try:
-            c.drawString(50, height - 250, processed_hebrew)
-            result = "SUCCESS"
+            logger.info(f"[UPC] Looking up for brand='{brand}', name='{name}', region='{region}'")
+            endpoint_type, params, is_israeli = prepare_upc_lookup_params(brand, name, region)
+            if not endpoint_type:
+                enriched_ing["UPC"] = None
+                logger.info(f"[UPC] No valid parameters for lookup: brand='{brand}', name='{name}'")
+            else:
+                if endpoint_type == "hebrew":
+                    url = "https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-upc-hebrew"
+                    print("Tenant ID:", os.getenv("AZURE_TENANT_ID"))
+                    print("Client ID:", os.getenv("AZURE_CLIENT_ID"))
+                    print("Client Secret:", os.getenv("AZURE_CLIENT_SECRET"))
+                else:
+                    url = "https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-upc"
+                logger.info(f"[UPC] Sending request to {url} with params={params}")
+                if not access_token:
+                    logger.warning("[UPC] No Azure access token available, skipping UPC lookup.")
+                    enriched_ing["UPC"] = None
+                else:
+                    resp = requests.get(url, params=params, headers=headers, timeout=30)
+                    logger.info(f"[UPC] HTTP {resp.status_code} — URL: {resp.url}")
+                    logger.info(f"[UPC] Response body: {resp.text}")
+                    resp.raise_for_status()
+                    upc_data = resp.json()
+                    enriched_ing["UPC"] = upc_data.get("upc")
+                    logger.info(f"[UPC] Parsed UPC: {enriched_ing['UPC']!r}")
         except Exception as e:
-            c.setFont('Helvetica', 12)
-            c.drawString(50, height - 250, f"ERROR: {str(e)}")
-            result = f"ERROR: {str(e)}"
-        
-        c.save()
-        buffer.seek(0)
-        
-        return send_file(
-            buffer,
-            as_attachment=True,
-            download_name="hebrew_test.pdf",
-            mimetype="application/pdf"
-        )
-        
-    except Exception as e:
-        logger.error(f"Hebrew test failed: {e}")
-        return jsonify({"error": str(e), "hebrew_support": BIDI_SUPPORT}), 500
+            enriched_ing["UPC"] = None
+            logger.warning(f"[UPC] UPC lookup failed for {brand!r} {name!r}: {e}")
+        enriched_ingredients.append(enriched_ing)
+    block["ingredients"] = enriched_ingredients
+    logger.info(f"[UPC] Final enriched ingredients: {enriched_ingredients}")
+    return block
 
-@app.route('/api/test-pdf-generation', methods=['POST'])
-def test_pdf_generation():
-    """Test endpoint to verify PDF generation with different meal counts"""
-    try:
-        data = request.json
-        meal_count = data.get("meal_count", 4)
-        
-        # Create a test menu with the specified number of meals
-        test_menu = {
-            "meals": [],
-            "totals": {
-                "calories": 2000,
-                "protein": 150,
-                "fat": 80,
-                "carbs": 250
-            }
-        }
-        
-        # Define meal names based on count
-        meal_names = {
-            3: ["Breakfast", "Lunch", "Dinner"],
-            4: ["Breakfast", "Morning Snack", "Lunch", "Afternoon Snack"],
-            5: ["Breakfast", "Morning Snack", "Lunch", "Afternoon Snack", "Dinner"]
-        }
-        
-        names = meal_names.get(meal_count, meal_names[4])
-        
-        for i, meal_name in enumerate(names):
-            meal = {
-                "meal": meal_name,
-                "main": {
-                    "meal_title": f"Test {meal_name} Main",
-                    "nutrition": {
-                        "calories": 400,
-                        "protein": 25,
-                        "fat": 15,
-                        "carbs": 45
-                    },
-                    "ingredients": [
-                        {
-                            "item": f"Test ingredient {i+1}",
-                            "quantity": 100,
-                            "unit": "g",
-                            "household_measure": "1 cup"
-                        }
-                    ]
-                },
-                "alternative": {
-                    "meal_title": f"Test {meal_name} Alternative",
-                    "nutrition": {
-                        "calories": 380,
-                        "protein": 22,
-                        "fat": 18,
-                        "carbs": 42
-                    },
-                    "ingredients": [
-                        {
-                            "item": f"Test alt ingredient {i+1}",
-                            "quantity": 90,
-                            "unit": "g",
-                            "household_measure": "3/4 cup"
-                        }
-                    ]
-                }
-            }
-            test_menu["meals"].append(meal)
-        
-        logger.info(f"🔍 Testing PDF generation with {meal_count} meals: {names}")
-        
-        # Call the PDF generation function
-        return generate_menu_pdf_test(test_menu)
-        
-    except Exception as e:
-        logger.error(f"Test PDF generation failed: {e}")
-        return jsonify({"error": str(e)}), 500
-
-def generate_menu_pdf_test(menu):
-    """Test version of PDF generation for debugging"""
-    try:
-        buffer = BytesIO()
-        c = canvas.Canvas(buffer, pagesize=letter)
-        width, height = letter
-        y = height - 50
-        margin = 50
-        
-        # Simple test version
-        c.setFont('Helvetica', 16)
-        c.drawString(margin, y, f"Test PDF Generation - {len(menu.get('meals', []))} meals")
-        y -= 30
-        
-        c.setFont('Helvetica', 12)
-        for i, meal in enumerate(menu.get('meals', [])):
-            meal_name = meal.get('meal', f'Meal {i+1}')
-            c.drawString(margin, y, f"Meal {i+1}: {meal_name}")
-            y -= 20
-            
-            if y < margin + 50:
-                c.showPage()
-                y = height - 50
-        
-        c.save()
-        buffer.seek(0)
-        
-        return send_file(
-            buffer,
-            as_attachment=True,
-            download_name=f"test_meal_plan_{len(menu.get('meals', []))}_meals.pdf",
-            mimetype="application/pdf"
-        )
-        
-    except Exception as e:
-        logger.error(f"Test PDF generation failed: {e}")
-        return jsonify({"error": str(e)}), 500
 
 def clean_ingredient_names(menu):
     """
@@ -2515,41 +2251,149 @@ def clean_ingredient_names(menu):
         # Return as-is if structure is not recognized
         return menu
 
-@app.route("/api/recommendations", methods=["GET"])
-def get_user_recommendations():
-    """Fetch user recommendations from Supabase"""
+@app.route('/api/generate-alternative-meal-by-id', methods=['POST'])
+def generate_alternative_meal_by_id():
+    data = request.get_json()
+    user_code = data.get('user_code')
+    plan_id = data.get('id')
+    meal_name = data.get('meal_name')
+
+    if not user_code or not plan_id or not meal_name:
+        return jsonify({'error': 'Missing user_code, id, or meal_name'}), 400
+
+    # Fetch meal plan from Supabase
     try:
-        user_code = request.args.get("user_code")
-        if not user_code:
-            return jsonify({"error": "user_code is required"}), 400
-        
-        logger.info(f"🔍 Fetching recommendations for user_code: {user_code}")
-        
-        # Fetch user data including recommendations
-        response = supabase.table('chat_users').select('recommendations').eq('user_code', user_code).execute()
-        
+        response = supabase.table('meal_plans_and_schemas').select('meal_plan').eq('id', plan_id).single().execute()
         if not response.data:
-            logger.warning(f"No user found with user_code: {user_code}")
-            return jsonify({"error": "User not found"}), 404
-        
-        user_data = response.data[0]
-        recommendations = user_data.get('recommendations', {})
-        
-        # Handle different recommendation formats
-        if isinstance(recommendations, str):
-            try:
-                recommendations = json.loads(recommendations)
-            except:
-                recommendations = {"general": recommendations}
-        elif not recommendations:
-            recommendations = {}
-        
-        logger.info(f"✅ Retrieved recommendations: {recommendations}")
-        return jsonify({"recommendations": recommendations})
-        
+            return jsonify({'error': f'Meal plan with id {plan_id} not found'}), 404
+        meal_plan = response.data['meal_plan']
+        if isinstance(meal_plan, str):
+            meal_plan = json.loads(meal_plan)
     except Exception as e:
-        logger.error(f"Error fetching recommendations: {str(e)}")
-        return jsonify({"error": "Failed to fetch recommendations"}), 500
+        logger.error(f"Error fetching meal plan: {e}")
+        return jsonify({'error': f'Failed to fetch meal plan: {str(e)}'}), 500
+
+    # Find the meal by name
+    meals = meal_plan.get('meals', [])
+    meal = next((m for m in meals if m.get('meal') == meal_name), None)
+    if not meal:
+        return jsonify({'error': f'Meal with name {meal_name} not found in plan'}), 404
+
+    main = meal.get('main')
+    alternative = meal.get('alternative')
+    if not main or not alternative:
+        return jsonify({'error': 'Meal is missing main or alternative option'}), 400
+
+    # Load user preferences
+    try:
+        preferences = load_user_preferences(user_code)
+    except Exception as e:
+        return jsonify({'error': f'Failed to load user preferences: {str(e)}'}), 500
+
+    # Get region-specific instructions (reuse from /api/generate-alternative-meal)
+    region = preferences.get('region', 'israel').lower()
+    region_instructions = {
+        'israel': "Use Israeli products and brands (e.g., Tnuva, Osem, Strauss, Elite, Telma). Include local Israeli foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 150g-200g containers, hummus in 400g containers, pita bread is typically 60-80g per piece, Israeli cheese slices are 20-25g each, Bamba comes in 80g bags, Bissli in 100g bags. Use realistic Israeli portion sizes.",
+        'us': "Use American products and brands (e.g., Kraft, General Mills, Kellogg's, Pepsi). Include typical American foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 16oz (454g) containers, yogurt in 6-8oz (170-227g) containers, cream cheese in 8oz (227g) packages, American cheese slices are 21g each, bagels are 95-105g each.",
+        'uk': "Use British products and brands (e.g., Tesco, Sainsbury's, Heinz UK, Cadbury). Include typical British foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 300g containers, yogurt in 150-170g pots, British cheese slices are 25g each, bread slices are 35-40g each.",
+        'canada': "Use Canadian products and brands (e.g., Loblaws, President's Choice, Tim Hortons). Include typical Canadian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 500g containers, yogurt in 175g containers, Canadian cheese slices are 22g each.",
+        'australia': "Use Australian products and brands (e.g., Woolworths, Coles, Arnott's, Vegemite). Include typical Australian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 170g tubs, Australian cheese slices are 25g each."
+    }
+    region_instruction = region_instructions.get(region, region_instructions['israel'])
+
+    # Compose prompt for OpenAI (reuse from /api/generate-alternative-meal)
+    system_prompt = (
+        "You are a professional dietitian AI. Generate a COMPLETELY DIFFERENT alternative meal that is entirely distinct from both the main meal and the existing alternative. "
+        "CRITICAL REQUIREMENTS: "
+        "- Create a meal with DIFFERENT main protein source, DIFFERENT cooking method, and DIFFERENT flavor profile "
+        "- Use COMPLETELY DIFFERENT ingredients than both the main and existing alternative "
+        "- The new meal MUST match the main meal's macros within ±5% tolerance (calories, protein, fat, carbs) "
+        f"REGION-SPECIFIC REQUIREMENTS: {region_instruction} "
+        "**CRITICAL: ALWAYS GENERATE ALL CONTENT IN ENGLISH ONLY.** "
+        "- All meal names, ingredient names, and descriptions must be in English "
+        "- Do not use Hebrew, Arabic, or any other language "
+        "- Use English names for all foods, brands, and cooking terms "
+        "DIETARY RESTRICTIONS: "
+        f"- STRICTLY AVOID all foods in user allergies: {', '.join(preferences.get('allergies', []))} "
+        f"- STRICTLY FOLLOW all dietary limitations: {', '.join(preferences.get('limitations', []))} "
+        "- If user has 'kosher' limitation, NEVER mix meat with dairy in the same meal "
+        "- Use only kosher-certified ingredients and brands if kosher is required "
+        "HUMAN-LIKE MEAL REQUIREMENTS: "
+        "- Generate SIMPLE, REALISTIC meals that people actually eat daily "
+        "- Use common, familiar ingredients and combinations "
+        "- Avoid overly complex recipes or unusual ingredient combinations "
+        "- Focus on comfort foods, simple sandwiches, basic salads, easy-to-make dishes "
+        "- Examples of good meals: grilled chicken with rice, tuna sandwich, yogurt with fruit, simple pasta dishes "
+        "- Examples to AVOID: complex multi-ingredient recipes, unusual spice combinations, overly fancy preparations "
+        "- Keep ingredients list short (3-6 ingredients max) "
+        "- Use realistic portion sizes that match the region's packaging standards "
+        "VARIETY REQUIREMENTS: "
+        "- Use a DIFFERENT main protein source than both existing meals "
+        "- Use a DIFFERENT cooking method (if main is grilled, use baked/steamed/fried) "
+        "- Use a DIFFERENT flavor profile (if main is Mediterranean, use Asian/Mexican/Italian) "
+        "- Include DIFFERENT vegetables and grains than existing meals "
+        "IMPORTANT: For any brand names in ingredients, you MUST use real, specific brand names based on the user's region. "
+        "NEVER use 'Generic' or 'generic' as a brand name. Always specify actual commercial brands available in the user's region. "
+        "Return ONLY the new alternative meal as valid JSON with: meal_title, ingredients (list of {item, brand of pruduct, household_measure, calories, protein, fat, carbs}), and nutrition (sum of ingredients)."
+    )
+    user_prompt = {
+        "role": "user",
+        "content": json.dumps({
+            "main": main,
+            "current_alternative": alternative,
+            "user_preferences": preferences
+        })
+    }
+    try:
+        response = openai.ChatCompletion.create(
+            engine=deployment,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                user_prompt
+            ],
+            temperature=0.4
+        )
+        raw = response["choices"][0]["message"]["content"]
+        try:
+            parsed = json.loads(raw)
+            # Clean ingredient names in the generated alternative meal
+            cleaned_alternative = clean_ingredient_names({"alternative": parsed}).get("alternative", parsed)
+            # Enrich with UPC codes
+            enriched = enrich_alternative_with_upc(cleaned_alternative, user_code, region)
+            return jsonify(enriched)
+        except Exception:
+            logger.error(f"❌ JSON parse error for new alternative meal:\n{raw}")
+            return jsonify({"error": "Invalid JSON from OpenAI", "raw": raw}), 500
+    except Exception as e:
+        logger.error(f"Error generating alternative meal: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+def get_azure_access_token():
+    import requests
+    tenant_id = os.getenv("AZURE_TENANT_ID")
+    client_id = os.getenv("AZURE_CLIENT_ID")
+    client_secret = os.getenv("AZURE_CLIENT_SECRET")
+    scope = os.getenv("AZURE_UPC_SCOPE", "api://sqlservice/.default")
+    if not all([tenant_id, client_id, client_secret, scope]):
+        logger.error("Azure AD credentials are not set in environment variables.")
+        return None
+    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    token_data = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scope": scope
+    }
+    try:
+        token_resp = requests.post(token_url, data=token_data)
+        token_resp.raise_for_status()
+        access_token = token_resp.json().get("access_token")
+        if not access_token:
+            logger.error(f"Failed to obtain Azure access token: {token_resp.text}")
+        return access_token
+    except Exception as e:
+        logger.error(f"Error requesting Azure access token: {e}")
+        return None
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
