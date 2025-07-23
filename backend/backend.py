@@ -2019,10 +2019,10 @@ def enrich_menu_with_upc():
                             
                             # Choose the appropriate endpoint
                             if endpoint_type == "hebrew":
-                                url = "https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-upc-hebrew"
+                                url = "https://dietitian-web.onrender.com/api/ingredient-upc-hebrew"
                                 app.logger.info(f"Using Hebrew UPC endpoint for region: {region}")
                             else:
-                                url = "https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-upc"
+                                url = "https://dietitian-web.onrender.com/api/ingredient-upc"
                                 app.logger.info(f"Using regular UPC endpoint for region: {region}")
                             
                             resp = requests.get(url, params=params, timeout=30)
