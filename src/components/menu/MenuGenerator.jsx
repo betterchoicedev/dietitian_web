@@ -46,6 +46,14 @@ export default function MenuGenerator({
         Create comprehensive dietary recommendations for this client:
         ${JSON.stringify(clientContext, null, 2)}
         
+        **CRITICAL HEALTHY DIETITIAN RULES:**
+        • You are a HEALTHY nutritionist - prioritize nutritious, whole foods over processed snacks
+        • NEVER suggest unhealthy processed snacks (like BISLI, Bamba, chips, candy, cookies, etc.) unless the user EXPLICITLY requests them in their preferences
+        • For snacks, always suggest healthy options like: fruits, vegetables, nuts, yogurt, cottage cheese, hummus, whole grain crackers, etc.
+        • Only include unhealthy snacks if the user specifically mentions "likes BISLI", "loves chips", "wants candy" etc. in their client_preferences
+        • Even then, limit unhealthy snacks to maximum 1-2 times per week, not daily
+        • Focus on balanced nutrition with whole foods, lean proteins, complex carbohydrates, and healthy fats
+        
         Consider their goals, metrics, and any restrictions.
         Provide specific, actionable recommendations for:
         1. General nutrition advice and meal timing
@@ -81,6 +89,14 @@ export default function MenuGenerator({
     try {
       const mealPrompt = `
         Generate a detailed ${mealName} meal plan:
+        
+        **CRITICAL HEALTHY DIETITIAN RULES:**
+        • You are a HEALTHY nutritionist - prioritize nutritious, whole foods over processed snacks
+        • NEVER suggest unhealthy processed snacks (like BISLI, Bamba, chips, candy, cookies, etc.) unless the user EXPLICITLY requests them in their preferences
+        • For snacks, always suggest healthy options like: fruits, vegetables, nuts, yogurt, cottage cheese, hummus, whole grain crackers, etc.
+        • Only include unhealthy snacks if the user specifically mentions "likes BISLI", "loves chips", "wants candy" etc. in their client_preferences
+        • Even then, limit unhealthy snacks to maximum 1-2 times per week, not daily
+        • Focus on balanced nutrition with whole foods, lean proteins, complex carbohydrates, and healthy fats
         
         Client Context:
         ${JSON.stringify(clientContext, null, 2)}

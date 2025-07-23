@@ -193,6 +193,107 @@ def api_translate_recipes():
     cleaned_recipes = clean_ingredient_names({"recipes": new_recipes}).get("recipes", new_recipes)
     return jsonify({"recipes": cleaned_recipes})
 
+@app.route("/api/translate-text", methods=["POST"])
+def api_translate_text():
+    """Simple text translation endpoint for translating user preferences and other text"""
+    try:
+        data = request.get_json()
+        text = data.get("text", "")
+        target = data.get("targetLang", "he")
+        
+        if not text or not text.strip():
+            return jsonify({"translatedText": text})
+        
+        # Custom translation mapping for food-related terms
+        custom_terms = [
+            {"en": "Based on", "he": "מבוסס על"},
+            {"en": "food log entries", "he": "רשומות יומן מזון"},
+            {"en": "this user frequently consumes", "he": "משתמש זה צורך לעתים קרובות"},
+            {"en": "Meal patterns", "he": "דפוסי ארוחות"},
+            {"en": "times", "he": "פעמים"},
+            {"en": "Breakfast", "he": "ארוחת בוקר"},
+            {"en": "Lunch", "he": "ארוחת צהריים"},
+            {"en": "Dinner", "he": "ארוחת ערב"},
+            {"en": "Snack", "he": "חטיף"},
+            {"en": "Morning Snack", "he": "חטיף בוקר"},
+            {"en": "Afternoon Snack", "he": "חטיף צהריים"},
+            {"en": "Evening Snack", "he": "חטיף ערב"},
+            {"en": "Mid-Morning Snack", "he": "חטיף אמצע בוקר"},
+            {"en": "Mid-Afternoon Snack", "he": "חטיף אמצע צהריים"},
+            {"en": "Late Night Snack", "he": "חטיף לילה מאוחר"},
+            {"en": "entries", "he": "רשומות"},
+            {"en": "entry", "he": "רשומה"},
+            {"en": "frequently", "he": "לעתים קרובות"},
+            {"en": "consumes", "he": "צורך"},
+            {"en": "user", "he": "משתמש"},
+            {"en": "patterns", "he": "דפוסים"},
+            {"en": "meal", "he": "ארוחה"},
+            {"en": "meals", "he": "ארוחות"},
+        ]
+        
+        # Sort terms by length of English phrase, descending (longest first)
+        custom_terms.sort(key=lambda t: -len(t["en"]))
+        custom_map = {t["en"].lower(): t["he"] for t in custom_terms}
+        custom_words = [t["en"] for t in custom_terms]
+        
+        # For Hebrew: replace mapped phrases/words with placeholders, send to Azure, then restore
+        if target == "he":
+            ph_map = {}
+            ph_idx = 0
+            
+            # Replace each mapped phrase/word with a unique placeholder (longest first)
+            def repl_func(match):
+                nonlocal ph_idx
+                en_word = match.group(0)
+                ph = f"__CUSTOMWORD{ph_idx}__"
+                ph_map[ph] = custom_map[en_word.lower()]
+                ph_idx += 1
+                return ph
+            
+            text_for_azure = text
+            for en_word in custom_words:
+                pattern = r'(?<!\w)'+re.escape(en_word)+r'(?!\w)'
+                text_for_azure = re.sub(pattern, repl_func, text_for_azure, flags=re.IGNORECASE)
+        else:
+            text_for_azure = text
+            ph_map = {}
+        
+        # Call Azure Translator
+        endpoint = os.getenv("AZURE_TRANSLATOR_ENDPOINT")
+        key = os.getenv("AZURE_TRANSLATOR_KEY")
+        region = os.getenv("AZURE_TRANSLATOR_REGION")
+        
+        if not all([endpoint, key, region]):
+            logger.error("Azure Translator environment variables not configured")
+            return jsonify({"error": "Translation service not configured"}), 500
+        
+        url = f"{endpoint}/translate?api-version=3.0&to={target}"
+        headers = {
+            "Ocp-Apim-Subscription-Key": key,
+            "Ocp-Apim-Subscription-Region": region,
+            "Content-Type": "application/json"
+        }
+        body = [{"Text": text_for_azure}]
+        
+        resp = requests.post(url, headers=headers, json=body)
+        resp.raise_for_status()
+        translations = resp.json()
+        
+        if not translations:
+            return jsonify({"translatedText": text})
+        
+        translated = translations[0]["translations"][0]["text"]
+        
+        # Replace placeholders with Hebrew terms
+        for ph, heb in ph_map.items():
+            translated = translated.replace(ph, heb)
+        
+        return jsonify({"translatedText": translated})
+        
+    except Exception as e:
+        logger.error(f"Error in text translation: {str(e)}")
+        return jsonify({"error": f"Translation failed: {str(e)}"}), 500
+
 @app.route("/api/translate", methods=["POST"])
 def api_translate_menu():
     data = request.get_json()
@@ -856,8 +957,16 @@ def api_template():
 """
 
             system_prompt = f"""
-You are a professional dietitian AI specializing in personalized, practical meal planning.
+You are a professional HEALTHY dietitian AI specializing in personalized, practical meal planning.
 Your mission: generate a realistic meal template that a real person can cook and enjoy, while strictly hitting their daily calorie & macro targets and honoring every user's unique preferences, allergies, and dietary rules.
+
+**CRITICAL HEALTHY DIETITIAN RULES:**
+• You are a HEALTHY dietitian - prioritize nutritious, whole foods over processed snacks
+• NEVER suggest unhealthy processed snacks (like BISLI, Bamba, chips, candy, cookies, etc.) unless the user EXPLICITLY requests them in their preferences
+• For snacks, always suggest healthy options like: fruits, vegetables, nuts, yogurt, cottage cheese, hummus, whole grain crackers, etc.
+• Only include unhealthy snacks if the user specifically mentions "likes BISLI", "loves chips", "wants candy" etc. in their client_preferences
+• Even then, limit unhealthy snacks to maximum 1-2 times per week, not daily
+• Focus on balanced nutrition with whole foods, lean proteins, complex carbohydrates, and healthy fats
 
 **CRITICAL: ALWAYS GENERATE ALL MENU CONTENT IN ENGLISH ONLY.**
 - All meal names, ingredient names, and descriptions must be in English
@@ -873,8 +982,12 @@ CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fa
 {region_instruction}
 
 ────────────────────────────────────────────  MEAL STRUCTURE  ────────────────────────────────────────────────
-• The user can request 3–5 meals.  
+• The user can request 3–9 meals.  
 • **CRITICAL: You MUST use these exact meal names based on the number_of_meals:**
+  - For 9 meals: Breakfast, Morning Snack, Mid-Morning Snack, Lunch, Afternoon Snack, Mid-Afternoon Snack, Dinner, Evening Snack, Late Night Snack
+  - For 8 meals: Breakfast, Morning Snack, Mid-Morning Snack, Lunch, Afternoon Snack, Mid-Afternoon Snack, Dinner, Evening Snack
+  - For 7 meals: Breakfast, Morning Snack, Mid-Morning Snack, Lunch, Afternoon Snack, Dinner, Evening Snack
+  - For 6 meals: Breakfast, Morning Snack, Lunch, Afternoon Snack, Dinner, Evening Snack
   - For 5 meals: Breakfast, Morning Snack, Lunch, Afternoon Snack, Dinner
   - For 4 meals: Breakfast, Morning Snack, Lunch, Dinner
   - For 3 meals: Breakfast, Lunch, Dinner
@@ -882,7 +995,7 @@ CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fa
 • Always use the exact meal names listed above for the specified number of meals.
 
 ───────────────────────────────  MAIN MEALS VS SNACKS CALORIE DISTRIBUTION  ────────────────────────────────
-• **CRITICAL: The main meals (Breakfast, Lunch, Dinner) must each have significantly more calories, protein, fat, and carbs than the snacks (Morning Snack, Afternoon Snack).**
+• **CRITICAL: The main meals (Breakfast, Lunch, Dinner) must each have significantly more calories, protein, fat, and carbs than the snacks (Morning Snack, Mid-Morning Snack, Afternoon Snack, Mid-Afternoon Snack, Evening Snack, Late Night Snack).**
 • **Snacks should always be much lighter in calories and macros than the main meals.**
 • **Never allow a snack to have as many or more calories/macros as a main meal.**
 
@@ -899,7 +1012,7 @@ CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fa
 - daily_protein (g)  
 - daily_fat (g)  
 - daily_carbs (g)  
-- number_of_meals (integer 3–5)  
+- number_of_meals (integer 3–9)  
 - dietary_restrictions (e.g., kosher, vegetarian, gluten-free)  
 - food_allergies (list of ingredients to avoid)  
 - client_preferences (free-form list, e.g. "loves pasta", "hates mushrooms")  
@@ -910,6 +1023,21 @@ CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fa
 2. **Inclusions:** Feature each "likes/loves…" item in **exactly one** meal only.  
 3. **Neutral items:** Neither forced nor forbidden.  
 4. **Variety first:** Never repeat the same main ingredient across meals.
+5. **CRITICAL ALTERNATIVE DIFFERENTIATION:** Main and alternative meals must be fundamentally different:
+   • Use completely different main protein sources (e.g., eggs vs yogurt, chicken vs fish, tofu vs beef)
+   • Use different grain/carb bases (e.g., bread vs rice vs pasta vs potatoes vs quinoa)
+   • Use different cooking methods (e.g., grilled vs baked vs steamed vs sautéed)
+   • Use different flavor profiles (e.g., Mediterranean vs Asian vs Mexican vs Italian)
+   • Never use the same core ingredients in both options (e.g., if main has yogurt, alternative should not have yogurt)
+   • If user has a preference for a specific food, use it in ONLY ONE option, not both
+   • **EXAMPLES OF WHAT NOT TO DO:**
+     - Breakfast: Both options having yogurt + cereal + fruit + nut butter
+     - Dinner: Both options having eggs + bread + cheese + vegetables
+     - Lunch: Both options having fish + rice + vegetables + oil
+   • **EXAMPLES OF GOOD ALTERNATIVES:**
+     - Breakfast: Option 1: Yogurt bowl with granola vs Option 2: Scrambled eggs with toast
+     - Dinner: Option 1: Grilled chicken with quinoa vs Option 2: Baked fish with potatoes
+     - Lunch: Option 1: Tofu stir-fry with rice vs Option 2: Turkey sandwich with salad
 
 ────────────────────────────────────────  MACRO DISTRIBUTION & VALIDATION  ───────────────────────────────────
 **CRITICAL: You MUST respect the EXACT daily macro targets provided by the user with ZERO tolerance.**
@@ -928,7 +1056,7 @@ CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fa
    per_carb = daily_carbs     ÷ number_of_meals (exact division, no rounding)
 
 3. **PERFECT Meal distribution:**  
-    • For Breakfast, Morning Snack, Lunch, Afternoon Snack: each must be EXACTLY at per-meal averages (±0% tolerance)
+    • For Breakfast, Morning Snack, Mid-Morning Snack, Lunch, Afternoon Snack, Mid-Afternoon Snack, Evening Snack, Late Night Snack: each must be EXACTLY at per-meal averages (±0% tolerance)
     • Dinner (when included): must be EXACTLY at its calculated percentage of daily totals (±0% tolerance)
     • **For low-fat diets (< 30g total fat):** Distribute fat with surgical precision - use lean proteins, minimal oils, fat-free dairy
     • **For low-carb diets (< 100g total carbs):** Focus on protein and healthy fats, minimize grains and fruits with exact precision
@@ -962,6 +1090,8 @@ Respond **only** with valid JSON in this exact shape.
 If any meal is missing or fails a rule, silently self-correct and regenerate before sending.
 
 • **CRITICAL: For each meal, the main protein source in the main meal must be different from the main protein source in the alternative meal. Never use the same main protein source for both.**
+• **CRITICAL: Main and alternative meals must be fundamentally different - never use the same core ingredients, cooking methods, or flavor profiles.**
+• **CRITICAL: If user has a preference for a specific food, use it in ONLY ONE option (main OR alternative), never in both.**
 
 {{
   "template": [
@@ -1020,7 +1150,11 @@ If any meal is missing or fails a rule, silently self-correct and regenerate bef
                     expected_meals = {
                         3: ["Breakfast", "Lunch", "Dinner"],
                         4: ["Breakfast", "Morning Snack", "Lunch", "Dinner"],
-                        5: ["Breakfast", "Morning Snack", "Lunch", "Afternoon Snack", "Dinner"]
+                        5: ["Breakfast", "Morning Snack", "Lunch", "Afternoon Snack", "Dinner"],
+                        6: ["Breakfast", "Morning Snack", "Lunch", "Afternoon Snack", "Dinner", "Evening Snack"],
+                        7: ["Breakfast", "Morning Snack", "Mid-Morning Snack", "Lunch", "Afternoon Snack", "Dinner", "Evening Snack"],
+                        8: ["Breakfast", "Morning Snack", "Mid-Morning Snack", "Lunch", "Afternoon Snack", "Mid-Afternoon Snack", "Dinner", "Evening Snack"],
+                        9: ["Breakfast", "Morning Snack", "Mid-Morning Snack", "Lunch", "Afternoon Snack", "Mid-Afternoon Snack", "Dinner", "Evening Snack", "Late Night Snack"]
                     }
                     
                     meal_count = preferences.get('meal_count', 5)
@@ -1050,7 +1184,8 @@ If any meal is missing or fails a rule, silently self-correct and regenerate bef
                         alt_issues = val_data.get("issues_alt", [])
                         main_vs_snack_issues = val_data.get("issues_main_vs_snack", [])
                         main_alt_issues = val_data.get("issues_main_alt", [])
-                        new_issues = main_issues + alt_issues + main_vs_snack_issues + main_alt_issues
+                        similarity_issues = val_data.get("issues_similarity", [])
+                        new_issues = main_issues + alt_issues + main_vs_snack_issues + main_alt_issues + similarity_issues
                         
                         if new_issues:
                             previous_issues = new_issues
@@ -1189,10 +1324,17 @@ def api_build_menu():
                     region_instruction = region_instructions.get(region, region_instructions['israel'])
                     
                     main_prompt = (
-                        "You are a professional dietitian AI. "
+                        "You are a professional HEALTHY dietitian AI. "
                         "Given a meal template for one meal and user preferences, build the **main option only** for this meal. "
                         "The meal you generate MUST have the EXACT name as provided in 'meal_name'. "
                         f"REGION-SPECIFIC REQUIREMENTS: {region_instruction} "
+                        "**CRITICAL HEALTHY DIETITIAN RULES:** "
+                        "• You are a HEALTHY dietitian - prioritize nutritious, whole foods over processed snacks "
+                        "• NEVER suggest unhealthy processed snacks (like BISLI, Bamba, chips, candy, cookies, etc.) unless the user EXPLICITLY requests them in their preferences "
+                        "• For snacks, always suggest healthy options like: fruits, vegetables, nuts, yogurt, cottage cheese, hummus, whole grain crackers, etc. "
+                        "• Only include unhealthy snacks if the user specifically mentions 'likes BISLI', 'loves chips', 'wants candy' etc. in their client_preferences "
+                        "• Even then, limit unhealthy snacks to maximum 1-2 times per week, not daily "
+                        "• Focus on balanced nutrition with whole foods, lean proteins, complex carbohydrates, and healthy fats "
                         "**CRITICAL: ALWAYS GENERATE ALL CONTENT IN ENGLISH ONLY.** "
                         "- All meal names, ingredient names, and descriptions must be in English "
                         "- Do not use Hebrew, Arabic, or any other language "
@@ -1292,10 +1434,17 @@ def api_build_menu():
                 for alt_attempt in range(6):
                     logger.info(f"🧠 Building ALTERNATIVE for meal '{meal_name}', attempt {alt_attempt + 1}")
                     alt_prompt = (
-                        "You are a professional dietitian AI. "
+                        "You are a professional HEALTHY dietitian AI. "
                         "Given a meal template for one meal and user preferences, build the **alternative option only** for this meal. "
                         "The meal you generate MUST have the EXACT name as provided in 'meal_name'. "
                         f"REGION-SPECIFIC REQUIREMENTS: {region_instruction} "
+                        "**CRITICAL HEALTHY DIETITIAN RULES:** "
+                        "• You are a HEALTHY dietitian - prioritize nutritious, whole foods over processed snacks "
+                        "• NEVER suggest unhealthy processed snacks (like BISLI, Bamba, chips, candy, cookies, etc.) unless the user EXPLICITLY requests them in their preferences "
+                        "• For snacks, always suggest healthy options like: fruits, vegetables, nuts, yogurt, cottage cheese, hummus, whole grain crackers, etc. "
+                        "• Only include unhealthy snacks if the user specifically mentions 'likes BISLI', 'loves chips', 'wants candy' etc. in their client_preferences "
+                        "• Even then, limit unhealthy snacks to maximum 1-2 times per week, not daily "
+                        "• Focus on balanced nutrition with whole foods, lean proteins, complex carbohydrates, and healthy fats "
                         "**CRITICAL: ALWAYS GENERATE ALL CONTENT IN ENGLISH ONLY.** "
                         "- All meal names, ingredient names, and descriptions must be in English "
                         "- Do not use Hebrew, Arabic, or any other language "
@@ -1689,7 +1838,7 @@ def api_validate_template():
         # --- Main meals vs Snacks calorie/macros distribution validation ---
         # Define meal types
         main_meal_names = {"Breakfast", "Lunch", "Dinner"}
-        snack_names = {"Morning Snack", "Afternoon Snack"}
+        snack_names = {"Morning Snack", "Mid-Morning Snack", "Afternoon Snack", "Mid-Afternoon Snack", "Evening Snack", "Late Night Snack"}
 
         # Helper to extract macro values for main and snacks
         def extract_macro_lists(template, macro):
@@ -1720,16 +1869,62 @@ def api_validate_template():
         is_valid_main_vs_snack = len(main_vs_snack_issues) == 0
         is_valid = is_valid and is_valid_main_vs_snack
 
+        # --- Alternative Similarity Validation ---
+        # Check that main and alternative meals are sufficiently different
+        similarity_issues = []
+        for meal in template:
+            meal_name = meal.get("meal", "")
+            main_meal = meal.get("main", {})
+            alt_meal = meal.get("alternative", {})
+            
+            # Extract ingredients from both meals
+            main_ingredients = set()
+            alt_ingredients = set()
+            
+            # Extract from main meal ingredients
+            if "ingredients" in main_meal:
+                for ingredient in main_meal["ingredients"]:
+                    item = ingredient.get("item", "").lower().strip()
+                    if item:
+                        main_ingredients.add(item)
+            
+            # Extract from alternative meal ingredients
+            if "ingredients" in alt_meal:
+                for ingredient in alt_meal["ingredients"]:
+                    item = ingredient.get("item", "").lower().strip()
+                    if item:
+                        alt_ingredients.add(item)
+            
+            # Check for overlapping ingredients
+            common_ingredients = main_ingredients.intersection(alt_ingredients)
+            if len(common_ingredients) > 2:  # Allow max 2 common ingredients
+                similarity_issues.append(
+                    f"{meal_name}: Too many common ingredients ({len(common_ingredients)}): {', '.join(list(common_ingredients)[:5])} - Main and alternative must be fundamentally different"
+                )
+            
+            # Check for similar protein sources
+            main_protein = main_meal.get("main_protein_source", "").lower()
+            alt_protein = alt_meal.get("main_protein_source", "").lower()
+            if main_protein and alt_protein and main_protein == alt_protein:
+                similarity_issues.append(
+                    f"{meal_name}: Same protein source '{main_protein}' in both main and alternative - Must use different proteins"
+                )
+
+        is_valid_similarity = len(similarity_issues) == 0
+        is_valid = is_valid and is_valid_similarity
+
         return jsonify({
             "is_valid": is_valid,
             "is_valid_main": is_valid_main,
             "is_valid_alt": is_valid_alt,
             "is_valid_main_alt": is_valid_main_alt,
             "is_valid_main_vs_snack": is_valid_main_vs_snack,
+            "is_valid_similarity": is_valid_similarity,
             "issues_main": issues_main,
             "issues_alt": issues_alt,
             "issues_main_alt": main_alt_issues,
             "issues_main_vs_snack": main_vs_snack_issues,
+            "issues_similarity": similarity_issues,
             "totals_main": {k: round(v, 1) for k, v in total_main.items()},
             "totals_alt": {k: round(v, 1) for k, v in total_alt.items()},
             "targets": target_macros
@@ -2015,12 +2210,19 @@ def generate_alternative_meal():
     
     # Compose prompt for OpenAI
     system_prompt = (
-        "You are a professional dietitian AI. Generate a COMPLETELY DIFFERENT alternative meal that is entirely distinct from both the main meal and the existing alternative. "
+        "You are a professional HEALTHY dietitian AI. Generate a COMPLETELY DIFFERENT alternative meal that is entirely distinct from both the main meal and the existing alternative. "
         "CRITICAL REQUIREMENTS: "
         "- Create a meal with DIFFERENT main protein source, DIFFERENT cooking method, and DIFFERENT flavor profile "
         "- Use COMPLETELY DIFFERENT ingredients than both the main and existing alternative "
         "- The new meal MUST match the main meal's macros within ±5% tolerance (calories, protein, fat, carbs) "
         f"REGION-SPECIFIC REQUIREMENTS: {region_instruction} "
+        "**CRITICAL HEALTHY DIETITIAN RULES:** "
+        "• You are a HEALTHY dietitian - prioritize nutritious, whole foods over processed snacks "
+        "• NEVER suggest unhealthy processed snacks (like BISLI, Bamba, chips, candy, cookies, etc.) unless the user EXPLICITLY requests them in their preferences "
+        "• For snacks, always suggest healthy options like: fruits, vegetables, nuts, yogurt, cottage cheese, hummus, whole grain crackers, etc. "
+        "• Only include unhealthy snacks if the user specifically mentions 'likes BISLI', 'loves chips', 'wants candy' etc. in their client_preferences "
+        "• Even then, limit unhealthy snacks to maximum 1-2 times per week, not daily "
+        "• Focus on balanced nutrition with whole foods, lean proteins, complex carbohydrates, and healthy fats "
         "**CRITICAL: ALWAYS GENERATE ALL CONTENT IN ENGLISH ONLY.** "
         "- All meal names, ingredient names, and descriptions must be in English "
         "- Do not use Hebrew, Arabic, or any other language "
@@ -2303,12 +2505,19 @@ def generate_alternative_meal_by_id():
 
     # Compose prompt for OpenAI (reuse from /api/generate-alternative-meal)
     system_prompt = (
-        "You are a professional dietitian AI. Generate a COMPLETELY DIFFERENT alternative meal that is entirely distinct from both the main meal and the existing alternative. "
+        "You are a professional HEALTHY dietitian AI. Generate a COMPLETELY DIFFERENT alternative meal that is entirely distinct from both the main meal and the existing alternative. "
         "CRITICAL REQUIREMENTS: "
         "- Create a meal with DIFFERENT main protein source, DIFFERENT cooking method, and DIFFERENT flavor profile "
         "- Use COMPLETELY DIFFERENT ingredients than both the main and existing alternative "
         "- The new meal MUST match the main meal's macros within ±5% tolerance (calories, protein, fat, carbs) "
         f"REGION-SPECIFIC REQUIREMENTS: {region_instruction} "
+        "**CRITICAL HEALTHY DIETITIAN RULES:** "
+        "• You are a HEALTHY dietitian - prioritize nutritious, whole foods over processed snacks "
+        "• NEVER suggest unhealthy processed snacks (like BISLI, Bamba, chips, candy, cookies, etc.) unless the user EXPLICITLY requests them in their preferences "
+        "• For snacks, always suggest healthy options like: fruits, vegetables, nuts, yogurt, cottage cheese, hummus, whole grain crackers, etc. "
+        "• Only include unhealthy snacks if the user specifically mentions 'likes BISLI', 'loves chips', 'wants candy' etc. in their client_preferences "
+        "• Even then, limit unhealthy snacks to maximum 1-2 times per week, not daily "
+        "• Focus on balanced nutrition with whole foods, lean proteins, complex carbohydrates, and healthy fats "
         "**CRITICAL: ALWAYS GENERATE ALL CONTENT IN ENGLISH ONLY.** "
         "- All meal names, ingredient names, and descriptions must be in English "
         "- Do not use Hebrew, Arabic, or any other language "

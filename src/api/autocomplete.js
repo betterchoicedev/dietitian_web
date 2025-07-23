@@ -91,11 +91,11 @@ function handleDatabaseError(operation, err) {
 }
 
 // פונקציה שמחזירה הצעות השלמה על בסיס קלט המשתמש
-export async function getIngredientSuggestions(query) {
+export async function getIngredientSuggestions(query, limit = 10, offset = 0) {
   if (!query || query.length < 2) return [];
 
   const startTime = Date.now();
-  console.log(`🔍 Getting suggestions for: "${query}"`);
+  console.log(`🔍 Getting suggestions for: "${query}" (limit: ${limit}, offset: ${offset})`);
 
   try {
     const poolConnection = await getPool();
@@ -106,8 +106,10 @@ export async function getIngredientSuggestions(query) {
     
     const result = await request
       .input('search', sql.NVarChar, query)
+      .input('limit', sql.Int, limit)
+      .input('offset', sql.Int, offset)
       .query(`
-        SELECT TOP 10
+        SELECT 
           english_name,
           hebrew_name,
           Energy,
@@ -119,10 +121,16 @@ export async function getIngredientSuggestions(query) {
            OR hebrew_name LIKE N'%' + @search + '%'
         ORDER BY 
           CASE 
-            WHEN hebrew_name LIKE N'%' + @search + '%' THEN 0
-            ELSE 1
+            WHEN hebrew_name LIKE @search + N'%' THEN 0
+            WHEN english_name LIKE @search + N'%' THEN 1
+            WHEN hebrew_name LIKE N'%' + @search + N'%' THEN 2
+            WHEN english_name LIKE N'%' + @search + N'%' THEN 3
+            ELSE 4
           END,
-          LEN(hebrew_name)
+          LEN(hebrew_name),
+          hebrew_name
+        OFFSET @offset ROWS
+        FETCH NEXT @limit ROWS ONLY
       `);
 
     const endTime = Date.now();

@@ -818,6 +818,146 @@ export const entities = {
       return true;
     }
   },
+  FoodLogs: {
+    // Get food logs by user_id
+    getByUserId: async (user_id) => {
+      try {
+        console.log('🍽️ Getting food logs for user_id:', user_id);
+        
+        const { data, error } = await supabase
+          .from('food_logs')
+          .select('*')
+          .eq('user_id', user_id)
+          .order('log_date', { ascending: false });
+        
+        if (error) {
+          console.error('❌ Supabase food logs get error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        console.log('✅ Retrieved food logs from Supabase:', data?.length || 0, 'records');
+        return data || [];
+        
+      } catch (err) {
+        console.error('❌ Error in FoodLogs.getByUserId:', err);
+        throw err;
+      }
+    },
+    
+    // Get food logs by user_code (via chat_users table)
+    getByUserCode: async (user_code) => {
+      try {
+        console.log('🍽️ Getting food logs for user_code:', user_code);
+        
+        // First get the user_id from chat_users table
+        const { data: user, error: userError } = await supabase
+          .from('chat_users')
+          .select('id')
+          .eq('user_code', user_code)
+          .single();
+        
+        if (userError) {
+          console.error('❌ Error getting user by user_code:', userError);
+          throw new Error(`User not found: ${user_code}`);
+        }
+        
+        if (!user) {
+          console.log('⚠️ No user found with user_code:', user_code);
+          return [];
+        }
+        
+        // Then get food logs by user_id
+        const { data, error } = await supabase
+          .from('food_logs')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('log_date', { ascending: false });
+        
+        if (error) {
+          console.error('❌ Supabase food logs get error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        console.log('✅ Retrieved food logs from Supabase:', data?.length || 0, 'records');
+        return data || [];
+        
+      } catch (err) {
+        console.error('❌ Error in FoodLogs.getByUserCode:', err);
+        throw err;
+      }
+    },
+    
+    // Analyze food logs to extract user preferences
+    analyzePreferences: async (user_code) => {
+      try {
+        console.log('🔍 Analyzing food preferences for user_code:', user_code);
+        
+        const foodLogs = await entities.FoodLogs.getByUserCode(user_code);
+        
+        if (!foodLogs || foodLogs.length === 0) {
+          console.log('⚠️ No food logs found for user:', user_code);
+          return null;
+        }
+        
+        // Extract food items from all logs
+        const allFoodItems = [];
+        const mealPreferences = {};
+        
+        foodLogs.forEach(log => {
+          if (log.food_items && typeof log.food_items === 'object') {
+            // Handle JSONB format
+            const items = Array.isArray(log.food_items) ? log.food_items : [log.food_items];
+            
+            items.forEach(item => {
+              if (item && item.name) {
+                allFoodItems.push({
+                  name: item.name,
+                  meal_label: log.meal_label,
+                  date: log.log_date
+                });
+              }
+            });
+          }
+        });
+        
+        // Count food item frequencies
+        const foodFrequency = {};
+        allFoodItems.forEach(item => {
+          const name = item.name.toLowerCase().trim();
+          foodFrequency[name] = (foodFrequency[name] || 0) + 1;
+        });
+        
+        // Get most frequently consumed foods (top 10)
+        const sortedFoods = Object.entries(foodFrequency)
+          .sort(([,a], [,b]) => b - a)
+          .slice(0, 10)
+          .map(([name, count]) => ({ name, count }));
+        
+        // Analyze meal patterns
+        const mealCounts = {};
+        foodLogs.forEach(log => {
+          if (log.meal_label) {
+            mealCounts[log.meal_label] = (mealCounts[log.meal_label] || 0) + 1;
+          }
+        });
+        
+        // Create preferences object
+        const preferences = {
+          frequently_consumed_foods: sortedFoods.map(food => food.name),
+          meal_patterns: mealCounts,
+          total_logs: foodLogs.length,
+          analysis_date: new Date().toISOString()
+        };
+        
+        console.log('✅ Food preferences analysis completed:', preferences);
+        return preferences;
+        
+      } catch (err) {
+        console.error('❌ Error analyzing food preferences:', err);
+        throw err;
+      }
+    }
+  },
   ChatMessage: {
     // Fetch messages for a conversation, paginated (oldest first)
     listByConversation: async (conversation_id, { limit = 20, beforeMessageId = null } = {}) => {
@@ -902,7 +1042,7 @@ export const integrations = {
             messages: [
               {
                 role: 'system',
-                content: 'You are a friendly and helpful nutritionist assistant. Keep your responses concise and to the point. Use emojis appropriately to make the conversation engaging. When answering questions about specific foods or nutrients, focus only on the asked topic. If the user provides a JSON schema, format your response as valid JSON matching that schema.'
+                content: 'You are a friendly and helpful HEALTHY nutritionist assistant. Keep your responses concise and to the point. Use emojis appropriately to make the conversation engaging. When answering questions about specific foods or nutrients, focus only on the asked topic. If the user provides a JSON schema, format your response as valid JSON matching that schema. **CRITICAL HEALTHY DIETITIAN RULES:** You are a HEALTHY nutritionist - prioritize nutritious, whole foods over processed snacks. NEVER suggest unhealthy processed snacks (like BISLI, Bamba, chips, candy, cookies, etc.) unless the user EXPLICITLY requests them in their preferences. For snacks, always suggest healthy options like: fruits, vegetables, nuts, yogurt, cottage cheese, hummus, whole grain crackers, etc. Only include unhealthy snacks if the user specifically mentions "likes BISLI", "loves chips", "wants candy" etc. in their preferences. Even then, limit unhealthy snacks to maximum 1-2 times per week, not daily. Focus on balanced nutrition with whole foods, lean proteins, complex carbohydrates, and healthy fats.'
               },
               {
                 role: 'user',

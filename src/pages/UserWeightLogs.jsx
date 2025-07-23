@@ -154,6 +154,12 @@ export default function UserWeightLogs() {
             // Keep original date for filtering, add display date for UI
             original_date: log.measurement_date,
             measurement_date: log.measurement_date ? new Date(log.measurement_date).toLocaleDateString() : 'Unknown Date',
+            // Ensure numeric values are valid numbers
+            weight_kg: typeof log.weight_kg === 'number' && !isNaN(log.weight_kg) ? log.weight_kg : 0,
+            body_fat_percentage: typeof log.body_fat_percentage === 'number' && !isNaN(log.body_fat_percentage) ? log.body_fat_percentage : 0,
+            waist_circumference_cm: typeof log.waist_circumference_cm === 'number' && !isNaN(log.waist_circumference_cm) ? log.waist_circumference_cm : 0,
+            hip_circumference_cm: typeof log.hip_circumference_cm === 'number' && !isNaN(log.hip_circumference_cm) ? log.hip_circumference_cm : 0,
+            arm_circumference_cm: typeof log.arm_circumference_cm === 'number' && !isNaN(log.arm_circumference_cm) ? log.arm_circumference_cm : 0,
             // Parse JSON fields if they're strings
             general_measurements: typeof log.general_measurements === 'string' 
               ? JSON.parse(log.general_measurements) 
@@ -217,19 +223,47 @@ export default function UserWeightLogs() {
 
     const latest = filteredLogs[filteredLogs.length - 1];
     const earliest = filteredLogs[0];
-    const weightChange = latest.weight_kg - earliest.weight_kg;
-    const bodyFatChange = latest.body_fat_percentage - earliest.body_fat_percentage;
+    
+    // Ensure we have valid numeric values
+    const latestWeight = typeof latest.weight_kg === 'number' && !isNaN(latest.weight_kg) ? latest.weight_kg : 0;
+    const earliestWeight = typeof earliest.weight_kg === 'number' && !isNaN(earliest.weight_kg) ? earliest.weight_kg : 0;
+    const latestBodyFat = typeof latest.body_fat_percentage === 'number' && !isNaN(latest.body_fat_percentage) ? latest.body_fat_percentage : 0;
+    const earliestBodyFat = typeof earliest.body_fat_percentage === 'number' && !isNaN(earliest.body_fat_percentage) ? earliest.body_fat_percentage : 0;
+    
+    const weightChange = latestWeight - earliestWeight;
+    const bodyFatChange = latestBodyFat - earliestBodyFat;
+
+    // Calculate percentage changes with division by zero protection
+    const weightChangePercent = earliestWeight > 0 
+      ? ((weightChange / earliestWeight) * 100).toFixed(1)
+      : '0.0';
+    
+    const bodyFatChangePercent = earliestBodyFat > 0 
+      ? ((bodyFatChange / earliestBodyFat) * 100).toFixed(1)
+      : '0.0';
+
+    // Calculate averages with validation
+    const validWeightLogs = filteredLogs.filter(log => typeof log.weight_kg === 'number' && !isNaN(log.weight_kg));
+    const validBodyFatLogs = filteredLogs.filter(log => typeof log.body_fat_percentage === 'number' && !isNaN(log.body_fat_percentage));
+    
+    const averageWeight = validWeightLogs.length > 0 
+      ? (validWeightLogs.reduce((sum, log) => sum + log.weight_kg, 0) / validWeightLogs.length).toFixed(1)
+      : '0.0';
+    
+    const averageBodyFat = validBodyFatLogs.length > 0 
+      ? (validBodyFatLogs.reduce((sum, log) => sum + log.body_fat_percentage, 0) / validBodyFatLogs.length).toFixed(1)
+      : '0.0';
 
     return {
       totalMeasurements: filteredLogs.length,
-      latestWeight: latest.weight_kg,
-      latestBodyFat: latest.body_fat_percentage,
+      latestWeight: latestWeight,
+      latestBodyFat: latestBodyFat,
       weightChange,
       bodyFatChange,
-      weightChangePercent: ((weightChange / earliest.weight_kg) * 100).toFixed(1),
-      bodyFatChangePercent: ((bodyFatChange / earliest.body_fat_percentage) * 100).toFixed(1),
-      averageWeight: (filteredLogs.reduce((sum, log) => sum + log.weight_kg, 0) / filteredLogs.length).toFixed(1),
-      averageBodyFat: (filteredLogs.reduce((sum, log) => sum + log.body_fat_percentage, 0) / filteredLogs.length).toFixed(1)
+      weightChangePercent,
+      bodyFatChangePercent,
+      averageWeight,
+      averageBodyFat
     };
   };
 

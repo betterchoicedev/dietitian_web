@@ -100,11 +100,22 @@ function handleDatabaseError(err, res, operation) {
 // Suggestions endpoint
 app.get('/api/suggestions', async (req, res) => {
   try {
-    const { query } = req.query;
-    if (!query || query.length < 2) return res.json([]);
+    const { query, page = 1, limit = 10 } = req.query;
+    if (!query || query.length < 2) return res.json({ suggestions: [], hasMore: false });
 
-    const suggestions = await getIngredientSuggestions(query);
-    res.json(suggestions);
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const offset = (pageNum - 1) * limitNum;
+
+    const suggestions = await getIngredientSuggestions(query, limitNum, offset);
+    const hasMore = suggestions.length === limitNum;
+
+    res.json({
+      suggestions,
+      hasMore,
+      page: pageNum,
+      limit: limitNum
+    });
   } catch (error) {
     console.error('Error in /api/suggestions:', error);
     res.status(500).json({ error: 'Failed to fetch suggestions' });

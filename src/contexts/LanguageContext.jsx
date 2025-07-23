@@ -208,6 +208,7 @@ export const translations = {
     foodLimitationsPlaceholder: 'Simple text: vegetarian, kosher, low sodium (auto-converts to JSON array)',
     foodLimitationsHelp: '✨ Enter simple text like "vegetarian, kosher" and it will auto-convert to ["vegetarian", "kosher"]',
     clientPreferences: 'Client Preferences',
+    foodDiary: 'Food Diary',
     clientPreferencesPlaceholder: 'Simple text: loves pasta, mediterranean cuisine, quick meals',
     clientPreferencesHelp: '✨ Enter simple text like "loves pasta" and it will auto-convert to ["loves pasta"]',
     recommendations: 'Recommendations',
@@ -224,6 +225,11 @@ export const translations = {
     confirmDelete: 'Are you sure you want to delete',
     clientDeleted: 'Client deleted successfully',
     deleteWarning: 'This action cannot be undone.',
+    foodLogsFound: 'Food logs found',
+    entriesFound: 'entries found',
+    preferencesAutoPopulated: 'Preferences auto-populated',
+    autoPopulated: 'Auto-populated',
+    translateToHebrew: 'Translate to Hebrew',
     
     // BMI Status
     underweight: 'Underweight',
@@ -1011,6 +1017,7 @@ export const translations = {
     foodLimitationsPlaceholder: 'טקסט פשוט: צמחוני, קושר, נמוך בנתרן (מתמיר בעצמו למערך JSON)',
     foodLimitationsHelp: '✨ הכנס טקסט פשוט כמו "צמחוני, קושר" והוא יתמיר בעצמו ל["צמחוני", "קושר"]',
     clientPreferences: 'העדפות לקוח',
+    foodDiary: 'יומן מזון',
     clientPreferencesPlaceholder: 'טקסט פשוט: אוהב פסטה, מטבח ים תיכוני, ארוחות מהירות',
     clientPreferencesHelp: '✨ הכנס טקסט פשוט כמו "אוהב פסטה" והוא יתמיר בעצמו ל["אוהב פסטה"]',
     recommendations: 'המלצות',
@@ -1027,6 +1034,11 @@ export const translations = {
     confirmDelete: 'האם אתה בטוח שברצונך למחוק',
     clientDeleted: 'הלקוח נמחק בהצלחה',
     deleteWarning: 'פעולה זו לא ניתנת לביטול.',
+    foodLogsFound: 'נמצאו יומני מזון',
+    entriesFound: 'רשומות נמצאו',
+    preferencesAutoPopulated: 'העדפות מולאו אוטומטית',
+    autoPopulated: 'מולא אוטומטית',
+    translateToHebrew: 'תרגם לעברית',
     
     // BMI Status
     underweight: 'תת משקל',

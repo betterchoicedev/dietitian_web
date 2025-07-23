@@ -77,7 +77,7 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
   );
 };
 
-const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, translations }) => {
+const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, translations, currentIngredient }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
   const [originalValue, setOriginalValue] = useState(value);
@@ -85,6 +85,9 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [suggestionSelected, setSuggestionSelected] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [currentQuery, setCurrentQuery] = useState('');
   const inputRef = React.useRef(null);
   const searchTimeoutRef = React.useRef(null);
 
@@ -101,15 +104,17 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
     };
   }, []);
 
-  const fetchSuggestions = async (query) => {
+  const fetchSuggestions = async (query, page = 1, append = false) => {
     if (query.length < 2) {
       setSuggestions([]);
+      setHasMore(false);
       return;
     }
 
     setIsLoading(true);
     try {
-      const url = `https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/suggestions?query=${encodeURIComponent(query)}`;
+      // const url = `https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/suggestions?query=${encodeURIComponent(query)}`;
+      const url = `http://localhost:3001/api/suggestions?query=${encodeURIComponent(query)}&page=${page}&limit=10`;
       console.log('🔍 Fetching suggestions from:', url);
       
       const response = await fetch(url);
@@ -123,10 +128,22 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
       
       const data = await response.json();
       console.log('📋 Suggestions received:', data);
-      setSuggestions(data);
+      
+      if (append) {
+        setSuggestions(prev => [...prev, ...data.suggestions]);
+      } else {
+        setSuggestions(data.suggestions);
+      }
+      
+      setHasMore(data.hasMore || false);
+      setCurrentPage(page);
+      setCurrentQuery(query);
     } catch (error) {
       console.error('❌ Error fetching suggestions:', error);
-      setSuggestions([]);
+      if (!append) {
+        setSuggestions([]);
+        setHasMore(false);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -156,22 +173,57 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
       setIsEditing(false);
       setShowSuggestions(false);
       setSuggestions([]);
+    } else if (e.key === 'Enter') {
+      console.log('↵ Enter pressed, saving direct edit');
+      // Save the direct edit without selecting a suggestion
+      handleDirectEdit();
     }
   };
 
   const handleBlur = () => {
-    console.log('👋 Input blurred, reverting to original value:', originalValue);
-    // Always revert to original value - only database suggestions should trigger changes
-    setEditValue(originalValue);
+    console.log('👋 Input blurred');
+    // Only revert if no suggestion was selected and no direct edit was made
+    if (!suggestionSelected) {
+      console.log('👋 No suggestion selected, reverting to original value:', originalValue);
+      setEditValue(originalValue);
+    }
+    setIsEditing(false);
+    setShowSuggestions(false);
+    setSuggestions([]);
+    setSuggestionSelected(false);
+  };
+
+  const handleDirectEdit = () => {
+    console.log('✏️ Saving direct edit:', editValue);
+    // Update only the item name, preserving all existing nutritional values
+    const updatedValues = {
+      item: editValue,
+      household_measure: currentIngredient?.household_measure || '',
+      calories: currentIngredient?.calories || 0,
+      protein: currentIngredient?.protein || 0,
+      fat: currentIngredient?.fat || 0,
+      carbs: currentIngredient?.carbs || 0,
+      'brand of pruduct': currentIngredient?.['brand of pruduct'] || ''
+    };
+    
+    onChange(updatedValues, mealIndex, optionIndex, ingredientIndex);
+    setSuggestionSelected(true);
     setIsEditing(false);
     setShowSuggestions(false);
     setSuggestions([]);
   };
 
+  const loadMore = () => {
+    if (hasMore && !isLoading) {
+      fetchSuggestions(currentQuery, currentPage + 1, true);
+    }
+  };
+
   const handleSelect = async (suggestion) => {
     console.log('🔍 handleSelect called with suggestion:', suggestion);
     try {
-      const url = `https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`;
+      // const url = `https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`;
+      const url = `http://localhost:3001/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`;
       console.log('🌐 Fetching from URL:', url);
       
       const response = await fetch(url);
@@ -200,6 +252,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
       onChange(updatedValues, mealIndex, optionIndex, ingredientIndex);
       setEditValue(suggestion.hebrew || suggestion.english);
+      setSuggestionSelected(true);
       setShowSuggestions(false);
       setIsEditing(false);
     } catch (error) {
@@ -261,6 +314,9 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
             <div className="px-4 py-3 text-gray-500 text-center">Loading...</div>
           ) : suggestions.length > 0 ? (
             <ul className="py-1 max-h-72 overflow-auto divide-y divide-gray-100">
+              <li className="px-4 py-2 text-xs text-gray-500 bg-gray-50 border-b border-gray-100">
+                Click a suggestion to replace with nutritional data, or press Enter to keep current macros
+              </li>
               {suggestions.map((suggestion, index) => (
                 <li
                   key={index}
@@ -291,9 +347,41 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
                   )}
                 </li>
               ))}
+              {hasMore && (
+                <li className="border-t border-gray-100">
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      loadMore();
+                    }}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    disabled={isLoading}
+                    className="w-full px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150 flex items-center justify-center gap-2"
+                  >
+                    {isLoading ? (
+                      <>
+                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
+                        Loading...
+                      </>
+                    ) : (
+                      <>
+                        <span>Load More</span>
+                        <span className="text-xs text-gray-400">({suggestions.length} shown)</span>
+                      </>
+                    )}
+                  </button>
+                </li>
+              )}
             </ul>
           ) : (
-            <div className="px-4 py-3 text-gray-400 text-center">No suggestions found</div>
+            <div className="px-4 py-3 text-gray-400 text-center">
+              <div>No suggestions found</div>
+              <div className="text-xs mt-1">Press Enter to save your edit (keeps current macros)</div>
+            </div>
           )}
         </div>
       )}
@@ -305,6 +393,47 @@ const MenuCreate = () => {
   const pdfRef = React.useRef();
   const [showShoppingList, setShowShoppingList] = useState(false);
   const [shoppingList, setShoppingList] = useState([]);
+  
+  // Undo/Redo system
+  const [undoStack, setUndoStack] = useState([]);
+  const [redoStack, setRedoStack] = useState([]);
+  const [isUndoRedoAction, setIsUndoRedoAction] = useState(false);
+
+  // Undo/Redo functions
+  const saveToUndoStack = (currentMenu) => {
+    if (!isUndoRedoAction) {
+      setUndoStack(prev => [...prev, JSON.stringify(currentMenu)]);
+      setRedoStack([]); // Clear redo stack when new action is performed
+    }
+  };
+
+  const undo = () => {
+    if (undoStack.length > 0) {
+      setIsUndoRedoAction(true);
+      const previousState = undoStack[undoStack.length - 1];
+      const currentState = JSON.stringify(menu);
+      
+      setRedoStack(prev => [...prev, currentState]);
+      setUndoStack(prev => prev.slice(0, -1));
+      setMenu(JSON.parse(previousState));
+      setOriginalMenu(JSON.parse(previousState));
+      setIsUndoRedoAction(false);
+    }
+  };
+
+  const redo = () => {
+    if (redoStack.length > 0) {
+      setIsUndoRedoAction(true);
+      const nextState = redoStack[redoStack.length - 1];
+      const currentState = JSON.stringify(menu);
+      
+      setUndoStack(prev => [...prev, currentState]);
+      setRedoStack(prev => prev.slice(0, -1));
+      setMenu(JSON.parse(nextState));
+      setOriginalMenu(JSON.parse(nextState));
+      setIsUndoRedoAction(false);
+    }
+  };
 
   // Load menu state from localStorage on initialization
   const [menu, setMenu] = useState(() => {
@@ -460,8 +589,24 @@ const MenuCreate = () => {
     }
   }, [userTargets]);
 
+  // Keyboard event handler for undo/redo
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        e.preventDefault();
+        redo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) {
+        e.preventDefault();
+        redo();
+      }
+    };
 
-
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [undoStack, redoStack, menu]);
 
   async function downloadPdf(menu) {
     const response = await fetch('https://dietitian-be.azurewebsites.net/api/menu-pdf', {
@@ -514,6 +659,9 @@ const MenuCreate = () => {
 
   const handleTitleChange = (newTitle, mealIndex, optionIndex) => {
     setMenu(prevMenu => {
+      // Save current state to undo stack before making changes
+      saveToUndoStack(prevMenu);
+      
       const updatedMenu = JSON.parse(JSON.stringify(prevMenu));
       const meal = updatedMenu.meals[mealIndex];
       const option = optionIndex === 'main' ? meal.main : meal.alternative;
@@ -539,6 +687,9 @@ const MenuCreate = () => {
 
   const handleIngredientChange = (newValues, mealIndex, optionIndex, ingredientIndex) => {
     setMenu(prevMenu => {
+      // Save current state to undo stack before making changes
+      saveToUndoStack(prevMenu);
+      
       const updatedMenu = JSON.parse(JSON.stringify(prevMenu));
       const meal = updatedMenu.meals[mealIndex];
       const option = optionIndex === 'main' ? meal.main : meal.alternative;
@@ -616,6 +767,9 @@ const MenuCreate = () => {
 
   const handleMakeAlternativeMain = (mealIndex, alternativeIndex = null) => {
     setMenu(prevMenu => {
+      // Save current state to undo stack before making changes
+      saveToUndoStack(prevMenu);
+      
       const updatedMenu = JSON.parse(JSON.stringify(prevMenu));
       const meal = updatedMenu.meals[mealIndex];
       
@@ -676,6 +830,9 @@ const MenuCreate = () => {
 
   const handleDeleteIngredient = (mealIndex, optionIndex, ingredientIndex, alternativeIndex = null) => {
     setMenu(prevMenu => {
+      // Save current state to undo stack before making changes
+      saveToUndoStack(prevMenu);
+      
       const updatedMenu = JSON.parse(JSON.stringify(prevMenu));
       const meal = updatedMenu.meals[mealIndex];
       
@@ -1084,7 +1241,8 @@ const MenuCreate = () => {
       setProgress(5);
       setProgressStep('🎯 Analyzing client preferences...');
 
-      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_code: selectedUser.user_code })
@@ -1126,7 +1284,8 @@ const MenuCreate = () => {
       setProgress(30);
       setProgressStep('🍽️ Creating personalized meals...');
 
-      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template, user_code: selectedUser.user_code }),
@@ -1386,6 +1545,7 @@ const MenuCreate = () => {
                         optionIndex={isAlternative ? 'alternative' : 'main'}
                         ingredientIndex={idx}
                         translations={translations}
+                        currentIngredient={ingredient}
                       />
                       <span className="text-gray-600">
                         {ingredient.household_measure}
@@ -1543,6 +1703,9 @@ const MenuCreate = () => {
       
       // Update both current menu and original menu to maintain consistency
       setMenu((prevMenu) => {
+        // Save current state to undo stack before making changes
+        saveToUndoStack(prevMenu);
+        
         const updated = { ...prevMenu };
         if (!updated.meals[mealIdx].alternatives) updated.meals[mealIdx].alternatives = [];
         updated.meals[mealIdx].alternatives.push(translatedAlt);
@@ -1974,14 +2137,38 @@ const MenuCreate = () => {
                 </Button>
                 
                 {menu && (
-                  <Button
-                    onClick={() => setMenu(null)}
-                    variant="outline"
-                    className="border-red-300 text-red-700 hover:bg-red-50"
-                  >
-                    <span className="mr-2">🗑️</span>
-                    {translations.clearMenu || 'Clear Menu'}
-                  </Button>
+                  <>
+                    <Button
+                      onClick={undo}
+                      disabled={undoStack.length === 0}
+                      variant="outline"
+                      className="border-gray-300 text-gray-700 hover:bg-gray-50"
+                      title="Undo (Ctrl+Z)"
+                    >
+                      <span className="mr-2">↶</span>
+                      Undo {undoStack.length > 0 && `(${undoStack.length})`}
+                    </Button>
+                    
+                    <Button
+                      onClick={redo}
+                      disabled={redoStack.length === 0}
+                      variant="outline"
+                      className="border-gray-300 text-gray-700 hover:bg-gray-50"
+                      title="Redo (Ctrl+Y)"
+                    >
+                      <span className="mr-2">↷</span>
+                      Redo {redoStack.length > 0 && `(${redoStack.length})`}
+                    </Button>
+                    
+                    <Button
+                      onClick={() => setMenu(null)}
+                      variant="outline"
+                      className="border-red-300 text-red-700 hover:bg-red-50"
+                    >
+                      <span className="mr-2">🗑️</span>
+                      {translations.clearMenu || 'Clear Menu'}
+                    </Button>
+                  </>
                 )}
               </div>
               
