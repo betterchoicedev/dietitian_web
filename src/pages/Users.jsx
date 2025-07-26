@@ -43,14 +43,35 @@ import { Slider } from '@/components/ui/slider';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
 
-const generateUniqueCode = () => {
+const generateUniqueCode = async () => {
   const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const numbers = '0123456789';
-  const chars = letters + numbers;
   let code = '';
-  for (let i = 0; i < 8; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  let isUnique = false;
+  let attempts = 0;
+  const maxAttempts = 10;
+
+  while (!isUnique && attempts < maxAttempts) {
+    // Generate 8-letter code
+    code = '';
+    for (let i = 0; i < 8; i++) {
+      code += letters.charAt(Math.floor(Math.random() * letters.length));
+    }
+
+    try {
+      // Check if code exists using ChatUser.get
+      const existingUser = await ChatUser.get(code);
+      // If no user found, code is unique
+      if (!existingUser) {
+        isUnique = true;
+      }
+    } catch (error) {
+      // If error (user not found), code is unique
+      isUnique = true;
+    }
+
+    attempts++;
   }
+
   return code;
 };
 
@@ -487,31 +508,61 @@ export default function Clients() {
     setFoodLogsAnalysis(null);
 
     try {
-      const preferences = await FoodLogs.analyzePreferences(userCode);
+      // Call the new eating habits analysis API
+      const response = await fetch('http://127.0.0.1:8000/api/analyze-eating-habits', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_code: userCode
+        }),
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.log('No food logs found for this user');
+          setFoodLogsAnalysis(null);
+          return;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const analysisResult = await response.json();
       
-      if (preferences) {
-        setFoodLogsAnalysis(preferences);
+      if (analysisResult.analysis) {
+        // Store the analysis data
+        const analysisData = analysisResult.analysis_data || {};
+        setFoodLogsAnalysis({
+          ...analysisData,
+          analysis: analysisResult.analysis
+        });
         
-        // Auto-populate client preferences based on food logs analysis
-        let preferenceText = `Based on ${preferences.total_logs} food log entries, this user frequently consumes: ${preferences.frequently_consumed_foods.join(', ')}. Meal patterns: ${Object.entries(preferences.meal_patterns).map(([meal, count]) => `${meal} (${count} times)`).join(', ')}.`;
+        console.log('Setting foodLogsAnalysis:', {
+          ...analysisData,
+          analysis: analysisResult.analysis
+        });
+        
+        // Put the LLM analysis directly in the food diary textbox
+        let analysisText = analysisResult.analysis;
         
         // Translate to Hebrew if the site is in Hebrew mode
         if (language === 'he') {
           try {
-            preferenceText = await translateText(preferenceText, 'he');
+            analysisText = await translateText(analysisText, 'he');
           } catch (translationError) {
-            console.error('Failed to translate preferences:', translationError);
+            console.error('Failed to translate analysis:', translationError);
             // Keep original text if translation fails
           }
         }
         
         setFormData(prev => ({
           ...prev,
-          client_preference: preferenceText
+          client_preference: analysisText
         }));
         
         // Show a notification to the user
-        alert(`${translations.foodLogsFound || 'Food logs found'}: ${preferences.total_logs} ${translations.entriesFound || 'entries found'}. ${translations.preferencesAutoPopulated || 'Preferences auto-populated'}.`);
+        alert(`${translations.foodLogsFound || 'Food logs found'}: ${analysisData.total_logs || 0} ${translations.entriesFound || 'entries found'}. ${translations.preferencesAutoPopulated || 'Analysis completed'}.`);
       } else {
         setFoodLogsAnalysis(null);
       }
@@ -588,9 +639,10 @@ export default function Clients() {
   const displayedClients = searchTerm || showAll ? processedClients : processedClients.slice(0, 5);
   const hasMoreClients = !searchTerm && !showAll && processedClients.length > 5;
 
-  const resetForm = () => {
+  const resetForm = async () => {
+    const newUserCode = await generateUniqueCode();
     setFormData({
-      user_code: generateUniqueCode(),
+      user_code: newUserCode,
       full_name: '',
       email: '',
       phone_number: '',
@@ -632,9 +684,9 @@ export default function Clients() {
                                     setTranslatingPreferences(false);
   };
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     setCurrentClient(null);
-    resetForm();
+    await resetForm();
     setFormSubmitted(false);
     setTouchedFields({});
     setDialogOpen(true);
@@ -652,7 +704,7 @@ export default function Clients() {
     const calculatedAge = client.date_of_birth ? calculateAgeFromBirthDate(client.date_of_birth) : (client.age?.toString() || '');
     
     const formDataToSet = {
-      user_code: client.user_code || generateUniqueCode(),
+      user_code: client.user_code || await generateUniqueCode(),
       full_name: client.full_name || '',
       email: client.email || '',
       phone_number: client.phone_number || '',
@@ -685,28 +737,45 @@ export default function Clients() {
     // Check for existing food logs and update preferences if found
     if (client.user_code) {
       try {
-        const preferences = await FoodLogs.analyzePreferences(client.user_code);
-        if (preferences) {
-          setFoodLogsAnalysis(preferences);
+        // Call the new eating habits analysis API
+        const response = await fetch('https://dietitian-be.azurewebsites.net/api/analyze-eating-habits', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            user_code: client.user_code
+          }),
+        });
+
+        if (response.ok) {
+          const analysisResult = await response.json();
           
-          // If the user doesn't have existing preferences, auto-populate them
-          if (!client.client_preference || client.client_preference.trim() === '') {
-            let preferenceText = `Based on ${preferences.total_logs} food log entries, this user frequently consumes: ${preferences.frequently_consumed_foods.join(', ')}. Meal patterns: ${Object.entries(preferences.meal_patterns).map(([meal, count]) => `${meal} (${count} times)`).join(', ')}.`;
+          if (analysisResult.analysis) {
+            setFoodLogsAnalysis({
+              ...analysisResult.analysis_data,
+              analysis: analysisResult.analysis
+            });
             
-            // Translate to Hebrew if the site is in Hebrew mode
-            if (language === 'he') {
-              try {
-                preferenceText = await translateText(preferenceText, 'he');
-              } catch (translationError) {
-                console.error('Failed to translate preferences:', translationError);
-                // Keep original text if translation fails
+            // If the user doesn't have existing preferences, auto-populate them
+            if (!client.client_preference || client.client_preference.trim() === '') {
+              let analysisText = analysisResult.analysis;
+              
+              // Translate to Hebrew if the site is in Hebrew mode
+              if (language === 'he') {
+                try {
+                  analysisText = await translateText(analysisText, 'he');
+                } catch (translationError) {
+                  console.error('Failed to translate analysis:', translationError);
+                  // Keep original text if translation fails
+                }
               }
+              
+              setFormData(prev => ({
+                ...prev,
+                client_preference: analysisText
+              }));
             }
-            
-            setFormData(prev => ({
-              ...prev,
-              client_preference: preferenceText
-            }));
           }
         }
       } catch (error) {
@@ -1881,7 +1950,7 @@ export default function Clients() {
                   </div>
                   <div>
                     <Label htmlFor="client_preference" className="flex items-center gap-2">
-                      {translations.foodDiary}
+                      {translations.foodDiary} / {translations.eatingHabitsAnalysis}
                       {foodLogsAnalysis && (
                         <Badge variant="secondary" className="text-xs bg-green-100 text-green-800">
                           {translations.autoPopulated || 'Auto-populated'} ({foodLogsAnalysis.total_logs} {translations.entriesFound || 'entries'})
@@ -1889,13 +1958,19 @@ export default function Clients() {
                       )}
                     </Label>
                     <div className="flex gap-2">
+                      {console.log('foodLogsAnalysis state:', foodLogsAnalysis)}
                       <Textarea
                         id="client_preference"
                         value={formData.client_preference}
                         onChange={(e) => setFormData({...formData, client_preference: e.target.value})}
                         placeholder={translations.clientPreferencesPlaceholder}
                         rows={3}
-                        className={`flex-1 ${foodLogsAnalysis ? 'border-green-300 bg-green-50' : ''}`}
+                        className={`flex-1 transition-all duration-200 ${foodLogsAnalysis ? 'border-green-500 bg-green-100 text-green-900 font-semibold shadow-md ring-2 ring-green-300' : ''}`}
+                        style={{ 
+                          borderColor: foodLogsAnalysis ? '#10b981' : undefined,
+                          backgroundColor: foodLogsAnalysis ? '#dcfce7' : undefined,
+                          color: foodLogsAnalysis ? '#064e3b' : undefined
+                        }}
                       />
                       {formData.client_preference && language === 'he' && (
                         <Button
@@ -1928,13 +2003,14 @@ export default function Clients() {
                     </div>
                     <p className="text-xs text-gray-500 mt-1">
                       {foodLogsAnalysis ? (
-                        <span className="text-green-600">
-                          {translations.preferencesAutoPopulated || 'Preferences auto-populated'} from {foodLogsAnalysis.total_logs} food log entries. You can edit these preferences as needed.
+                        <span className="text-green-600 font-medium">
+                          ✨ {translations.preferencesAutoPopulated || 'Eating habits analysis completed'} from {foodLogsAnalysis.total_logs} food log entries. You can edit this analysis as needed.
                         </span>
                       ) : (
                         translations.clientPreferencesHelp
                       )}
                     </p>
+
                   </div>
                   <div>
                     <Label htmlFor="recommendations">{translations.recommendations}</Label>
@@ -1983,6 +2059,8 @@ export default function Clients() {
           </form>
         </DialogContent>
       </Dialog>
+
+
     </div>
   );
 }

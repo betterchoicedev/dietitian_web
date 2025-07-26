@@ -2019,10 +2019,10 @@ def enrich_menu_with_upc():
                             
                             # Choose the appropriate endpoint
                             if endpoint_type == "hebrew":
-                                url = "https://dietitian-web.onrender.com/api/ingredient-upc-hebrew"
+                                url = "https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-upc-hebrew"
                                 app.logger.info(f"Using Hebrew UPC endpoint for region: {region}")
                             else:
-                                url = "https://dietitian-web.onrender.com/api/ingredient-upc"
+                                url = "https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-upc"
                                 app.logger.info(f"Using regular UPC endpoint for region: {region}")
                             
                             resp = requests.get(url, params=params, timeout=30)
@@ -2603,6 +2603,175 @@ def get_azure_access_token():
     except Exception as e:
         logger.error(f"Error requesting Azure access token: {e}")
         return None
+
+@app.route("/api/analyze-eating-habits", methods=["POST"])
+def api_analyze_eating_habits():
+    try:
+        data = request.get_json()
+        user_code = data.get("user_code")
+        
+        if not user_code:
+            return jsonify({"error": "user_code is required"}), 400
+            
+        logger.info(f"🔍 Analyzing eating habits for user_code: {user_code}")
+        
+        # Get food logs for the user
+        food_logs = []
+        try:
+            # First get the user_id from chat_users table
+            user_response = supabase.table('chat_users').select('id').eq('user_code', user_code).single().execute()
+            if user_response.data:
+                user_id = user_response.data['id']
+                
+                # Get food logs by user_id
+                logs_response = supabase.table('food_logs').select('*').eq('user_id', user_id).order('log_date', desc=True).execute()
+                food_logs = logs_response.data or []
+                
+        except Exception as e:
+            logger.error(f"Error fetching food logs: {e}")
+            return jsonify({"error": "Failed to fetch food logs"}), 500
+        
+        if not food_logs:
+            return jsonify({"error": "No food logs found for this user"}), 404
+            
+        # Analyze eating habits
+        meal_categories = {
+            'breakfast': [],
+            'lunch': [],
+            'dinner': [],
+            'snack': [],
+            'morning snack': [],
+            'afternoon snack': [],
+            'evening snack': [],
+            'other': []
+        }
+        
+        # Process each food log
+        for log in food_logs:
+            meal_label = log.get('meal_label', '').lower()
+            food_items = log.get('food_items', [])
+            
+            # Determine meal category
+            category = 'other'
+            if 'breakfast' in meal_label:
+                category = 'breakfast'
+            elif 'lunch' in meal_label:
+                category = 'lunch'
+            elif 'dinner' in meal_label:
+                category = 'dinner'
+            elif 'snack' in meal_label:
+                if 'morning' in meal_label:
+                    category = 'morning snack'
+                elif 'afternoon' in meal_label:
+                    category = 'afternoon snack'
+                elif 'evening' in meal_label:
+                    category = 'evening snack'
+                else:
+                    category = 'snack'
+            
+            # Extract food items
+            if isinstance(food_items, list):
+                for item in food_items:
+                    if isinstance(item, dict) and item.get('name'):
+                        meal_categories[category].append(item['name'].lower().strip())
+            elif isinstance(food_items, dict) and food_items.get('name'):
+                meal_categories[category].append(food_items['name'].lower().strip())
+        
+        # Get top 3 most frequent foods for each meal category
+        top_foods_by_meal = {}
+        for category, foods in meal_categories.items():
+            if foods:
+                # Count frequency
+                food_counts = {}
+                for food in foods:
+                    food_counts[food] = food_counts.get(food, 0) + 1
+                
+                # Get top 3
+                sorted_foods = sorted(food_counts.items(), key=lambda x: x[1], reverse=True)
+                top_foods_by_meal[category] = sorted_foods[:3]
+        
+        # Create system prompt for LLM
+        # Create a simple summary of food habits
+        food_habits_summary = []
+        for category, top_foods in top_foods_by_meal.items():
+            if top_foods:
+                foods_list = [f"{food} ({count} times)" for food, count in top_foods]
+                food_habits_summary.append(f"{category}: {', '.join(foods_list)}")
+        
+        habits_text = "; ".join(food_habits_summary) if food_habits_summary else "No specific patterns found"
+        
+        system_prompt = f"""You are a professional dietitian analyst. Based on the client's food habits, create a comprehensive structured prompt for menu generation.
+
+**CLIENT FOOD HABITS DATA:**
+{habits_text}
+
+**TASK:**
+Create a detailed, structured prompt that another AI can use to generate personalized menus. Include the following sections:
+
+**EATING HABITS ANALYSIS:**
+[Analyze their current eating patterns, meal timing, food preferences, and nutritional habits in 2-3 sentences]
+
+**NUTRITIONAL STRENGTHS:**
+[Identify 2-3 positive aspects of their current diet in bullet points]
+
+**AREAS FOR IMPROVEMENT:**
+[Identify 2-3 specific areas where their diet could be enhanced in bullet points]
+
+**RECOMMENDED FOODS TO INCLUDE:**
+[Suggest 5-8 specific foods they should eat more of based on their current habits and nutritional needs]
+
+**FOODS TO REDUCE OR REPLACE:**
+[Suggest 3-5 foods they should eat less of or healthier alternatives]
+
+**MEAL TIMING RECOMMENDATIONS:**
+[Provide specific advice about when and how often they should eat]
+
+**PERSONALIZED MENU GUIDELINES:**
+[Give specific instructions for menu generation, such as preferred cooking methods, portion sizes, meal structure, etc.]
+
+**IMPORTANT GUIDELINES:**
+- Be specific and actionable
+- Focus on practical, realistic recommendations
+- Consider their current food preferences and habits
+- Provide clear instructions for menu generation
+- Keep the tone professional but encouraging
+- Make recommendations that can be easily implemented in daily meal planning
+
+Write this as a comprehensive, structured prompt that can be directly used as input for menu generation AI."""
+
+        # Call Azure OpenAI to generate the analysis
+        try:
+            logger.info("🧠 Sending eating habits analysis to OpenAI")
+            
+            response = openai.ChatCompletion.create(
+                deployment_id=deployment,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "Please analyze my eating habits and create a comprehensive menu generation prompt."}
+                ],
+                temperature=0.7,
+                max_tokens=2500
+            )
+            
+            analysis_text = response.choices[0].message.content
+            logger.info("✅ Generated eating habits analysis successfully")
+            
+            return jsonify({
+                "analysis": analysis_text,
+                "analysis_data": {
+                    "total_logs": len(food_logs),
+                    "top_foods_by_meal": top_foods_by_meal,
+                    "unique_foods_count": len(set([food for foods in meal_categories.values() for food in foods]))
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Error calling OpenAI for eating habits analysis: {e}")
+            return jsonify({"error": "Failed to generate analysis"}), 500
+        
+    except Exception as e:
+        logger.error(f"Error analyzing eating habits: {e}")
+        return jsonify({"error": "Failed to analyze eating habits"}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))

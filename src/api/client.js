@@ -901,7 +901,6 @@ export const entities = {
         
         // Extract food items from all logs
         const allFoodItems = [];
-        const mealPreferences = {};
         
         foodLogs.forEach(log => {
           if (log.food_items && typeof log.food_items === 'object') {
@@ -933,18 +932,45 @@ export const entities = {
           .slice(0, 10)
           .map(([name, count]) => ({ name, count }));
         
-        // Analyze meal patterns
+        // Analyze meal patterns and group foods by meal
         const mealCounts = {};
+        const foodsByMeal = {};
+        
         foodLogs.forEach(log => {
           if (log.meal_label) {
             mealCounts[log.meal_label] = (mealCounts[log.meal_label] || 0) + 1;
+            
+            // Group foods by meal
+            if (!foodsByMeal[log.meal_label]) {
+              foodsByMeal[log.meal_label] = {};
+            }
+            
+            if (log.food_items && typeof log.food_items === 'object') {
+              const items = Array.isArray(log.food_items) ? log.food_items : [log.food_items];
+              items.forEach(item => {
+                if (item && item.name) {
+                  const foodName = item.name.toLowerCase().trim();
+                  foodsByMeal[log.meal_label][foodName] = (foodsByMeal[log.meal_label][foodName] || 0) + 1;
+                }
+              });
+            }
           }
+        });
+        
+        // Convert foodsByMeal to sorted arrays
+        const foodsByMealSorted = {};
+        Object.keys(foodsByMeal).forEach(meal => {
+          const sortedFoodsForMeal = Object.entries(foodsByMeal[meal])
+            .sort(([,a], [,b]) => b - a)
+            .map(([name, count]) => ({ name, count }));
+          foodsByMealSorted[meal] = sortedFoodsForMeal;
         });
         
         // Create preferences object
         const preferences = {
           frequently_consumed_foods: sortedFoods.map(food => food.name),
           meal_patterns: mealCounts,
+          foods_by_meal: foodsByMealSorted, // Added this
           total_logs: foodLogs.length,
           analysis_date: new Date().toISOString()
         };

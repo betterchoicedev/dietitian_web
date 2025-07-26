@@ -892,30 +892,510 @@ const MenuLoad = () => {
   // PDF download function
   async function downloadPdf(menu) {
     try {
-      const response = await fetch('https://dietitian-be.azurewebsites.net/api/menu-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu })
-      });
+      // Create HTML content for the PDF
+      const htmlContent = generateMenuHtml(menu);
       
-      if (!response.ok) {
-        throw new Error('Failed to generate PDF');
-      }
+      // Create a blob from the HTML content
+      const blob = new Blob([htmlContent], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
       
-      const blob = await response.blob();
-      // Create a link to download
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${menu.meal_plan_name || 'meal_plan'}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      // Open in new window for printing
+      const printWindow = window.open(url, '_blank');
+      
+      // Wait for the window to load, then trigger print
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print();
+          // Clean up after printing
+          setTimeout(() => {
+            printWindow.close();
+            URL.revokeObjectURL(url);
+          }, 1000);
+        }, 500);
+      };
+      
     } catch (error) {
-      console.error('Error downloading PDF:', error);
-      alert('Failed to download PDF. Please try again.');
+      console.error('Error generating PDF:', error);
+      alert('Failed to generate PDF. Please try again.');
     }
+  }
+
+  function generateMenuHtml(menu) {
+    const today = new Date().toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+    
+    const totals = menu.totals || calculateMainTotals(menu);
+    
+    // Detect if menu contains Hebrew text
+    const containsHebrew = (text) => {
+      if (!text) return false;
+      return /[\u0590-\u05FF]/.test(text);
+    };
+    
+    const hasHebrewContent = menu.meals?.some(meal => 
+      containsHebrew(meal.meal) ||
+      containsHebrew(meal.main?.meal_title) ||
+      containsHebrew(meal.alternative?.meal_title) ||
+      meal.main?.ingredients?.some(ing => containsHebrew(ing.item)) ||
+      meal.alternative?.ingredients?.some(ing => containsHebrew(ing.item))
+    );
+    
+    const htmlDir = hasHebrewContent ? 'rtl' : 'ltr';
+    const htmlLang = hasHebrewContent ? 'he' : 'en';
+    
+    return `
+<!DOCTYPE html>
+<html lang="${htmlLang}" dir="${htmlDir}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BetterChoice - Meal Plan</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Hebrew:wght@400;700&family=Inter:wght@400;600;700&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', 'Noto Sans Hebrew', sans-serif;
+            line-height: 1.6;
+            color: #1f2937;
+            background: white;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #059669;
+        }
+        
+        .header h1 {
+            color: #059669;
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            color: #6b7280;
+            font-size: 14px;
+        }
+        
+        .totals-section {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .totals-section h3 {
+            color: #059669;
+            font-size: 18px;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }
+        
+        .macros-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+        }
+        
+        .macro-item {
+            text-align: center;
+            padding: 10px;
+            border-radius: 8px;
+            background: white;
+        }
+        
+        .macro-value {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+        
+        .macro-label {
+            font-size: 12px;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .calories { color: #059669; }
+        .protein { color: #2563eb; }
+        .carbs { color: #fb923c; }
+        .fat { color: #facc15; }
+        
+        .meal-section {
+            margin-bottom: 30px;
+            page-break-inside: avoid;
+        }
+        
+        .meal-title {
+            color: #059669;
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #d1fae5;
+        }
+        
+        .meal-option {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+        }
+        
+        .option-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 10px;
+        }
+        
+        .option-type {
+            display: inline-block;
+            background: #059669;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        
+        .option-type.alternative {
+            background: #2563eb;
+        }
+        
+        .nutrition-info {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .nutrition-item {
+            font-size: 14px;
+            color: #6b7280;
+        }
+        
+        .nutrition-item strong {
+            color: #1f2937;
+        }
+        
+        .ingredients-list {
+            list-style: none;
+        }
+        
+        .ingredients-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid #f1f5f9;
+            font-size: 14px;
+        }
+        
+        .ingredients-list li:last-child {
+            border-bottom: none;
+        }
+        
+        .ingredient-item {
+            font-weight: 500;
+            color: #1f2937;
+        }
+        
+        .ingredient-details {
+            color: #6b7280;
+            font-size: 13px;
+            margin-top: 2px;
+        }
+        
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e5e7eb;
+            color: #6b7280;
+            font-size: 12px;
+        }
+        
+        @media print {
+            body {
+                padding: 0;
+                max-width: none;
+                margin: 0;
+                font-size: 12px;
+            }
+            
+            .header {
+                margin-bottom: 20px;
+                padding-bottom: 15px;
+            }
+            
+            .header h1 {
+                font-size: 24px;
+                margin-bottom: 8px;
+            }
+            
+            .header p {
+                font-size: 12px;
+            }
+            
+            .totals-section {
+                margin-bottom: 20px;
+                padding: 15px;
+            }
+            
+            .totals-section h3 {
+                font-size: 16px;
+                margin-bottom: 12px;
+            }
+            
+            .macro-value {
+                font-size: 18px;
+            }
+            
+            .macro-label {
+                font-size: 10px;
+            }
+            
+            .meal-section {
+                page-break-inside: avoid;
+                margin-bottom: 20px;
+            }
+            
+            .meal-title {
+                font-size: 18px;
+                margin-bottom: 12px;
+                padding-bottom: 6px;
+            }
+            
+            .meal-option {
+                page-break-inside: avoid;
+                margin-bottom: 12px;
+                padding: 15px;
+            }
+            
+            .option-title {
+                font-size: 14px;
+                margin-bottom: 8px;
+            }
+            
+            .option-type {
+                font-size: 10px;
+                padding: 3px 10px;
+                margin-bottom: 8px;
+            }
+            
+            .nutrition-info {
+                gap: 12px;
+                margin-bottom: 12px;
+            }
+            
+            .nutrition-item {
+                font-size: 12px;
+            }
+            
+            .ingredients-list li {
+                padding: 6px 0;
+                font-size: 12px;
+            }
+            
+            .ingredient-item {
+                font-size: 12px;
+            }
+            
+            .ingredient-details {
+                font-size: 11px;
+            }
+            
+            .footer {
+                margin-top: 30px;
+                padding-top: 15px;
+                font-size: 10px;
+            }
+            
+            /* Force page breaks at logical points */
+            .meal-section:nth-child(3n) {
+                page-break-before: auto;
+            }
+            
+            /* Ensure headers don't break */
+            .meal-title {
+                page-break-after: avoid;
+            }
+            
+            /* Keep nutrition info with meal titles */
+            .nutrition-info {
+                page-break-inside: avoid;
+            }
+            
+            /* Keep ingredients with their meal options */
+            .ingredients-list {
+                page-break-inside: avoid;
+            }
+        }
+        
+        /* RTL Support */
+        [dir="rtl"] {
+            text-align: right;
+        }
+        
+        [dir="rtl"] .macros-grid {
+            direction: rtl;
+        }
+        
+        [dir="rtl"] .nutrition-info {
+            direction: rtl;
+        }
+        
+        [dir="rtl"] .header {
+            text-align: center;
+        }
+        
+        [dir="rtl"] .footer {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>BetterChoice - Meal Plan</h1>
+        <p>Personalized Nutrition Menu • Generated on ${today}</p>
+    </div>
+    
+    <div class="totals-section">
+        <h3>Daily Nutritional Summary</h3>
+        <div class="macros-grid">
+            <div class="macro-item">
+                <div class="macro-value calories">${totals.calories || 0}</div>
+                <div class="macro-label">Calories</div>
+            </div>
+            <div class="macro-item">
+                <div class="macro-value protein">${totals.protein || 0}g</div>
+                <div class="macro-label">Protein</div>
+            </div>
+            <div class="macro-item">
+                <div class="macro-value carbs">${totals.carbs || 0}g</div>
+                <div class="macro-label">Carbs</div>
+            </div>
+            <div class="macro-item">
+                <div class="macro-value fat">${totals.fat || 0}g</div>
+                <div class="macro-label">Fat</div>
+            </div>
+        </div>
+    </div>
+    
+    ${menu.meals ? menu.meals.map((meal, index) => `
+        <div class="meal-section">
+            <h2 class="meal-title">${meal.meal || `Meal ${index + 1}`}</h2>
+            
+            ${meal.main ? `
+                <div class="meal-option">
+                    <div class="option-type">Main Option</div>
+                    <div class="option-title">${meal.main.meal_title || 'Main Meal'}</div>
+                    ${meal.main.nutrition ? `
+                        <div class="nutrition-info">
+                            <span class="nutrition-item"><strong>${meal.main.nutrition.calories || 0}</strong> kcal</span>
+                            <span class="nutrition-item"><strong>${meal.main.nutrition.protein || 0}g</strong> protein</span>
+                            <span class="nutrition-item"><strong>${meal.main.nutrition.carbs || 0}g</strong> carbs</span>
+                            <span class="nutrition-item"><strong>${meal.main.nutrition.fat || 0}g</strong> fat</span>
+                        </div>
+                    ` : ''}
+                    ${meal.main.ingredients && meal.main.ingredients.length > 0 ? `
+                        <ul class="ingredients-list">
+                            ${meal.main.ingredients.map(ingredient => `
+                                <li>
+                                    <div class="ingredient-item">${ingredient.item || 'Ingredient'}</div>
+                                    ${ingredient.quantity || ingredient.unit || ingredient.household_measure ? `
+                                        <div class="ingredient-details">
+                                            ${ingredient.quantity ? `${ingredient.quantity} ` : ''}${ingredient.unit ? `${ingredient.unit} ` : ''}${ingredient.household_measure ? `(${ingredient.household_measure})` : ''}
+                                        </div>
+                                    ` : ''}
+                                </li>
+                            `).join('')}
+                        </ul>
+                    ` : ''}
+                </div>
+            ` : ''}
+            
+            ${meal.alternative ? `
+                <div class="meal-option">
+                    <div class="option-type alternative">Alternative Option</div>
+                    <div class="option-title">${meal.alternative.meal_title || 'Alternative Meal'}</div>
+                    ${meal.alternative.nutrition ? `
+                        <div class="nutrition-info">
+                            <span class="nutrition-item"><strong>${meal.alternative.nutrition.calories || 0}</strong> kcal</span>
+                            <span class="nutrition-item"><strong>${meal.alternative.nutrition.protein || 0}g</strong> protein</span>
+                            <span class="nutrition-item"><strong>${meal.alternative.nutrition.carbs || 0}g</strong> carbs</span>
+                            <span class="nutrition-item"><strong>${meal.alternative.nutrition.fat || 0}g</strong> fat</span>
+                        </div>
+                    ` : ''}
+                    ${meal.alternative.ingredients && meal.alternative.ingredients.length > 0 ? `
+                        <ul class="ingredients-list">
+                            ${meal.alternative.ingredients.map(ingredient => `
+                                <li>
+                                    <div class="ingredient-item">${ingredient.item || 'Ingredient'}</div>
+                                    ${ingredient.quantity || ingredient.unit || ingredient.household_measure ? `
+                                        <div class="ingredient-details">
+                                            ${ingredient.quantity ? `${ingredient.quantity} ` : ''}${ingredient.unit ? `${ingredient.unit} ` : ''}${ingredient.household_measure ? `(${ingredient.household_measure})` : ''}
+                                        </div>
+                                    ` : ''}
+                                </li>
+                            `).join('')}
+                        </ul>
+                    ` : ''}
+                </div>
+            ` : ''}
+            
+            ${meal.alternatives && meal.alternatives.length > 0 ? meal.alternatives.map((alt, altIndex) => `
+                <div class="meal-option">
+                    <div class="option-type alternative">Additional Alternative ${altIndex + 2}</div>
+                    <div class="option-title">${alt.meal_title || 'Additional Alternative'}</div>
+                    ${alt.nutrition ? `
+                        <div class="nutrition-info">
+                            <span class="nutrition-item"><strong>${alt.nutrition.calories || 0}</strong> kcal</span>
+                            <span class="nutrition-item"><strong>${alt.nutrition.protein || 0}g</strong> protein</span>
+                            <span class="nutrition-item"><strong>${alt.nutrition.carbs || 0}g</strong> carbs</span>
+                            <span class="nutrition-item"><strong>${alt.nutrition.fat || 0}g</strong> fat</span>
+                        </div>
+                    ` : ''}
+                    ${alt.ingredients && alt.ingredients.length > 0 ? `
+                        <ul class="ingredients-list">
+                            ${alt.ingredients.map(ingredient => `
+                                <li>
+                                    <div class="ingredient-item">${ingredient.item || 'Ingredient'}</div>
+                                    ${ingredient.quantity || ingredient.unit || ingredient.household_measure ? `
+                                        <div class="ingredient-details">
+                                            ${ingredient.quantity ? `${ingredient.quantity} ` : ''}${ingredient.unit ? `${ingredient.unit} ` : ''}${ingredient.household_measure ? `(${ingredient.household_measure})` : ''}
+                                        </div>
+                                    ` : ''}
+                                </li>
+                            `).join('')}
+                        </ul>
+                    ` : ''}
+                </div>
+            `).join('') : ''}
+        </div>
+    `).join('') : ''}
+    
+    <div class="footer">
+        <p>© BetterChoice 2025 • Personalized Nutrition Planning</p>
+    </div>
+</body>
+</html>`;
   }
 
   // Handle language changes

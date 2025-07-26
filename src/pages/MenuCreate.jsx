@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from "@/components/ui/separator";
 import { useLanguage } from '@/contexts/LanguageContext';
 import { EventBus } from '@/utils/EventBus';
-import ReactToPdf from 'react-to-pdf';
+
 import { supabase } from '@/lib/supabase';
 
 // https://dietitian-web-backend.onrender.com
@@ -609,22 +609,381 @@ const MenuCreate = () => {
   }, [undoStack, redoStack, menu]);
 
   async function downloadPdf(menu) {
-    const response = await fetch('https://dietitian-be.azurewebsites.net/api/menu-pdf', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ menu })
-    });
-    const blob = await response.blob();
-    // Create a link to download
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'meal_plan.pdf';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    try {
+      // Create HTML content for the PDF
+      const htmlContent = generateMenuHtml(menu);
+      
+      // Create a blob from the HTML content
+      const blob = new Blob([htmlContent], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      
+      // Open in new window for printing
+      const printWindow = window.open(url, '_blank');
+      
+      // Wait for the window to load, then trigger print
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print();
+          // Clean up after printing
+          setTimeout(() => {
+            printWindow.close();
+            URL.revokeObjectURL(url);
+          }, 1000);
+        }, 500);
+      };
+      
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert('Failed to generate PDF. Please try again.');
+    }
   }
 
+  function generateMenuHtml(menu) {
+    const today = new Date().toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+    
+    const totals = menu.totals || calculateMainTotals(menu);
+    const userName = selectedUser?.full_name || 'Client';
+    
+    // Detect if menu contains Hebrew text
+    const containsHebrew = (text) => {
+      if (!text) return false;
+      return /[\u0590-\u05FF]/.test(text);
+    };
+    
+    const hasHebrewContent = menu.meals?.some(meal => 
+      containsHebrew(meal.meal) ||
+      containsHebrew(meal.main?.meal_title) ||
+      containsHebrew(meal.alternative?.meal_title) ||
+      meal.main?.ingredients?.some(ing => containsHebrew(ing.item)) ||
+      meal.alternative?.ingredients?.some(ing => containsHebrew(ing.item))
+    );
+    
+    const htmlDir = hasHebrewContent ? 'rtl' : 'ltr';
+    const htmlLang = hasHebrewContent ? 'he' : 'en';
+    
+    return `
+<!DOCTYPE html>
+<html lang="${htmlLang}" dir="${htmlDir}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BetterChoice - תפריט אישי</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Hebrew:wght@400;700&family=Inter:wght@400;600;700&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Noto Sans Hebrew', 'Inter', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: white;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .page {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            background: #e8f5e8;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .logo {
+            width: 50px;
+            height: 50px;
+            background: #4CAF50;
+            border-radius: 50%;
+            margin: 0 auto 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 20px;
+        }
+        
+        .main-title {
+            font-size: 28px;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        
+        .user-name {
+            font-size: 20px;
+            font-weight: 600;
+            color: #4CAF50;
+            margin-bottom: 8px;
+        }
+        
+        .content {
+            flex: 1;
+            padding: 20px;
+        }
+        
+        .meal-section {
+            margin-bottom: 20px;
+            page-break-inside: avoid;
+        }
+        
+        .meal-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #666;
+            text-align: right;
+            margin-bottom: 12px;
+            padding-bottom: 4px;
+            border-bottom: 2px dashed #ddd;
+        }
+        
+        .meal-subtitle {
+            font-size: 14px;
+            font-weight: 600;
+            color: #4CAF50;
+            text-align: right;
+            margin-bottom: 8px;
+        }
+        
+        .meal-options {
+            margin-right: 20px;
+        }
+        
+        .meal-option {
+            margin-bottom: 6px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        
+        .option-number {
+            font-weight: 600;
+            color: #4CAF50;
+            margin-left: 8px;
+        }
+        
+        .option-text {
+            color: #333;
+        }
+        
+        .highlighted {
+            text-decoration: underline;
+            text-decoration-color: #ff4444;
+            text-decoration-thickness: 2px;
+        }
+        
+        .bold-note {
+            font-weight: 700;
+            color: #333;
+        }
+        
+        .footer {
+            background: #e8f5e8;
+            padding: 15px;
+            text-align: right;
+        }
+        
+        .contact-info {
+            color: white;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+        
+        .contact-info div {
+            margin-bottom: 5px;
+        }
+        
+        @media print {
+            body {
+                font-size: 12px;
+            }
+            
+            .header {
+                padding: 20px;
+            }
+            
+            .logo {
+                width: 50px;
+                height: 50px;
+                font-size: 20px;
+                margin-bottom: 15px;
+            }
+            
+            .main-title {
+                font-size: 28px;
+                margin-bottom: 8px;
+            }
+            
+            .user-name {
+                font-size: 20px;
+                margin-bottom: 8px;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+            
+            .meal-title {
+                font-size: 18px;
+                margin-bottom: 12px;
+            }
+            
+            .meal-subtitle {
+                font-size: 14px;
+                margin-bottom: 8px;
+            }
+            
+            .meal-option {
+                font-size: 14px;
+                margin-bottom: 6px;
+            }
+            
+            .footer {
+                padding: 15px;
+            }
+            
+            .contact-info {
+                font-size: 12px;
+            }
+            
+            /* Keep meal sections together but allow natural flow */
+            .meal-section {
+                page-break-inside: avoid;
+            }
+        }
+        
+        /* RTL Support */
+        [dir="rtl"] {
+            text-align: right;
+        }
+        
+        [dir="rtl"] .meal-options {
+            margin-right: 0;
+            margin-left: 20px;
+        }
+        
+        [dir="rtl"] .option-number {
+            margin-left: 0;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="header">
+            <div class="logo">BC</div>
+            <div class="main-title">תפריט אישי</div>
+            <div class="user-name">${userName}</div>
+        </div>
+        
+        <div class="content">
+            ${menu.meals ? menu.meals.map((meal, index) => {
+                // Get meal name in Hebrew or English
+                const mealName = meal.meal || `Meal ${index + 1}`;
+                const isSnack = mealName.toLowerCase().includes('snack') || mealName.toLowerCase().includes('ביניים');
+                
+                return `
+                    <div class="meal-section">
+                        <h2 class="meal-title">${mealName}</h2>
+                        ${isSnack ? '<div class="meal-subtitle">לבחירתך מתי</div>' : ''}
+                        
+                        <div class="meal-options">
+                            ${(() => {
+                                let optionNumber = 1;
+                                let options = [];
+                                
+                                // Add main meal
+                                if (meal.main && meal.main.ingredients && meal.main.ingredients.length > 0) {
+                                    const mainIngredients = meal.main.ingredients.map(ing => {
+                                        let text = ing.item || 'Ingredient';
+                                        // Highlight specific words (brands, types, etc.)
+                                        text = text.replace(/\b(וגן|קוביה|בישבת|טורטיות|סולוג|מולך|אלשבע|בולים)\b/g, '<span class="highlighted">$1</span>');
+                                        
+                                        // Add household measure if available
+                                        if (ing.household_measure) {
+                                            text += ` (${ing.household_measure})`;
+                                        }
+                                        
+                                        return text;
+                                    }).join(', ');
+                                    options.push(`<div class="meal-option"><span class="option-number">${optionNumber}.</span><span class="option-text">${mainIngredients}</span></div>`);
+                                    optionNumber++;
+                                }
+                                
+                                // Add alternative meal
+                                if (meal.alternative && meal.alternative.ingredients && meal.alternative.ingredients.length > 0) {
+                                    const altIngredients = meal.alternative.ingredients.map(ing => {
+                                        let text = ing.item || 'Ingredient';
+                                        text = text.replace(/\b(וגן|קוביה|בישבת|טורטיות|סולוג|מולך|אלשבע|בולים)\b/g, '<span class="highlighted">$1</span>');
+                                        
+                                        // Add household measure if available
+                                        if (ing.household_measure) {
+                                            text += ` (${ing.household_measure})`;
+                                        }
+                                        
+                                        return text;
+                                    }).join(', ');
+                                    options.push(`<div class="meal-option"><span class="option-number">${optionNumber}.</span><span class="option-text">${altIngredients}</span></div>`);
+                                    optionNumber++;
+                                }
+                                
+                                // Add additional alternatives
+                                if (meal.alternatives && meal.alternatives.length > 0) {
+                                    meal.alternatives.forEach(alt => {
+                                        if (alt.ingredients && alt.ingredients.length > 0) {
+                                            const altIngredients = alt.ingredients.map(ing => {
+                                                let text = ing.item || 'Ingredient';
+                                                text = text.replace(/\b(וגן|קוביה|בישבת|טורטיות|סולוג|מולך|אלשבע|בולים)\b/g, '<span class="highlighted">$1</span>');
+                                                
+                                                // Add household measure if available
+                                                if (ing.household_measure) {
+                                                    text += ` (${ing.household_measure})`;
+                                                }
+                                                
+                                                return text;
+                                            }).join(', ');
+                                            options.push(`<div class="meal-option"><span class="option-number">${optionNumber}.</span><span class="option-text">${altIngredients}</span></div>`);
+                                            optionNumber++;
+                                        }
+                                    });
+                                }
+                                
+                                // Add special note for lunch if it exists
+                                if (mealName.toLowerCase().includes('lunch') || mealName.toLowerCase().includes('צהרים')) {
+                                    options.push(`<div class="meal-option"><span class="bold-note">**אם רוצה אז להוסיף לך חלבון וירקות**</span></div>`);
+                                }
+                                
+                                return options.join('');
+                            })()}
+                        </div>
+                    </div>
+                `;
+            }).join('') : ''}
+        </div>
+        
+        <div class="footer">
+            <div class="contact-info">
+                <div>כתובת: משכית 10, הרצליה</div>
+                <div>לקביעת תור: 054-3066442</div>
+                <div>א"ל: galbecker106@gmail.com</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>`;
+  }
 
   function calculateMainTotals(menu) {
     let totalCalories = 0;
