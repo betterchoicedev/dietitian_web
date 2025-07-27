@@ -510,6 +510,7 @@ export default function Clients() {
     try {
       // Call the new eating habits analysis API
       const response = await fetch('https://dietitian-be.azurewebsites.net/api/analyze-eating-habits', {
+      // const response = await fetch('http://127.0.0.1:8000/api/analyze-eating-habits', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -739,6 +740,7 @@ export default function Clients() {
       try {
         // Call the new eating habits analysis API
         const response = await fetch('https://dietitian-be.azurewebsites.net/api/analyze-eating-habits', {
+        // const response = await fetch('http://127.0.0.1:8000/api/analyze-eating-habits', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

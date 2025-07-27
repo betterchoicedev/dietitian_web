@@ -639,7 +639,9 @@ const MenuCreate = () => {
   }
 
   function generateMenuHtml(menu) {
-    const today = new Date().toLocaleDateString('en-US', { 
+    // Get current date in Hebrew
+    const today = new Date();
+    const hebrewDate = today.toLocaleDateString('he-IL', { 
       year: 'numeric', 
       month: 'long', 
       day: 'numeric' 
@@ -730,6 +732,13 @@ const MenuCreate = () => {
             margin-bottom: 8px;
         }
         
+        .date {
+            font-size: 16px;
+            font-weight: 500;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        
         .content {
             flex: 1;
             padding: 20px;
@@ -806,8 +815,16 @@ const MenuCreate = () => {
         }
         
         @media print {
+            /* Disable browser headers and footers */
+            @page {
+                margin: 0;
+                size: A4;
+            }
+            
             body {
                 font-size: 12px;
+                margin: 0;
+                padding: 0;
             }
             
             .header {
@@ -828,6 +845,11 @@ const MenuCreate = () => {
             
             .user-name {
                 font-size: 20px;
+                margin-bottom: 8px;
+            }
+            
+            .date {
+                font-size: 16px;
                 margin-bottom: 8px;
             }
             
@@ -886,6 +908,7 @@ const MenuCreate = () => {
             <div class="logo">BC</div>
             <div class="main-title">תפריט אישי</div>
             <div class="user-name">${userName}</div>
+            <div class="date">${hebrewDate}</div>
         </div>
         
         <div class="content">
@@ -3186,4 +3209,3 @@ async function translateMenu(menu, targetLang = 'he') {
 
 
 export default MenuCreate;
-

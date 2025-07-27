@@ -8,14 +8,6 @@ from functools import wraps
 import logging
 import traceback
 from io import BytesIO
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from reportlab.lib import colors
-from reportlab.lib.utils import ImageReader
-from reportlab.pdfbase import pdfutils
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.pdfbase import pdfmetrics
-from flask import send_file
 import datetime
 from dotenv import load_dotenv
 load_dotenv()
@@ -421,351 +413,7 @@ def api_translate_menu():
     cleaned_menu = clean_ingredient_names(new_menu)
     return jsonify(cleaned_menu)
 
-@app.route('/api/menu-pdf', methods=['POST'])
-def generate_menu_pdf():
-    try:
-        data = request.json
-        menu = data.get("menu", {})
-        
-        # Add debugging information
-        logger.info(f"🔍 PDF generation started with menu structure: {type(menu)}")
-        if isinstance(menu, dict):
-            logger.info(f"🔍 Menu keys: {list(menu.keys())}")
-            if 'meals' in menu:
-                logger.info(f"🔍 Number of meals: {len(menu['meals'])}")
-                for i, meal in enumerate(menu['meals']):
-                    logger.info(f"🔍 Meal {i+1}: {meal.get('meal', 'Unknown')}")
-        
-        if not menu:
-            logger.error("❌ No menu data provided")
-            return jsonify({"error": "No menu data provided"}), 400
 
-        buffer = BytesIO()
-        c = canvas.Canvas(buffer, pagesize=letter)
-        width, height = letter
-        y = height - 50
-        margin = 50
-        line_height = 14
-
-        # Simple color scheme
-        title_color = colors.HexColor("#1f2937")
-        subtitle_color = colors.HexColor("#6b7280")
-        accent_color = colors.HexColor("#059669")
-        macro_colors = {
-            'protein': colors.HexColor("#2563eb"),
-            'carbs': colors.HexColor("#fb923c"),
-            'fat': colors.HexColor("#facc15"),
-            'calories': accent_color
-        }
-
-        # Register Hebrew font
-        hebrew_font = 'Helvetica'
-        try:
-            import urllib.request
-            import tempfile
-            import os
-            temp_dir = tempfile.gettempdir()
-            font_path = os.path.join(temp_dir, 'NotoSansHebrew-Regular.ttf')
-            if not os.path.exists(font_path):
-                    urllib.request.urlretrieve(
-                        'https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansHebrew/NotoSansHebrew-Regular.ttf',
-                        font_path
-                    )
-            pdfmetrics.registerFont(TTFont('NotoSansHebrew', font_path))
-            hebrew_font = 'NotoSansHebrew'
-        except Exception:
-            # Fallback to Arial if on Windows
-            try:
-                import platform
-                if platform.system() == "Windows":
-                    arial_path = 'C:/Windows/Fonts/arial.ttf'
-                    if os.path.exists(arial_path):
-                        pdfmetrics.registerFont(TTFont('Arial', arial_path))
-                        hebrew_font = 'Arial'
-            except Exception:
-                pass
-
-        def contains_hebrew(text):
-            if not text:
-                return False
-            return any(0x0590 <= ord(ch) <= 0x05FF for ch in str(text))
-
-        def process_hebrew(text):
-            if not text:
-                return text
-            try:
-                reshaped = reshape(text)
-                return get_display(reshaped)
-            except Exception:
-                    return text
-
-        def draw_text(x, y, text, size=10, bold=False, color=colors.black, rtl=False):
-            if contains_hebrew(text):
-                text = process_hebrew(text)
-                font = hebrew_font
-                if rtl:
-                    c.setFont(font, size)
-                c.setFillColor(color)
-                c.drawRightString(x, y, str(text))
-                return
-            font = 'Helvetica-Bold' if bold else 'Helvetica'
-            c.setFont(font, size)
-            c.setFillColor(color)
-            c.drawString(x, y, str(text))
-
-        def draw_centered_text(x, y, text, size=10, bold=False, color=colors.black, rtl=False):
-            if contains_hebrew(text):
-                text = process_hebrew(text)
-                font = hebrew_font
-                c.setFont(font, size)
-                c.setFillColor(color)
-                c.drawCentredString(x, y, str(text))
-                return
-            font = 'Helvetica-Bold' if bold else 'Helvetica'
-            c.setFont(font, size)
-            c.setFillColor(color)
-            c.drawCentredString(x, y, str(text))
-
-        # Header
-        # Determine RTL based on first meal name, with fallback
-        meals_list = menu.get('meals', [])
-        first_meal_name = ""
-        if meals_list and len(meals_list) > 0:
-            first_meal_name = meals_list[0].get('meal', '')
-        
-        rtl = contains_hebrew(first_meal_name)
-        
-        draw_centered_text(width/2, y, "BetterChoice - Meal Plan", size=20, bold=True, color=accent_color, rtl=rtl)
-        y -= 30
-        draw_centered_text(width/2, y, "Personalized Nutrition Menu", size=14, color=subtitle_color, rtl=rtl)
-        y -= 25
-        today_str = datetime.datetime.now().strftime("%B %d, %Y")
-        draw_centered_text(width/2, y, f"Generated on {today_str}", size=12, color=subtitle_color, rtl=rtl)
-        y -= 40
-
-        # Daily totals if available
-        if "totals" in menu:
-            totals = menu["totals"]
-            draw_text(margin if not rtl else width-margin, y, "Daily Nutritional Summary:" if not rtl else "סיכום תזונתי יומי:", size=14, bold=True, color=title_color, rtl=rtl)
-            y -= 20
-            col_width = 120
-            start_x = margin if not rtl else width - margin - col_width * 4
-            # Headers
-            draw_text(start_x, y, "Calories" if not rtl else "קלוריות", size=12, bold=True, color=macro_colors['calories'], rtl=rtl)
-            draw_text(start_x + col_width, y, "Protein" if not rtl else "חלבון", size=12, bold=True, color=macro_colors['protein'], rtl=rtl)
-            draw_text(start_x + col_width * 2, y, "Carbs" if not rtl else "פחמימות", size=12, bold=True, color=macro_colors['carbs'], rtl=rtl)
-            draw_text(start_x + col_width * 3, y, "Fat" if not rtl else "שומן", size=12, bold=True, color=macro_colors['fat'], rtl=rtl)
-            y -= 15
-            # Values
-            draw_text(start_x, y, f"{totals.get('calories', 0)} kcal", size=12, color=title_color, rtl=rtl)
-            draw_text(start_x + col_width, y, f"{totals.get('protein', 0)}g", size=12, color=title_color, rtl=rtl)
-            draw_text(start_x + col_width * 2, y, f"{totals.get('carbs', 0)}g", size=12, color=title_color, rtl=rtl)
-            draw_text(start_x + col_width * 3, y, f"{totals.get('fat', 0)}g", size=12, color=title_color, rtl=rtl)
-            y -= 40
-
-        # Meals - Handle any number of meals dynamically
-        if "meals" in menu and isinstance(menu["meals"], list):
-            meals_count = len(menu["meals"])
-            logger.info(f"🔍 Processing {meals_count} meals for PDF")
-            
-            for meal_index, meal in enumerate(menu["meals"]):
-                if not isinstance(meal, dict):
-                    logger.warning(f"🔍 Skipping invalid meal at index {meal_index}: {meal}")
-                    continue
-                    
-                meal_name = meal.get('meal', f'Meal {meal_index + 1}')
-                is_hebrew = contains_hebrew(meal_name)
-                meal_rtl = is_hebrew
-                
-                # Check if we need a new page
-                if y < margin + 200:
-                    c.showPage()
-                    y = height - 50
-                    
-                logger.info(f"🔍 Processing meal {meal_index + 1}: {meal_name}")
-                
-                # Draw meal name
-                draw_text(margin if not meal_rtl else width-margin, y, meal_name, size=16, bold=True, color=accent_color, rtl=meal_rtl)
-                y -= 25
-                
-                # Main option
-                main = meal.get('main', {})
-                if main and isinstance(main, dict):
-                    draw_text((margin + 20) if not meal_rtl else (width - margin - 20), y, "Main Option:" if not meal_rtl else "אפשרות עיקרית:", size=12, bold=True, color=title_color, rtl=meal_rtl)
-                    y -= 15
-                    
-                    main_title = main.get('meal_title', '')
-                    if main_title:
-                        draw_text((margin + 30) if not meal_rtl else (width - margin - 30), y, main_title, size=11, bold=True, color=title_color, rtl=meal_rtl)
-                        y -= 15
-                        
-                    nutrition = main.get('nutrition', {})
-                    if nutrition:
-                        nut_text = f"{nutrition.get('calories', 0)} kcal | Protein: {nutrition.get('protein', 0)}g | Carbs: {nutrition.get('carbs', 0)}g | Fat: {nutrition.get('fat', 0)}g"
-                        if meal_rtl:
-                            nut_text = f"{nutrition.get('calories', 0)} קלוריות | חלבון: {nutrition.get('protein', 0)}g | פחמימות: {nutrition.get('carbs', 0)}g | שומן: {nutrition.get('fat', 0)}g"
-                        draw_text((margin + 30) if not meal_rtl else (width - margin - 30), y, nut_text, size=10, color=subtitle_color, rtl=meal_rtl)
-                        y -= 15
-                        
-                    ingredients = main.get('ingredients', [])
-                    if ingredients and isinstance(ingredients, list):
-                        draw_text((margin + 30) if not meal_rtl else (width - margin - 30), y, "Ingredients:" if not meal_rtl else "מרכיבים:", size=10, bold=True, color=title_color, rtl=meal_rtl)
-                        y -= 12
-                        for ing in ingredients:
-                            if not isinstance(ing, dict):
-                                continue
-                            item = ing.get('item', '')
-                            quantity = ing.get('quantity', '')
-                            unit = ing.get('unit', '')
-                            household_measure = ing.get('household_measure', '')
-                            
-                            # Always show the ingredient, build the text with all available info
-                            parts = [item]
-                            if quantity:
-                                parts.append(str(quantity))
-                            if unit:
-                                parts.append(str(unit))
-                            ing_text = ' '.join(parts)
-                            if household_measure:
-                                ing_text += f" ({household_measure})"
-                            ing_text = f"• {ing_text}"
-                            
-                            draw_text((margin + 40) if not meal_rtl else (width - margin - 40), y, ing_text, size=9, color=title_color, rtl=meal_rtl)
-                            y -= 10
-                y -= 10
-                
-                # Alternative option
-                alternative = meal.get('alternative', {})
-                if alternative and isinstance(alternative, dict):
-                    draw_text((margin + 20) if not meal_rtl else (width - margin - 20), y, "Alternative Option:" if not meal_rtl else "אפשרות חלופית:", size=12, bold=True, color=title_color, rtl=meal_rtl)
-                    y -= 15
-                    
-                    alt_title = alternative.get('meal_title', '')
-                    if alt_title:
-                        draw_text((margin + 30) if not meal_rtl else (width - margin - 30), y, alt_title, size=11, bold=True, color=title_color, rtl=meal_rtl)
-                        y -= 15
-                        
-                    alt_nutrition = alternative.get('nutrition', {})
-                    if alt_nutrition:
-                        alt_nut_text = f"{alt_nutrition.get('calories', 0)} kcal | Protein: {alt_nutrition.get('protein', 0)}g | Carbs: {alt_nutrition.get('carbs', 0)}g | Fat: {alt_nutrition.get('fat', 0)}g"
-                        if meal_rtl:
-                            alt_nut_text = f"{alt_nutrition.get('calories', 0)} קלוריות | חלבון: {alt_nutrition.get('protein', 0)}g | פחמימות: {alt_nutrition.get('carbs', 0)}g | שומן: {alt_nutrition.get('fat', 0)}g"
-                        draw_text((margin + 30) if not meal_rtl else (width - margin - 30), y, alt_nut_text, size=10, color=subtitle_color, rtl=meal_rtl)
-                        y -= 15
-                        
-                    alt_ingredients = alternative.get('ingredients', [])
-                    if alt_ingredients and isinstance(alt_ingredients, list):
-                        draw_text((margin + 30) if not meal_rtl else (width - margin - 30), y, "Ingredients:" if not meal_rtl else "מרכיבים:", size=10, bold=True, color=title_color, rtl=meal_rtl)
-                        y -= 12
-                        for ing in alt_ingredients:
-                            if not isinstance(ing, dict):
-                                continue
-                            item = ing.get('item', '')
-                            quantity = ing.get('quantity', '')
-                            unit = ing.get('unit', '')
-                            household_measure = ing.get('household_measure', '')
-                            
-                            # Always show the ingredient, build the text with all available info
-                            parts = [item]
-                            if quantity:
-                                parts.append(str(quantity))
-                            if unit:
-                                parts.append(str(unit))
-                            ing_text = ' '.join(parts)
-                            if household_measure:
-                                ing_text += f" ({household_measure})"
-                            ing_text = f"• {ing_text}"
-                            
-                            draw_text((margin + 40) if not meal_rtl else (width - margin - 40), y, ing_text, size=9, color=title_color, rtl=meal_rtl)
-                            y -= 10
-                y -= 10
-                
-                # Additional alternatives
-                other_alts = meal.get('alternatives', [])
-                if other_alts and isinstance(other_alts, list):
-                    for idx, alt in enumerate(other_alts):
-                        if not isinstance(alt, dict):
-                            continue
-                        draw_text((margin + 20) if not meal_rtl else (width - margin - 20), y, f"Additional Alternative {idx + 2}:" if not meal_rtl else f"חלופה נוספת {idx + 2}:", size=12, bold=True, color=title_color, rtl=meal_rtl)
-                        y -= 15
-                        
-                        alt_title = alt.get('meal_title', '')
-                        if alt_title:
-                            draw_text((margin + 30) if not meal_rtl else (width - margin - 30), y, alt_title, size=11, bold=True, color=title_color, rtl=meal_rtl)
-                            y -= 15
-                            
-                        alt_nutrition = alt.get('nutrition', {})
-                        if alt_nutrition:
-                            alt_nut_text = f"{alt_nutrition.get('calories', 0)} kcal | Protein: {alt_nutrition.get('protein', 0)}g | Carbs: {alt_nutrition.get('carbs', 0)}g | Fat: {alt_nutrition.get('fat', 0)}g"
-                            if meal_rtl:
-                                alt_nut_text = f"{alt_nutrition.get('calories', 0)} קלוריות | חלבון: {alt_nutrition.get('protein', 0)}g | פחמימות: {alt_nutrition.get('carbs', 0)}g | שומן: {alt_nutrition.get('fat', 0)}g"
-                            draw_text((margin + 30) if not meal_rtl else (width - margin - 30), y, alt_nut_text, size=10, color=subtitle_color, rtl=meal_rtl)
-                            y -= 15
-                            
-                        alt_ingredients = alt.get('ingredients', [])
-                        if alt_ingredients and isinstance(alt_ingredients, list):
-                            draw_text((margin + 30) if not meal_rtl else (width - margin - 30), y, "Ingredients:" if not meal_rtl else "מרכיבים:", size=10, bold=True, color=title_color, rtl=meal_rtl)
-                            y -= 12
-                            for ing in alt_ingredients:
-                                if not isinstance(ing, dict):
-                                    continue
-                                item = ing.get('item', '')
-                                quantity = ing.get('quantity', '')
-                                unit = ing.get('unit', '')
-                                household_measure = ing.get('household_measure', '')
-                                
-                                # Always show the ingredient, build the text with all available info
-                                parts = [item]
-                                if quantity:
-                                    parts.append(str(quantity))
-                                if unit:
-                                    parts.append(str(unit))
-                                ing_text = ' '.join(parts)
-                                if household_measure:
-                                    ing_text += f" ({household_measure})"
-                                ing_text = f"• {ing_text}"
-                                
-                                draw_text((margin + 40) if not meal_rtl else (width - margin - 40), y, ing_text, size=9, color=title_color, rtl=meal_rtl)
-                                y -= 10
-                            y -= 10
-                        y -= 10
-                y -= 20
-                
-        else:
-            logger.warning(f"🔍 No valid meals found in menu: {menu}")
-            # Handle case where menu structure is different
-            if isinstance(menu, list):
-                # Direct list of meals
-                for meal_index, meal in enumerate(menu):
-                    if not isinstance(meal, dict):
-                        continue
-                    meal_name = meal.get('meal', f'Meal {meal_index + 1}')
-                    draw_text(margin, y, f"Processing meal: {meal_name}", size=12, color=title_color)
-                    y -= 20
-            else:
-                draw_text(margin, y, "No meals found in menu data", size=12, color=title_color)
-                y -= 20
-        
-        # Footer
-        c.setStrokeColor(colors.grey)
-        c.setLineWidth(1)
-        c.line(margin, margin + 20, width - margin, margin + 20)
-        draw_centered_text(width/2, margin + 8, "© BetterChoice 2025", size=10, color=colors.grey)
-        c.save()
-        buffer.seek(0)
-        
-        logger.info(f"✅ PDF generation completed successfully")
-        return send_file(
-            buffer,
-            as_attachment=True,
-            download_name="meal_plan.pdf",
-            mimetype="application/pdf"
-        )
-        
-    except Exception as e:
-        logger.error(f"❌ PDF generation failed: {str(e)}")
-        logger.error(f"❌ Error traceback: {traceback.format_exc()}")
-        return jsonify({"error": f"PDF generation failed: {str(e)}"}), 500
 
 
 def load_user_preferences(user_code=None):
@@ -774,21 +422,21 @@ def load_user_preferences(user_code=None):
     If user_code is not provided, falls back to first user or default values.
     """
     try:
-        logger.info(f"🔍 Loading user preferences for user_code: {user_code}")
-        logger.info(f"Supabase URL: {supabase_url}")
-        logger.info(f"Supabase Key exists: {bool(supabase_key)}")
+        # logger.info(f"🔍 Loading user preferences for user_code: {user_code}")
+        # logger.info(f"Supabase URL: {supabase_url}")
+        # logger.info(f"Supabase Key exists: {bool(supabase_key)}")
         
         # Define the specific fields we need to reduce data transfer
         selected_fields = 'user_code,food_allergies,dailyTotalCalories,recommendations,food_limitations,goal,number_of_meals,client_preference,macros,region'
         
         if user_code:
             # Fetch specific user by user_code
-            logger.info(f"Fetching user with user_code: {user_code}")
+            # logger.info(f"Fetching user with user_code: {user_code}")
             response = supabase.table('chat_users').select(selected_fields).eq('user_code', user_code).execute()
-            logger.info(f"Supabase response: {response}")
+            # logger.info(f"Supabase response: {response}")
             if response.data:
                 user_data = response.data[0]
-                logger.info(f"Found user: {user_data.get('user_code')}")
+                # logger.info(f"Found user: {user_data.get('user_code')}")
             else:
                 logger.warning(f"No user found with user_code: {user_code}")
                 raise Exception(f"User not found: {user_code}")
@@ -814,7 +462,7 @@ def load_user_preferences(user_code=None):
                 }
 
         # Debug: Log the raw user data
-        logger.info(f"Raw user data from Supabase: {json.dumps(user_data, indent=2, default=str, ensure_ascii=False)}")
+        # logger.info(f"Raw user data from Supabase: {json.dumps(user_data, indent=2, default=str, ensure_ascii=False)}")
 
         # Parse macros - handle both string and object formats
         macros = user_data.get("macros", {})
@@ -879,8 +527,8 @@ def load_user_preferences(user_code=None):
             "region": user_data.get("region", "israel")  # Default to israel if not specified
         }
 
-        logger.info(f"✅ Loaded user preferences for user_code: {user_data.get('user_code')}")
-        logger.info(f"Final preferences: {json.dumps(preferences, indent=2, ensure_ascii=False)}")
+        # logger.info(f"✅ Loaded user preferences for user_code: {user_data.get('user_code')}")
+        # logger.info(f"Final preferences: {json.dumps(preferences, indent=2, ensure_ascii=False)}")
         
         # Validate that essential fields are not None
         if preferences["calories_per_day"] is None:
@@ -891,8 +539,8 @@ def load_user_preferences(user_code=None):
         return preferences
 
     except Exception as e:
-        logger.error(f"Error loading user preferences: {str(e)}")
-        logger.error(f"Error traceback: {traceback.format_exc()}")
+        # logger.error(f"Error loading user preferences: {str(e)}")
+        # logger.error(f"Error traceback: {traceback.format_exc()}")
         raise Exception(f"Failed to load user preferences: {str(e)}")
 
 # Azure OpenAI config
@@ -928,7 +576,7 @@ def api_template():
             data = request.get_json()
             user_code = data.get("user_code") if data else None
             preferences = load_user_preferences(user_code)
-            logger.info("🔹 Received user preferences for template:\n%s", json.dumps(preferences, indent=2, ensure_ascii=False))
+            # logger.info("🔹 Received user preferences for template:\n%s", json.dumps(preferences, indent=2, ensure_ascii=False))
 
             region = preferences.get('region', 'israel').lower()
             
@@ -1123,7 +771,7 @@ If any meal is missing or fails a rule, silently self-correct and regenerate bef
                 "content": f"User preferences: {json.dumps(preferences, ensure_ascii=False)}"
             }
 
-            logger.info("🧠 Sending to OpenAI (/template):\nSystem: %s\nUser: %s", system_prompt, user_prompt["content"])
+            # logger.info("🧠 Sending to OpenAI (/template):\nSystem: %s\nUser: %s", system_prompt, user_prompt["content"])
 
             response = openai.ChatCompletion.create(
                 engine=deployment,
@@ -1141,10 +789,10 @@ If any meal is missing or fails a rule, silently self-correct and regenerate bef
                 # Add debugging for template structure
                 template = parsed.get("template", [])
                 if template:
-                    logger.info(f"🔍 Template has {len(template)} meals")
+                    # logger.info(f"🔍 Template has {len(template)} meals")
                     for i, meal in enumerate(template):
                         meal_name = meal.get('meal', 'Unknown')
-                        logger.info(f"🔍 Meal {i+1}: {meal_name}")
+                        # logger.info(f"🔍 Meal {i+1}: {meal_name}")
                     
                     # Check if meal names match expected pattern
                     expected_meals = {
@@ -1384,7 +1032,7 @@ def api_build_menu():
                         main_candidate = parsed.get("main") or parsed  # GPT might just return the main object
                         logger.info(f"✅ Successfully parsed JSON for MAIN '{meal_name}'")
                     except json.JSONDecodeError as e:
-                        logger.error(f"❌ JSON parse error for MAIN '{meal_name}': {e}\n{raw_main}")
+                        # logger.error(f"❌ JSON parse error for MAIN '{meal_name}': {e}\n{raw_main}")
                         main_feedback = [f"Invalid JSON from GPT: {str(e)}"]
                         continue
                     except Exception as e:
@@ -1725,8 +1373,8 @@ def api_validate_template():
         template = data.get("template")
         user_code = data.get("user_code")
         
-        logger.info(f"🔍 validate-template called with user_code: {user_code}")
-        logger.info(f"🔍 Request data keys: {list(data.keys()) if data else 'None'}")
+        # logger.info(f"🔍 validate-template called with user_code: {user_code}")
+        # logger.info(f"🔍 Request data keys: {list(data.keys()) if data else 'None'}")
         
         preferences = load_user_preferences(user_code)
 
