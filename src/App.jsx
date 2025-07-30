@@ -2,19 +2,19 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { LanguageProvider } from '@/contexts/LanguageContext';
 import { ClientProvider } from '@/contexts/ClientContext';
-import Layout from '@/pages/Layout.jsx';
-import Login from '@/pages/Login.jsx';
-import Register from '@/pages/Register.jsx';
-import Dashboard from '@/pages/Dashboard.jsx';
-import Users from '@/pages/users.jsx';
-import Chat from '@/pages/Chat.jsx';
-import DataGenerator from '@/pages/DataGenerator.jsx';
-import NutritionPlan from '@/pages/NutritionPlan.jsx';
+import Layout from '@/pages/Layout';
+import Login from '@/pages/Login';
+import Register from '@/pages/Register';
+import Dashboard from '@/pages/Dashboard';
+import Users from '@/pages/Users';
+import Chat from '@/pages/Chat';
+import DataGenerator from '@/pages/DataGenerator';
+import NutritionPlan from '@/pages/NutritionPlan';
 import '@/styles/rtl.css';
-import MenuCreate from './pages/MenuCreate.jsx';
-import MenuLoad from './pages/MenuLoad.jsx';
-import RecipesPage from './pages/RecipesPage.jsx';
-import UserWeightLogs from './pages/UserWeightLogs.jsx';
+import MenuCreate from './pages/MenuCreate';
+import MenuLoad from './pages/MenuLoad';
+import RecipesPage from './pages/RecipesPage';
+import UserWeightLogs from './pages/UserWeightLogs';
 
 // Protected Route component
 function ProtectedRoute({ children }) {
