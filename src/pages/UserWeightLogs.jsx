@@ -90,7 +90,7 @@ const CHART_COLORS = {
 const CHART_COLORS_ARRAY = Object.values(CHART_COLORS);
 
 export default function UserWeightLogs() {
-  const { translations } = useLanguage();
+  const { translations, language } = useLanguage();
   const { selectedClient } = useClient();
   const [weightLogs, setWeightLogs] = useState([]);
   const [filteredLogs, setFilteredLogs] = useState([]);
@@ -100,6 +100,72 @@ export default function UserWeightLogs() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMetrics, setSelectedMetrics] = useState(['weight_kg', 'body_fat_percentage']);
   const [chartType, setChartType] = useState('line');
+
+  // Check if current language is Hebrew (RTL)
+  const isRTL = language === 'he';
+
+  // Add RTL-specific styles for charts
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      .rtl-chart-container .recharts-legend-wrapper {
+        direction: rtl !important;
+        text-align: right !important;
+      }
+      
+      .rtl-chart-container .recharts-legend-item {
+        direction: rtl !important;
+        text-align: right !important;
+      }
+      
+      .rtl-chart-container .recharts-tooltip-wrapper {
+        direction: rtl !important;
+        text-align: right !important;
+      }
+      
+      /* Prevent number reversal in RTL mode */
+      .rtl-chart-container .recharts-cartesian-axis-tick-value {
+        direction: ltr !important;
+        text-anchor: end !important;
+        unicode-bidi: plaintext !important;
+      }
+      
+      .rtl-chart-container .recharts-cartesian-axis-label {
+        direction: rtl !important;
+        text-anchor: end !important;
+      }
+      
+      /* Ensure numbers and dates are not reversed */
+      .rtl-chart-container .recharts-cartesian-axis-tick-value tspan {
+        direction: ltr !important;
+        unicode-bidi: plaintext !important;
+      }
+      
+      /* Fix hover line positioning for RTL */
+      .rtl-chart-container .recharts-cartesian-axis-tick-line {
+        direction: ltr !important;
+      }
+      
+      /* Fix cursor and hover line positioning */
+      .rtl-chart-container .recharts-cartesian-grid-horizontal line {
+        direction: ltr !important;
+      }
+      
+      .rtl-chart-container .recharts-cartesian-grid-vertical line {
+        direction: ltr !important;
+      }
+      
+      /* Ensure proper cursor positioning */
+      .rtl-chart-container .recharts-cartesian-axis-tick {
+        direction: ltr !important;
+      }
+    `;
+    document.head.appendChild(style);
+    
+    return () => {
+      document.head.removeChild(style);
+    };
+  }, [isRTL]);
 
   // Available metrics for selection
   const availableMetrics = [
@@ -139,7 +205,15 @@ export default function UserWeightLogs() {
             ...log,
             // Keep original date for filtering, add display date for UI
             original_date: log.measurement_date,
-            measurement_date: log.measurement_date ? new Date(log.measurement_date).toLocaleDateString() : 'Unknown Date',
+            measurement_date: log.measurement_date ? 
+              (() => {
+                const date = new Date(log.measurement_date);
+                const day = date.getDate().toString().padStart(2, '0');
+                const month = (date.getMonth() + 1).toString().padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}/${month}/${year}`;
+              })() : 
+              'Unknown Date',
             // Ensure numeric values are valid numbers
             weight_kg: typeof log.weight_kg === 'number' && !isNaN(log.weight_kg) ? log.weight_kg : 0,
             body_fat_percentage: typeof log.body_fat_percentage === 'number' && !isNaN(log.body_fat_percentage) ? log.body_fat_percentage : 0,
@@ -175,7 +249,7 @@ export default function UserWeightLogs() {
     };
 
     fetchWeightLogs();
-  }, [selectedClient]);
+  }, [selectedClient, language]);
 
   // Filter data based on date range and search
   useEffect(() => {
@@ -328,14 +402,21 @@ export default function UserWeightLogs() {
 
 
 
-  // Custom tooltip for charts
+  // Custom tooltip for charts with RTL support
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
-        <div className="bg-white/95 backdrop-blur-xl border border-border/40 rounded-xl p-4 shadow-xl">
-          <p className="font-semibold text-foreground mb-2">{label}</p>
+        <div 
+          className="bg-white/95 backdrop-blur-xl border border-border/40 rounded-xl p-4 shadow-xl"
+          style={{ 
+            direction: isRTL ? 'rtl' : 'ltr',
+            textAlign: isRTL ? 'right' : 'left',
+            maxWidth: '200px'
+          }}
+        >
+          <p className="font-semibold text-foreground mb-2" style={{ direction: 'ltr', unicodeBidi: 'plaintext' }}>{label}</p>
           {payload.map((entry, index) => (
-            <p key={index} style={{ color: entry.color }} className="text-sm">
+            <p key={index} style={{ color: entry.color, direction: 'ltr', unicodeBidi: 'plaintext' }} className="text-sm">
               {entry.name}: {entry.value}
             </p>
           ))}
@@ -345,7 +426,7 @@ export default function UserWeightLogs() {
     return null;
   };
 
-  // Render chart based on type
+  // Render chart based on type with RTL support
   const renderChart = () => {
     if (chartData.length === 0) {
       return (
@@ -360,7 +441,40 @@ export default function UserWeightLogs() {
 
     const commonProps = {
       data: chartData,
-      margin: { top: 20, right: 30, left: 20, bottom: 20 }
+      margin: { 
+        top: 20, 
+        right: 60, 
+        left: 60, 
+        bottom: 20 
+      }
+    };
+
+    // Common axis props with RTL support
+    const commonAxisProps = {
+      stroke: "#6b7280",
+      fontSize: 12,
+      tickLine: false,
+      axisLine: false,
+      style: {
+        direction: isRTL ? 'ltr' : 'ltr', // Keep numbers in LTR direction
+        textAnchor: isRTL ? 'end' : 'start',
+        unicodeBidi: 'plaintext' // Prevent number reversal
+      }
+    };
+
+    // Custom tick formatter to prevent reversal
+    const formatTick = (value) => {
+      if (typeof value === 'string' && value.includes('/')) {
+        // This is a date, ensure it's not reversed
+        return value;
+      }
+      return value;
+    };
+
+    // Custom Y-axis formatter to prevent number reversal
+    const formatYAxisTick = (value) => {
+      // Ensure numbers are displayed correctly
+      return value.toString();
     };
 
     switch (chartType) {
@@ -371,20 +485,25 @@ export default function UserWeightLogs() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis 
                 dataKey="date" 
-                stroke="#6b7280"
-                fontSize={12}
-                tickLine={false}
-                axisLine={false}
+                {...commonAxisProps}
+                angle={isRTL ? -45 : 45}
+                textAnchor={isRTL ? 'end' : 'start'}
+                height={isRTL ? 80 : 60}
+                tickFormatter={formatTick}
               />
               <YAxis 
-                stroke="#6b7280"
-                fontSize={12}
-                tickLine={false}
-                axisLine={false}
+                {...commonAxisProps}
                 domain={getYAxisDomain()}
+                orientation={isRTL ? 'right' : 'left'}
+                tickFormatter={formatYAxisTick}
               />
               <Tooltip content={<CustomTooltip />} />
-              <Legend />
+              <Legend 
+                wrapperStyle={{
+                  direction: isRTL ? 'rtl' : 'ltr',
+                  textAlign: isRTL ? 'right' : 'left'
+                }}
+              />
               {selectedMetrics.map((metric, index) => {
                 const metricInfo = availableMetrics.find(m => m.key === metric);
                 return (
@@ -397,6 +516,7 @@ export default function UserWeightLogs() {
                     dot={{ fill: metricInfo?.color || CHART_COLORS_ARRAY[index % CHART_COLORS_ARRAY.length], strokeWidth: 2, r: 4 }}
                     activeDot={{ r: 6, strokeWidth: 2 }}
                     name={metricInfo?.label || metric}
+                    connectNulls={true}
                   />
                 );
               })}
@@ -411,20 +531,25 @@ export default function UserWeightLogs() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis 
                 dataKey="date" 
-                stroke="#6b7280"
-                fontSize={12}
-                tickLine={false}
-                axisLine={false}
+                {...commonAxisProps}
+                angle={isRTL ? -45 : 45}
+                textAnchor={isRTL ? 'end' : 'start'}
+                height={isRTL ? 80 : 60}
+                tickFormatter={formatTick}
               />
               <YAxis 
-                stroke="#6b7280"
-                fontSize={12}
-                tickLine={false}
-                axisLine={false}
+                {...commonAxisProps}
                 domain={getYAxisDomain()}
+                orientation={isRTL ? 'right' : 'left'}
+                tickFormatter={formatYAxisTick}
               />
               <Tooltip content={<CustomTooltip />} />
-              <Legend />
+              <Legend 
+                wrapperStyle={{
+                  direction: isRTL ? 'rtl' : 'ltr',
+                  textAlign: isRTL ? 'right' : 'left'
+                }}
+              />
               {selectedMetrics.map((metric, index) => {
                 const metricInfo = availableMetrics.find(m => m.key === metric);
                 return (
@@ -450,20 +575,25 @@ export default function UserWeightLogs() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis 
                 dataKey="date" 
-                stroke="#6b7280"
-                fontSize={12}
-                tickLine={false}
-                axisLine={false}
+                {...commonAxisProps}
+                angle={isRTL ? -45 : 45}
+                textAnchor={isRTL ? 'end' : 'start'}
+                height={isRTL ? 80 : 60}
+                tickFormatter={formatTick}
               />
               <YAxis 
-                stroke="#6b7280"
-                fontSize={12}
-                tickLine={false}
-                axisLine={false}
+                {...commonAxisProps}
                 domain={getYAxisDomain()}
+                orientation={isRTL ? 'right' : 'left'}
+                tickFormatter={formatYAxisTick}
               />
               <Tooltip content={<CustomTooltip />} />
-              <Legend />
+              <Legend 
+                wrapperStyle={{
+                  direction: isRTL ? 'rtl' : 'ltr',
+                  textAlign: isRTL ? 'right' : 'left'
+                }}
+              />
               {selectedMetrics.map((metric, index) => {
                 const metricInfo = availableMetrics.find(m => m.key === metric);
                 return (
@@ -510,8 +640,6 @@ export default function UserWeightLogs() {
           </p>
         </div>
       </section>
-
-
 
       {/* Controls Section */}
       <section className="container mx-auto px-6 mb-8">
@@ -732,7 +860,7 @@ export default function UserWeightLogs() {
         <Card className="glass-premium border-border/40 shadow-premium">
           <CardHeader className="pb-4">
             <div className="flex items-center justify-between">
-              <div>
+              <div style={{ textAlign: isRTL ? 'right' : 'left' }}>
                 <CardTitle className="text-2xl font-bold text-gradient-primary">
                   {translations.progressChart}
                 </CardTitle>
@@ -795,7 +923,14 @@ export default function UserWeightLogs() {
                 </div>
               </div>
             ) : (
-              renderChart()
+              <div 
+                style={{ 
+                  textAlign: isRTL ? 'right' : 'left'
+                }}
+                className={isRTL ? 'rtl-chart-container' : ''}
+              >
+                {renderChart()}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -806,35 +941,37 @@ export default function UserWeightLogs() {
         <section className="container mx-auto px-6 pb-20">
           <Card className="glass-premium border-border/40 shadow-premium">
             <CardHeader>
-                          <CardTitle className="text-xl font-bold text-gradient-primary">
-              {translations.measurementHistory}
-            </CardTitle>
-            <CardDescription>
-              {translations.measurementHistoryDescription}
-            </CardDescription>
+              <div style={{ textAlign: isRTL ? 'right' : 'left' }}>
+                <CardTitle className="text-xl font-bold text-gradient-primary">
+                  {translations.measurementHistory}
+                </CardTitle>
+                <CardDescription>
+                  {translations.measurementHistoryDescription}
+                </CardDescription>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-border/30">
-                      <th className="text-left p-4 font-semibold text-foreground/80">{translations.date || 'Date'}</th>
-                      <th className="text-left p-4 font-semibold text-foreground/80">{translations.weightKg}</th>
-                      <th className="text-left p-4 font-semibold text-foreground/80">{translations.bodyFatPercentage}</th>
-                      <th className="text-left p-4 font-semibold text-foreground/80">{translations.waistCm}</th>
-                      <th className="text-left p-4 font-semibold text-foreground/80">{translations.hipCm}</th>
-                      <th className="text-left p-4 font-semibold text-foreground/80">{translations.armCm}</th>
+                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.date || 'Date'}</th>
+                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.weightKg}</th>
+                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.bodyFatPercentage}</th>
+                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.waistCm}</th>
+                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.hipCm}</th>
+                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.armCm}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredLogs.map((log, index) => (
                       <tr key={index} className="border-b border-border/20 hover:bg-muted/20 transition-colors duration-200">
-                        <td className="p-4 text-sm text-foreground/80">{log.measurement_date}</td>
-                        <td className="p-4 text-sm font-medium">{log.weight_kg}</td>
-                        <td className="p-4 text-sm font-medium">{log.body_fat_percentage}%</td>
-                        <td className="p-4 text-sm font-medium">{log.waist_circumference_cm}</td>
-                        <td className="p-4 text-sm font-medium">{log.hip_circumference_cm}</td>
-                        <td className="p-4 text-sm font-medium">{log.arm_circumference_cm}</td>
+                        <td className={`p-4 text-sm ${isRTL ? 'text-right' : 'text-left'} text-foreground/80`}>{log.measurement_date}</td>
+                        <td className={`p-4 text-sm font-medium ${isRTL ? 'text-right' : 'text-left'}`}>{log.weight_kg}</td>
+                        <td className={`p-4 text-sm font-medium ${isRTL ? 'text-right' : 'text-left'}`}>{log.body_fat_percentage}%</td>
+                        <td className={`p-4 text-sm font-medium ${isRTL ? 'text-right' : 'text-left'}`}>{log.waist_circumference_cm}</td>
+                        <td className={`p-4 text-sm font-medium ${isRTL ? 'text-right' : 'text-left'}`}>{log.hip_circumference_cm}</td>
+                        <td className={`p-4 text-sm font-medium ${isRTL ? 'text-right' : 'text-left'}`}>{log.arm_circumference_cm}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -1946,8 +1946,8 @@ const MenuCreate = () => {
       setProgress(5);
       setProgressStep('🎯 Analyzing client preferences...');
 
-      // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
-      const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_code: selectedClient.user_code })
@@ -1996,8 +1996,8 @@ const MenuCreate = () => {
       setProgress(30);
       setProgressStep('🍽️ Creating personalized meals...');
 
-      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
-      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template, user_code: selectedClient.user_code }),
