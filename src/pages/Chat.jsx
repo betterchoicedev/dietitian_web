@@ -5,6 +5,7 @@ import { Client } from '@/api/entities';
 import { User } from '@/api/entities';
 import { InvokeLLM, UploadFile } from '@/api/integrations';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useClient } from '@/contexts/ClientContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -15,11 +16,9 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function Chat() {
   const { language, translations } = useLanguage();
+  const { selectedClient } = useClient();
   const [selectedChat, setSelectedChat] = useState(null);
   const [message, setMessage] = useState('');
-  const [client, setClient] = useState(null);
-  const [selectedClientUserCode, setSelectedClientUserCode] = useState(null);
-  const [availableClients, setAvailableClients] = useState([]);
   const [mealPlanData, setMealPlanData] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingData, setIsFetchingData] = useState(true);
@@ -48,17 +47,13 @@ export default function Chat() {
     setRefreshKey(prev => prev + 1);
   };
 
-  useEffect(() => {
-    loadData();
-  }, [refreshKey]);
-
   // Fetch conversation and initial messages when client is selected
   useEffect(() => {
-    if (selectedClientUserCode) {
-      loadClientData(selectedClientUserCode);
-      loadConversationAndMessages(selectedClientUserCode);
+    if (selectedClient?.user_code) {
+      loadClientData(selectedClient.user_code);
+      loadConversationAndMessages(selectedClient.user_code);
     }
-  }, [selectedClientUserCode]);
+  }, [selectedClient?.user_code]);
 
   // Fetch conversation by user_code, then fetch latest 20 messages
   const loadConversationAndMessages = async (userCode) => {
@@ -104,29 +99,9 @@ export default function Chat() {
   };
 
   const handleClientSelect = (userCode) => {
-    setSelectedClientUserCode(userCode);
-    setSelectedChat(null); // Reset chat when selecting new client
-  };
-
-  const loadData = async () => {
-    setIsFetchingData(true);
-    setError(null);
-
-    try {
-      console.log("Loading available clients from Supabase...");
-
-      // Load all available clients from chat_users table
-      const clients = await ChatUser.list();
-      setAvailableClients(clients);
-
-      console.log("Available clients loaded:", clients);
-
-    } catch (error) {
-      console.error("Error loading clients:", error);
-      setError(translations.failedToLoadClients);
-    } finally {
-      setIsFetchingData(false);
-    }
+    // Client selection is now handled globally through ClientContext
+    // This function is kept for compatibility but no longer needed
+    console.log('Client selection is now handled globally');
   };
 
   const loadClientData = async (userCode) => {
@@ -138,10 +113,6 @@ export default function Chat() {
     try {
       console.log("Loading client data for user_code:", userCode);
 
-      // Get client data from chat_users table
-      const clientData = await ChatUser.getByUserCode(userCode);
-      setClient(clientData);
-
       // Get meal plan data from meal_plans_and_schemas table
       let mealPlan = null;
       try {
@@ -152,7 +123,6 @@ export default function Chat() {
         setMealPlanData(null);
       }
 
-      console.log("Client data loaded:", clientData);
       console.log("Meal plan data loaded:", mealPlan);
 
       // Create a new temporary chat for this client (in memory only)
@@ -173,7 +143,7 @@ export default function Chat() {
 
   // When sending a message, after success, reload the latest 20 messages
   const handleSend = async () => {
-    if ((!message.trim() && !imageFile) || !client) return;
+    if ((!message.trim() && !imageFile) || !selectedClient) return;
 
     setIsLoading(true);
     try {
@@ -204,36 +174,36 @@ export default function Chat() {
 
       // Prepare comprehensive client profile for AI context
       const clientProfile = {
-        name: client.full_name,
-        user_code: client.user_code,
+        name: selectedClient.full_name,
+        user_code: selectedClient.user_code,
         // Personal information
-        ...(client.age && { age: client.age }),
-        ...(client.date_of_birth && { date_of_birth: client.date_of_birth }),
-        ...(client.gender && { gender: client.gender }),
-        ...(client.weight_kg && { weight_kg: client.weight_kg }),
-        ...(client.height_cm && { height_cm: client.height_cm }),
-        ...(client.user_language && { user_language: client.user_language }),
+        ...(selectedClient.age && { age: selectedClient.age }),
+        ...(selectedClient.date_of_birth && { date_of_birth: selectedClient.date_of_birth }),
+        ...(selectedClient.gender && { gender: selectedClient.gender }),
+        ...(selectedClient.weight_kg && { weight_kg: selectedClient.weight_kg }),
+        ...(selectedClient.height_cm && { height_cm: selectedClient.height_cm }),
+        ...(selectedClient.user_language && { user_language: selectedClient.user_language }),
 
         // Health and dietary information
-        ...(client.food_allergies && { food_allergies: client.food_allergies }),
-        ...(client.food_limitations && { food_limitations: client.food_limitations }),
-        ...(client.Activity_level && { activity_level: client.Activity_level }),
-        ...(client.goal && { goal: client.goal }),
+        ...(selectedClient.food_allergies && { food_allergies: selectedClient.food_allergies }),
+        ...(selectedClient.food_limitations && { food_limitations: selectedClient.food_limitations }),
+        ...(selectedClient.Activity_level && { activity_level: selectedClient.Activity_level }),
+        ...(selectedClient.goal && { goal: selectedClient.goal }),
 
         // Nutrition targets and preferences
-        ...(client.dailyTotalCalories && { daily_total_calories: client.dailyTotalCalories }),
-        ...(client.number_of_meals && { number_of_meals: client.number_of_meals }),
-        ...(client.macros && { macros: client.macros }),
-        ...(client.client_preference && { client_preference: client.client_preference }),
-        ...(client.recommendations && { recommendations: client.recommendations }),
+        ...(selectedClient.dailyTotalCalories && { daily_total_calories: selectedClient.dailyTotalCalories }),
+        ...(selectedClient.number_of_meals && { number_of_meals: selectedClient.number_of_meals }),
+        ...(selectedClient.macros && { macros: selectedClient.macros }),
+        ...(selectedClient.client_preference && { client_preference: selectedClient.client_preference }),
+        ...(selectedClient.recommendations && { recommendations: selectedClient.recommendations }),
 
         // Chat history from other platforms
-        ...(client.user_context && { user_context: client.user_context }),
+        ...(selectedClient.user_context && { user_context: selectedClient.user_context }),
 
         // Legacy fields for backward compatibility
-        ...(client.height && { height: client.height }),
-        ...(client.weight && { weight: client.weight }),
-        ...(client.activity_level && { activity_level: client.activity_level })
+        ...(selectedClient.height && { height: selectedClient.height }),
+        ...(selectedClient.weight && { weight: selectedClient.weight }),
+        ...(selectedClient.activity_level && { activity_level: selectedClient.activity_level })
       };
 
       // Log comprehensive client profile for debugging
@@ -256,7 +226,7 @@ export default function Chat() {
       let aiPrompt;
       const instruction = `You are a professional and friendly HEALTHY nutrition coach for BetterChoice.
 Your response must be in natural, conversational language. DO NOT output JSON, code, or markdown.
-Address the client by their first name: ${client.full_name.split(' ')[0]}.
+Address the client by their first name: ${selectedClient.full_name.split(' ')[0]}.
 
 **CRITICAL HEALTHY DIETITIAN RULES:**
 • You are a HEALTHY nutrition coach - prioritize nutritious, whole foods over processed snacks
@@ -338,7 +308,7 @@ Your task is to respond to the user's message below, taking into account their s
       }
 
       // Default fallback response in case AI fails
-      let aiResponse = `Hi ${client.full_name.split(' ')[0]}! Thank you for your message${userMessage.image_url ? ' and the food image' : ''}. \n\n`;
+      let aiResponse = `Hi ${selectedClient.full_name.split(' ')[0]}! Thank you for your message${userMessage.image_url ? ' and the food image' : ''}. \n\n`;
 
       // Include previous chat context if available
       if (clientProfile.user_context) {
@@ -580,36 +550,38 @@ Your task is to respond to the user's message below, taking into account their s
               <div className="flex-1">
                 <CardTitle className="flex items-center gap-2">
                   <Users className="h-5 w-5" />
-                  {translations.selectClientToChat}
+                  {selectedClient ? translations.selectedClient : translations.selectClientToChat}
                 </CardTitle>
-                <CardDescription>{translations.chooseClientFromList}</CardDescription>
+                <CardDescription>
+                  {selectedClient 
+                    ? `${translations.clientFromSidebar || 'Client selected from sidebar'}: ${selectedClient.full_name}`
+                    : translations.selectClientInSidebar || 'Please select a client in the sidebar to start chatting'
+                  }
+                </CardDescription>
               </div>
-              <div className="w-full md:w-auto md:min-w-[300px]">
-                <Select value={selectedClientUserCode || ""} onValueChange={handleClientSelect}>
-                  <SelectTrigger>
-                    <SelectValue placeholder={translations.selectAClient} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableClients.map((client) => (
-                      <SelectItem key={client.user_code} value={client.user_code}>
-                        {client.full_name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {selectedClient && (
+                <div className="w-full md:w-auto">
+                  <div className="p-3 bg-green-50 border border-green-200 rounded-md">
+                    <div className="flex items-center gap-2 text-sm text-green-700">
+                      <span>✓</span>
+                      <span className="font-medium">{translations.selected || 'Selected'}: {selectedClient.full_name}</span>
+                      <span className="text-green-600">({selectedClient.user_code})</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </CardHeader>
         </Card>
 
         {/* Chat Header - only show when client is selected */}
-        {client && (
+        {selectedClient && (
           <Card className="mb-4">
             <CardHeader>
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
                 <div>
-                  <CardTitle>{translations.chatWith} {client.full_name}</CardTitle>
-                  <CardDescription>{translations.clientCode}: {client.user_code}</CardDescription>
+                  <CardTitle>{translations.chatWith} {selectedClient.full_name}</CardTitle>
+                  <CardDescription>{translations.clientCode}: {selectedClient.user_code}</CardDescription>
                 </div>
                 {mealPlanData && (
                   <div className="text-sm text-right">
@@ -623,7 +595,7 @@ Your task is to respond to the user's message below, taking into account their s
         )}
 
         {/* Chat Area - only show when client is selected */}
-        {client ? (
+        {selectedClient ? (
           <>
             <Card className="flex-1 flex flex-col mb-4">
               <CardContent className="flex-1 p-4 overflow-hidden">
@@ -677,7 +649,7 @@ Your task is to respond to the user's message below, taking into account their s
                       <MessageSquare className="h-12 w-12 text-gray-300 mb-4" />
                       <h3 className="text-xl font-medium mb-2">{translations.startConversation}</h3>
                       <p className="max-w-md">
-                        {translations.chatWith} {client.full_name} {translations.chatAboutNutrition}
+                        {translations.chatWith} {selectedClient.full_name} {translations.chatAboutNutrition}
                       </p>
                     </div>
                   )}
@@ -707,7 +679,7 @@ Your task is to respond to the user's message below, taking into account their s
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder={`${translations.messageClient} ${client.full_name}...`}
+                placeholder={`${translations.messageClient} ${selectedClient.full_name}...`}
                 disabled={isLoading}
                 className="border-green-200 focus:ring-green-500"
               />

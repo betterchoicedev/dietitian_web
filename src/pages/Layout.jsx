@@ -3,6 +3,7 @@ import { Link, useNavigate, Outlet } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useClient } from '@/contexts/ClientContext';
 import {
   FileText, 
   Users, 
@@ -17,7 +18,9 @@ import {
   Activity,
   ClipboardList,
   Globe,
-  Scale
+  Scale,
+  User,
+  Badge
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -35,7 +38,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Badge as BadgeComponent } from "@/components/ui/badge";
 import { useAuth } from '@/contexts/AuthContext';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { LanguageToggle } from '@/components/ui/language-toggle';
@@ -45,12 +48,11 @@ export default function Layout() {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const { language, toggleLanguage, translations } = useLanguage();
+  const { clients, selectedUserCode, selectedClient, selectClient, isLoading: clientsLoading } = useClient();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const [hasOpenDialog, setHasOpenDialog] = useState(false);
-  const [clients, setClients] = useState([]);
-  const [selectedClient, setSelectedClient] = useState(null);
   const [error, setError] = useState(null);
   const [userData, setUserData] = useState(null);
   const dataLoadedRef = React.useRef(false);
@@ -145,20 +147,12 @@ export default function Layout() {
   
     loadUserData();
   }, [user]);
-  
 
-  const handleClientChange = async (clientId) => {
-    try {
-      setSelectedClient(clientId);
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ selected_client_id: clientId })
-        .eq('id', user.id);
-
-      if (updateError) throw updateError;
-      navigate('/dashboard');
-    } catch (error) {
-      console.error('Error updating selected client:', error);
+  const handleClientChange = (userCode) => {
+    selectClient(userCode);
+    // Close sidebar on mobile when client is selected
+    if (isMobile) {
+      setSidebarOpen(false);
     }
   };
 
@@ -201,14 +195,14 @@ export default function Layout() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 bg-mesh">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
       {/* Header */}
-      <header className="border-b border-border/40 glass-premium shadow-premium backdrop-blur-xl bg-white/60">
-        <div className="flex h-16 items-center px-4 md:px-6 gap-2 md:gap-4">
+      <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-white/80 backdrop-blur-xl shadow-sm">
+        <div className="flex h-16 items-center px-2 md:px-6 gap-1 md:gap-4">
           {/* Mobile Menu Button */}
           <Button
             variant="ghost"
-            className="md:hidden hover:bg-primary/10 mr-2"
+            className="md:hidden hover:bg-primary/10 flex-shrink-0"
             size="icon"
             onClick={() => {
               console.log('Open button clicked, current sidebarOpen:', sidebarOpen);
@@ -220,7 +214,7 @@ export default function Layout() {
           </Button>
 
           {/* Logo */}
-          <div className="hidden md:flex items-center mr-6">
+          <div className="hidden md:flex items-center mr-6 flex-shrink-0">
             <div className="flex items-center gap-3">
               <div className="relative">
                 <img src="/logo-placeholder.png" alt="BetterChoice Logo" className="w-10 h-10 drop-shadow-md" />
@@ -234,7 +228,7 @@ export default function Layout() {
           </div>
 
           {/* Mobile Logo */}
-          <div className="md:hidden flex items-center mr-2">
+          <div className="md:hidden flex items-center mr-2 flex-shrink-0">
             <div className="flex items-center gap-2">
               <div className="relative">
                 <img src="/logo-placeholder.png" alt="BetterChoice Logo" className="w-8 h-8 drop-shadow-md" />
@@ -244,16 +238,23 @@ export default function Layout() {
             </div>
           </div>
           
-          <div className="flex-1 flex justify-center">
+          {/* Client Selection - Responsive width */}
+          <div className="flex-1 flex justify-center min-w-0">
             {clients.length > 0 && (
-              <Select value={selectedClient} onValueChange={handleClientChange}>
-                <SelectTrigger className="w-full max-w-[320px] md:w-[320px] bg-white/80 backdrop-blur-sm border-border/60 shadow-sm hover:border-primary/40 transition-all duration-300">
-                  <SelectValue placeholder={translations.selectClient} />
+              <Select value={selectedUserCode || ''} onValueChange={handleClientChange}>
+                <SelectTrigger className="w-full max-w-[150px] sm:max-w-[200px] md:max-w-[280px] bg-white/80 backdrop-blur-sm border-border/60 shadow-sm hover:border-primary/40 transition-all duration-300 text-xs sm:text-sm md:text-base h-8 sm:h-9 md:h-10 px-2 md:px-3">
+                  <SelectValue placeholder={translations.selectClient || 'Select Client'} />
                 </SelectTrigger>
                 <SelectContent className="bg-white/95 backdrop-blur-xl border-border/60">
                   {clients.map((client) => (
-                    <SelectItem key={client.id} value={client.id} className="hover:bg-primary/5">
-                      {client.full_name}
+                    <SelectItem key={client.user_code} value={client.user_code} className="hover:bg-primary/5">
+                      <div className="flex items-center gap-2">
+                        <User className="h-3 w-3 md:h-4 md:w-4" />
+                        <span className="text-sm md:text-base">{client.full_name}</span>
+                        <BadgeComponent variant="outline" className="text-xs">
+                          {client.user_code}
+                        </BadgeComponent>
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -261,14 +262,15 @@ export default function Layout() {
             )}
           </div>
 
-          <div className="flex items-center gap-3">
+          {/* Right side - Language toggle and user menu */}
+          <div className="flex items-center gap-1 md:gap-3 flex-shrink-0">
             <LanguageToggle />
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-10 w-10 rounded-full hover:bg-primary/10 transition-all duration-300">
-                  <Avatar className="h-9 w-9 shadow-sm ring-2 ring-primary/10">
-                    <AvatarFallback className="bg-gradient-to-br from-primary to-primary-lighter text-white font-semibold">
+                <Button variant="ghost" className="relative h-8 w-8 md:h-10 md:w-10 rounded-full hover:bg-primary/10 transition-all duration-300">
+                  <Avatar className="h-7 w-7 md:h-9 md:w-9 shadow-sm ring-2 ring-primary/10">
+                    <AvatarFallback className="bg-gradient-to-br from-primary to-primary-lighter text-white font-semibold text-xs md:text-sm">
                       {userData?.email?.[0]?.toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
@@ -337,7 +339,7 @@ export default function Layout() {
             <X className="h-5 w-5" />
           </button>
         </div>
-        
+
         <nav className="space-y-1 p-4 pb-8 md:pb-4">
           <Link to="/dashboard" onClick={() => setSidebarOpen(false)}>
             <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-primary/8 hover:text-primary-darker transition-all duration-300 group">

@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ArrowLeft, Loader, Save, Clock, Utensils, CalendarRange, ArrowRight } from 'lucide-react';
+import { ArrowLeft, Loader, Save, Clock, Utensils, CalendarRange, ArrowRight, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Menu } from '@/api/entities';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from "@/components/ui/separator";
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useClient } from '@/contexts/ClientContext';
 import { EventBus } from '@/utils/EventBus';
 
 import { supabase } from '@/lib/supabase';
@@ -77,7 +78,7 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
   );
 };
 
-const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, translations, currentIngredient }) => {
+const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, translations, currentIngredient, onPortionDialog }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
   const [originalValue, setOriginalValue] = useState(value);
@@ -250,11 +251,17 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
       
       console.log('✅ Updated values:', updatedValues);
 
+      // First update the ingredient with the basic data
       onChange(updatedValues, mealIndex, optionIndex, ingredientIndex);
       setEditValue(suggestion.hebrew || suggestion.english);
       setSuggestionSelected(true);
       setShowSuggestions(false);
       setIsEditing(false);
+
+      // Then trigger the portion dialog
+      if (onPortionDialog) {
+        onPortionDialog(updatedValues, mealIndex, optionIndex, ingredientIndex);
+      }
     } catch (error) {
       console.error('❌ Error in handleSelect:', error);
       console.error('❌ Error stack:', error.stack);
@@ -389,6 +396,250 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
   );
 };
 
+const EditableHouseholdMeasure = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, translations }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(value);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    setEditValue(value);
+  }, [value]);
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const handleSubmit = () => {
+    onChange(editValue, mealIndex, optionIndex, ingredientIndex);
+    setIsEditing(false);
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleSubmit();
+    } else if (e.key === 'Escape') {
+      setEditValue(value);
+      setIsEditing(false);
+    }
+  };
+
+  const handleBlur = () => {
+    handleSubmit();
+  };
+
+  if (!isEditing) {
+    return (
+      <span
+        onClick={() => setIsEditing(true)}
+        className="text-gray-600 cursor-pointer hover:bg-gray-100 px-1 rounded"
+        title={translations?.clickToEditHouseholdMeasure || 'Click to edit household measure'}
+      >
+        {value || translations?.noMeasure || 'No measure'}
+      </span>
+    );
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      type="text"
+      value={editValue}
+      onChange={(e) => setEditValue(e.target.value)}
+      onKeyDown={handleKeyPress}
+      onBlur={handleBlur}
+      className="text-gray-600 bg-white border border-gray-300 rounded px-1 py-0.5 text-sm min-w-[80px] focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      placeholder={translations?.householdMeasurePlaceholder || 'e.g., 1 cup, 2 tbsp'}
+    />
+  );
+};
+
+const IngredientPortionDialog = ({ isOpen, onClose, onConfirm, ingredient, translations }) => {
+  const [gramAmount, setGramAmount] = useState('');
+  const [householdMeasure, setHouseholdMeasure] = useState('');
+  const [adjustedNutrition, setAdjustedNutrition] = useState(null);
+
+  useEffect(() => {
+    if (isOpen && ingredient) {
+      // Set default values
+      setGramAmount(ingredient.portionSI || '100');
+      setHouseholdMeasure(ingredient.household_measure || '');
+      
+      // Calculate adjusted nutrition based on default 100g serving
+      const baseAmount = 100;
+      const newAmount = parseFloat(ingredient.portionSI || 100);
+      const ratio = newAmount / baseAmount;
+      
+      setAdjustedNutrition({
+        calories: Math.round((ingredient.calories || 0) * ratio),
+        protein: Math.round((ingredient.protein || 0) * ratio),
+        fat: Math.round((ingredient.fat || 0) * ratio),
+        carbs: Math.round((ingredient.carbs || 0) * ratio),
+      });
+    }
+  }, [isOpen, ingredient]);
+
+  const handleGramAmountChange = (e) => {
+    const newAmount = e.target.value;
+    setGramAmount(newAmount);
+    
+    if (newAmount && ingredient) {
+      // Calculate adjusted nutrition based on 100g serving
+      const baseAmount = 100;
+      const newAmountNum = parseFloat(newAmount);
+      const ratio = newAmountNum / baseAmount;
+      
+      setAdjustedNutrition({
+        calories: Math.round((ingredient.calories || 0) * ratio),
+        protein: Math.round((ingredient.protein || 0) * ratio),
+        fat: Math.round((ingredient.fat || 0) * ratio),
+        carbs: Math.round((ingredient.carbs || 0) * ratio),
+      });
+    } else {
+      setAdjustedNutrition(null);
+    }
+  };
+
+  const handleConfirm = () => {
+    if (!gramAmount || !householdMeasure.trim()) {
+      alert(translations?.pleaseFillAllFields || 'Please fill in all fields');
+      return;
+    }
+    
+    const gramAmountNum = parseFloat(gramAmount);
+    if (isNaN(gramAmountNum) || gramAmountNum <= 0) {
+      alert(translations?.pleaseEnterValidAmount || 'Please enter a valid amount greater than 0');
+      return;
+    }
+    
+    const updatedIngredient = {
+      ...ingredient,
+      portionSI: gramAmountNum,
+      household_measure: householdMeasure.trim(),
+      calories: adjustedNutrition?.calories || ingredient.calories,
+      protein: adjustedNutrition?.protein || ingredient.protein,
+      fat: adjustedNutrition?.fat || ingredient.fat,
+      carbs: adjustedNutrition?.carbs || ingredient.carbs,
+    };
+    
+    onConfirm(updatedIngredient);
+    onClose();
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleConfirm();
+    } else if (e.key === 'Escape') {
+      onClose();
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4" dir="rtl">
+        <h3 className="text-lg font-semibold mb-4 text-gray-900">
+          {translations?.setPortion || 'Set Portion Size'}
+        </h3>
+        <p className="text-sm text-gray-600 mb-4">
+          {translations?.portionDialogDescription || 'Enter the amount in grams and a household measurement. The nutrition values will be automatically adjusted based on the 100g serving size from the database.'}
+        </p>
+        
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              {translations?.ingredient || 'Ingredient'}:
+            </label>
+            <div className="text-sm text-gray-900 bg-gray-50 p-2 rounded border">
+              {ingredient?.item}
+            </div>
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              {translations?.amountInGrams || 'Amount (grams)'}:
+            </label>
+            <input
+              type="number"
+              value={gramAmount}
+              onChange={handleGramAmountChange}
+              onKeyDown={handleKeyPress}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="100"
+              min="0"
+              step="0.1"
+              autoFocus
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              {translations?.householdMeasure || 'Household Measure'}:
+            </label>
+            <input
+              type="text"
+              value={householdMeasure}
+              onChange={(e) => setHouseholdMeasure(e.target.value)}
+              onKeyDown={handleKeyPress}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder={translations?.householdMeasurePlaceholder || 'e.g., 1 cup, 2 tbsp, 1 medium apple'}
+            />
+          </div>
+          
+          {adjustedNutrition && (
+            <div className="bg-blue-50 p-3 rounded-md">
+              <p className="text-sm font-medium text-gray-700 mb-2">
+                {translations?.adjustedNutrition || 'Adjusted Nutrition'} (per {gramAmount}g):
+              </p>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <span className="text-gray-600">{translations?.calories || 'Calories'}:</span>
+                  <span className="font-medium ml-1">{adjustedNutrition.calories}</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">{translations?.protein || 'Protein'}:</span>
+                  <span className="font-medium ml-1">{adjustedNutrition.protein}g</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">{translations?.fat || 'Fat'}:</span>
+                  <span className="font-medium ml-1">{adjustedNutrition.fat}g</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">{translations?.carbs || 'Carbs'}:</span>
+                  <span className="font-medium ml-1">{adjustedNutrition.carbs}g</span>
+                </div>
+              </div>
+              <div className="mt-2 pt-2 border-t border-blue-200">
+                <p className="text-xs text-gray-500">
+                  {translations?.basedOn100g || 'Based on 100g serving'} • {translations?.ratio || 'Ratio'}: {gramAmount}/100 = {(parseFloat(gramAmount) / 100).toFixed(2)}x
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+        
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+          >
+            {translations?.cancel || 'Cancel'}
+          </button>
+          <button
+            onClick={handleConfirm}
+            className="flex-1 px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-md transition-colors"
+          >
+            {translations?.confirm || 'Confirm'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const MenuCreate = () => {
   const pdfRef = React.useRef();
   const [showShoppingList, setShowShoppingList] = useState(false);
@@ -488,17 +739,15 @@ const MenuCreate = () => {
   const [enrichingUPC, setEnrichingUPC] = useState(false);
   const [users, setUsers] = useState([]);
 
-  const [selectedUser, setSelectedUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem('menuCreate_selectedUser');
-      return saved ? JSON.parse(saved) : null;
-    } catch (err) {
-      console.warn('Failed to load selectedUser from localStorage:', err);
-      return null;
-    }
-  });
+  // Ingredient portion dialog state
+  const [showPortionDialog, setShowPortionDialog] = useState(false);
+  const [selectedIngredientForDialog, setSelectedIngredientForDialog] = useState(null);
+  const [dialogIngredientContext, setDialogIngredientContext] = useState(null);
 
-  const [loadingUsers, setLoadingUsers] = useState(true);
+  // Use global client selection from ClientContext instead of local state
+  const { selectedClient } = useClient();
+
+  const [loadingUsers, setLoadingUsers] = useState(false);
   const [userTargets, setUserTargets] = useState(() => {
     try {
       const saved = localStorage.getItem('menuCreate_userTargets');
@@ -539,7 +788,7 @@ const MenuCreate = () => {
         const menuWithTimestamp = {
           ...menu,
           _savedAt: new Date().toISOString(),
-          _selectedUser: selectedUser
+          _selectedUser: selectedClient
         };
         localStorage.setItem('menuCreate_menu', JSON.stringify(menuWithTimestamp));
       } else {
@@ -548,7 +797,7 @@ const MenuCreate = () => {
     } catch (err) {
       console.warn('Failed to save menu to localStorage:', err);
     }
-  }, [menu, selectedUser]);
+  }, [menu, selectedClient]);
 
   // Save originalMenu state to localStorage whenever it changes
   useEffect(() => {
@@ -566,15 +815,15 @@ const MenuCreate = () => {
   // Save selectedUser state to localStorage whenever it changes
   useEffect(() => {
     try {
-      if (selectedUser) {
-        localStorage.setItem('menuCreate_selectedUser', JSON.stringify(selectedUser));
+      if (selectedClient) {
+        localStorage.setItem('menuCreate_selectedUser', JSON.stringify(selectedClient));
       } else {
         localStorage.removeItem('menuCreate_selectedUser');
       }
     } catch (err) {
       console.warn('Failed to save selectedUser to localStorage:', err);
     }
-  }, [selectedUser]);
+  }, [selectedClient]);
 
   // Save userTargets state to localStorage whenever it changes
   useEffect(() => {
@@ -648,7 +897,7 @@ const MenuCreate = () => {
     });
     
     const totals = menu.totals || calculateMainTotals(menu);
-    const userName = selectedUser?.full_name || 'Client';
+    const userName = selectedClient?.full_name || 'Client';
     
     // Detect if menu contains Hebrew text
     const containsHebrew = (text) => {
@@ -1147,6 +1396,57 @@ const MenuCreate = () => {
     });
   };
 
+  const handleHouseholdMeasureChange = (newHouseholdMeasure, mealIndex, optionIndex, ingredientIndex) => {
+    setMenu(prevMenu => {
+      // Save current state to undo stack before making changes
+      saveToUndoStack(prevMenu);
+      
+      const updatedMenu = JSON.parse(JSON.stringify(prevMenu));
+      const meal = updatedMenu.meals[mealIndex];
+      const option = optionIndex === 'main' ? meal.main : meal.alternative;
+
+      // Update only the household_measure field of the specific ingredient
+      option.ingredients[ingredientIndex].household_measure = newHouseholdMeasure;
+
+      return updatedMenu;
+    });
+
+    // Also update the original menu for consistency
+    setOriginalMenu(prevOriginal => {
+      if (!prevOriginal) return prevOriginal;
+
+      const updatedOriginal = JSON.parse(JSON.stringify(prevOriginal));
+      const meal = updatedOriginal.meals[mealIndex];
+      const option = optionIndex === 'main' ? meal.main : meal.alternative;
+
+      // Update only the household_measure field of the specific ingredient
+      option.ingredients[ingredientIndex].household_measure = newHouseholdMeasure;
+
+      return updatedOriginal;
+    });
+  };
+
+  // Dialog handlers for ingredient portion
+  const handleOpenPortionDialog = (ingredient, mealIndex, optionIndex, ingredientIndex) => {
+    setSelectedIngredientForDialog(ingredient);
+    setDialogIngredientContext({ mealIndex, optionIndex, ingredientIndex });
+    setShowPortionDialog(true);
+  };
+
+  const handleClosePortionDialog = () => {
+    setShowPortionDialog(false);
+    setSelectedIngredientForDialog(null);
+    setDialogIngredientContext(null);
+  };
+
+  const handleConfirmPortionDialog = (updatedIngredient) => {
+    if (dialogIngredientContext) {
+      const { mealIndex, optionIndex, ingredientIndex } = dialogIngredientContext;
+      handleIngredientChange(updatedIngredient, mealIndex, optionIndex, ingredientIndex);
+    }
+    handleClosePortionDialog();
+  };
+
   const handleMakeAlternativeMain = (mealIndex, alternativeIndex = null) => {
     setMenu(prevMenu => {
       // Save current state to undo stack before making changes
@@ -1307,51 +1607,51 @@ const MenuCreate = () => {
     });
   };
 
-  const fetchUsers = async () => {
-    try {
-      setLoadingUsers(true);
-      console.log('🔍 Fetching users from chat_users table...');
-
-      const { data, error } = await supabase
-        .from('chat_users')
-        .select('user_code, full_name')
-        .order('full_name');
-
-      if (error) {
-        console.error('❌ Error fetching users:', error);
-        setError('Failed to load users: ' + error.message);
-        return;
-      }
-
-      console.log('✅ Fetched users:', data);
-      setUsers(data || []);
-
-    } catch (err) {
-      console.error('❌ Error in fetchUsers:', err);
-      setError('Failed to load users');
-    } finally {
-      setLoadingUsers(false);
-    }
-  };
-
   const fetchUserTargets = async (userCode) => {
     try {
       setLoadingUserTargets(true);
       console.log('🎯 Fetching nutritional targets for user:', userCode);
 
-              const { data, error } = await supabase
-          .from('chat_users')
-          .select('dailyTotalCalories, macros, region, food_allergies, food_limitations, age, gender, weight_kg, height_cm, client_preference')
-          .eq('user_code', userCode)
-          .single();
+      if (!userCode) {
+        console.error('❌ No user code provided');
+        setError('No user code provided');
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('chat_users')
+        .select('dailyTotalCalories, macros, region, food_allergies, food_limitations, age, gender, weight_kg, height_cm, client_preference')
+        .eq('user_code', userCode)
+        .single();
 
       if (error) {
         console.error('❌ Error fetching user targets:', error);
-        setError('Failed to load user targets: ' + error.message);
+        if (error.code === 'PGRST116') {
+          // No rows returned
+          setError(`No user found with code: ${userCode}. Please check if the user exists in the database.`);
+        } else {
+          setError('Failed to load user targets: ' + error.message);
+        }
+        return;
+      }
+
+      if (!data) {
+        console.error('❌ No data returned from database');
+        setError('No data returned from database for user: ' + userCode);
         return;
       }
 
       console.log('✅ Fetched user targets:', data);
+
+      // Check if essential fields are missing
+      const missingFields = [];
+      if (!data.dailyTotalCalories) missingFields.push('dailyTotalCalories');
+      if (!data.macros) missingFields.push('macros');
+      
+      if (missingFields.length > 0) {
+        console.warn('⚠️ Missing essential fields:', missingFields);
+        console.log('Available data:', data);
+      }
 
       // Parse macros if it's a string
       let parsedMacros = data.macros;
@@ -1377,7 +1677,7 @@ const MenuCreate = () => {
         return [];
       };
 
-      setUserTargets({
+      const userTargetsData = {
         calories: data.dailyTotalCalories || 2000,
         macros: {
           protein: parseFloat(parsedMacros?.protein?.replace('g', '') || '150'),
@@ -1392,11 +1692,14 @@ const MenuCreate = () => {
         weight_kg: data.weight_kg,
         height_cm: data.height_cm,
         client_preference: parseArrayField(data.client_preference)
-      });
+      };
+
+      console.log('✅ Processed user targets:', userTargetsData);
+      setUserTargets(userTargetsData);
 
     } catch (err) {
       console.error('❌ Error in fetchUserTargets:', err);
-      setError('Failed to load user targets');
+      setError('Failed to load user targets: ' + err.message);
     } finally {
       setLoadingUserTargets(false);
     }
@@ -1404,9 +1707,11 @@ const MenuCreate = () => {
 
   const enrichMenuWithUPC = async (menuToEnrich) => {
     try {
-      setEnrichingUPC(true);
-      setProgress(90);
-      setProgressStep('🛒 Collecting all ingredients...');
+      // Don't set enrichingUPC here since it's now set in the calling function
+      // setEnrichingUPC(true);
+      // Don't update progress since this runs in background
+      // setProgress(90);
+      // setProgressStep('🛒 Collecting all ingredients...');
 
       // Step 1: Collect all unique ingredients across the menu
       const allIngredients = new Map(); // Use brand+name as key to avoid duplicates
@@ -1487,13 +1792,13 @@ const MenuCreate = () => {
       const cacheHitRate = totalIngredients > 0 ? Math.round((cacheHits / totalIngredients) * 100) : 0;
 
       if (uniqueIngredients.length === 0) {
-        setProgress(100);
-        setProgressStep(`✅ All ${totalIngredients} ingredients found in cache (${cacheHitRate}% cache hit rate)`);
+        // setProgress(100);
+        // setProgressStep(`✅ All ${totalIngredients} ingredients found in cache (${cacheHitRate}% cache hit rate)`);
         return menuToEnrich;
       }
 
-      setProgress(92);
-      setProgressStep(`🔍 Looking up ${uniqueIngredients.length} new ingredients (${cacheHits} found in cache, ${cacheHitRate}% hit rate)...`);
+      // setProgress(92);
+      // setProgressStep(`🔍 Looking up ${uniqueIngredients.length} new ingredients (${cacheHits} found in cache, ${cacheHitRate}% hit rate)...`);
 
       // Step 2: Batch UPC lookup for all ingredients
       const batchResponse = await fetch("https://dietitian-be.azurewebsites.net/api/batch-upc-lookup", {
@@ -1501,7 +1806,7 @@ const MenuCreate = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           ingredients: uniqueIngredients,
-          user_code: selectedUser.user_code 
+          user_code: selectedClient.user_code 
         }),
       });
 
@@ -1513,8 +1818,8 @@ const MenuCreate = () => {
 
       const batchData = await batchResponse.json();
 
-      setProgress(96);
-      setProgressStep('📋 Updating menu with product codes...');
+      // setProgress(96);
+      // setProgressStep('📋 Updating menu with product codes...');
 
       // Step 3: Update cache with new UPC codes
       const newCacheEntries = new Map(upcCache);
@@ -1541,8 +1846,8 @@ const MenuCreate = () => {
       const finalCacheHitRate = totalIngredients > 0 ? Math.round((cacheHits / totalIngredients) * 100) : 0;
       const successfulLookups = batchData.summary?.successful || 0;
 
-      setProgress(99);
-      setProgressStep(`✅ Product codes added! ${successfulLookups} new codes found, ${finalCacheHitRate}% cache efficiency`);
+      // setProgress(99);
+      // setProgressStep(`✅ Product codes added! ${successfulLookups} new codes found, ${finalCacheHitRate}% cache efficiency`);
 
       return enrichedMenu;
 
@@ -1550,9 +1855,11 @@ const MenuCreate = () => {
       console.error("Error in streamlined UPC enrichment:", err);
       // Fallback to original method if streamlined fails
       return await enrichMenuWithUPCFallback(menuToEnrich);
-    } finally {
-      setEnrichingUPC(false);
     }
+    // Don't set enrichingUPC(false) here since it's handled in the calling function
+    // finally {
+    //   setEnrichingUPC(false);
+    // }
   };
 
   // Fallback to original method if optimized version fails
@@ -1565,7 +1872,7 @@ const MenuCreate = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           menu: menuToEnrich.meals,
-          user_code: selectedUser.user_code 
+          user_code: selectedClient.user_code 
         }),
       });
 
@@ -1603,9 +1910,23 @@ const MenuCreate = () => {
   };
 
   const fetchMenu = async () => {
-    if (!selectedUser) {
+    if (!selectedClient) {
       setError('Please select a client before generating a menu.');
       return;
+    }
+
+    // Check if user targets are loaded
+    if (!userTargets) {
+      console.warn('⚠️ User targets not loaded, attempting to fetch them first...');
+      await fetchUserTargets(selectedClient.user_code);
+      
+      // Wait a moment for the state to update
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      if (!userTargets) {
+        setError('Unable to load client nutritional targets. Please check the client data and try again.');
+        return;
+      }
     }
 
     try {
@@ -1617,20 +1938,27 @@ const MenuCreate = () => {
       setProgress(0);
       setProgressStep('Initializing...');
 
-      console.log('🧠 Generating menu for user:', selectedUser.user_code);
+      console.log('🧠 Generating menu for user:', selectedClient.user_code);
+      console.log('🔍 Selected client data:', selectedClient);
+      console.log('🎯 Current user targets:', userTargets);
 
       // Step 1: Get meal template (25% progress)
       setProgress(5);
       setProgressStep('🎯 Analyzing client preferences...');
 
-      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
-      // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+      // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_code: selectedUser.user_code })
+        body: JSON.stringify({ user_code: selectedClient.user_code })
       });
       
+      console.log('📡 Template API response status:', templateRes.status);
+      
       if (!templateRes.ok) {
+        const errorText = await templateRes.text();
+        console.error('❌ Template API error response:', errorText);
+        
         if (templateRes.status === 404) {
           throw new Error("Client not found. Please check if the client exists in the database.");
         } else if (templateRes.status === 500) {
@@ -1643,6 +1971,8 @@ const MenuCreate = () => {
       }
       
       const templateData = await templateRes.json();
+      console.log('📋 Template API response data:', templateData);
+      
       if (templateData.error) {
         if (templateData.error.includes("Template validation failed")) {
           throw new Error("Unable to create a balanced meal plan that meets the client's nutritional requirements. Please check the client's dietary restrictions and try again.");
@@ -1666,11 +1996,11 @@ const MenuCreate = () => {
       setProgress(30);
       setProgressStep('🍽️ Creating personalized meals...');
 
-      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
-      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ template, user_code: selectedUser.user_code }),
+        body: JSON.stringify({ template, user_code: selectedClient.user_code }),
       });
       
       if (!buildRes.ok) {
@@ -1710,11 +2040,9 @@ const MenuCreate = () => {
       setProgress(70);
       setProgressStep('🛒 Adding product codes...');
 
-      // Step 3: Enrich with UPC codes BEFORE setting any state
-      const enrichedMenu = await enrichMenuWithUPC(menuData);
-      
-      // Set the original English menu data ONCE and FINAL. This is our source of truth.
-      setOriginalMenu(enrichedMenu);
+      // Step 3: Show menu immediately, then enrich with UPC codes in background
+      setMenu(menuData);
+      setOriginalMenu(menuData);
       
       setProgress(85);
       setProgressStep('🌐 Preparing menu display...');
@@ -1722,10 +2050,8 @@ const MenuCreate = () => {
       // Display the correct version based on the current language
       if (language === 'he') {
         setProgressStep('🌐 Translating to Hebrew...');
-        const translatedMenu = await translateMenu(enrichedMenu, 'he');
+        const translatedMenu = await translateMenu(menuData, 'he');
         setMenu(translatedMenu);
-      } else {
-        setMenu(enrichedMenu); // Already in English
       }
 
       setProgress(100);
@@ -1736,6 +2062,26 @@ const MenuCreate = () => {
         setProgress(0);
         setProgressStep('');
       }, 1500);
+
+      // Run UPC enrichment in the background (non-blocking)
+      console.log('🔄 Starting background UPC enrichment...');
+      setEnrichingUPC(true);
+      enrichMenuWithUPC(menuData).then(enrichedMenu => {
+        console.log('✅ Background UPC enrichment completed');
+        setOriginalMenu(enrichedMenu);
+        if (language === 'he') {
+          translateMenu(enrichedMenu, 'he').then(translatedEnrichedMenu => {
+            setMenu(translatedEnrichedMenu);
+          });
+        } else {
+          setMenu(enrichedMenu);
+        }
+      }).catch(err => {
+        console.error('❌ Background UPC enrichment failed:', err);
+        // Menu is already displayed, so this is not critical
+      }).finally(() => {
+        setEnrichingUPC(false);
+      });
 
     } catch (err) {
       console.error("Error generating menu:", err);
@@ -1826,7 +2172,7 @@ const MenuCreate = () => {
       console.log('💾 Saving combined schema + meal plan...');
       const combinedPayload = {
         record_type: 'meal_plan',
-        meal_plan_name: `Meal Plan - ${selectedUser?.full_name || 'Unknown Client'}`,
+        meal_plan_name: `Meal Plan - ${selectedClient?.full_name || 'Unknown Client'}`,
         schema: schemaTemplate,        // Schema template in same row
         meal_plan: originalMenu,       // Full meal plan in same row
         status: 'draft',
@@ -1838,7 +2184,7 @@ const MenuCreate = () => {
         },
         recommendations: originalMenu.recommendations || {},
         dietary_restrictions: {},
-        user_code: selectedUser?.user_code || null, // Use selected user's code
+        user_code: selectedClient?.user_code || null, // Use selected user's code
         dietitian_id: user.id
       };
 
@@ -1928,10 +2274,25 @@ const MenuCreate = () => {
                         ingredientIndex={idx}
                         translations={translations}
                         currentIngredient={ingredient}
+                        onPortionDialog={handleOpenPortionDialog}
                       />
-                      <span className="text-gray-600">
-                        {ingredient.household_measure}
-                      </span>
+                      <div className="flex items-center gap-1">
+                        <EditableHouseholdMeasure
+                          value={ingredient.household_measure}
+                          onChange={handleHouseholdMeasureChange}
+                          mealIndex={option.mealIndex}
+                          optionIndex={isAlternative ? 'alternative' : 'main'}
+                          ingredientIndex={idx}
+                          translations={translations}
+                        />
+                        <button
+                          onClick={() => handleOpenPortionDialog(ingredient, option.mealIndex, isAlternative ? 'alternative' : 'main', idx)}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-blue-500 hover:text-blue-700 hover:bg-blue-50 p-1 rounded text-xs"
+                          title={translations?.editPortion || 'Edit portion size'}
+                        >
+                          ✏️
+                        </button>
+                      </div>
                       {(ingredient.calories || ingredient.protein) && (
                         <>
                           <span className="font-bold text-green-700">
@@ -2033,7 +2394,7 @@ const MenuCreate = () => {
       body: JSON.stringify({
         main,
         alternative,
-        user_code: selectedUser?.user_code
+        user_code: selectedClient.user_code
       })
     });
     if (!response.ok) {
@@ -2182,18 +2543,17 @@ const MenuCreate = () => {
       .sort((a, b) => a.base.localeCompare(b.base));
   }
 
-  // Fetch users when component loads
-  useEffect(() => {
-    fetchUsers();
-  }, []);
-
   // Auto-fetch user targets if a user was previously selected
+  // REMOVED: This useEffect had a condition that prevented fetching when userTargets already existed
+  // Now using the useEffect below that fetches whenever selectedClient changes
+
+  // Auto-fetch user targets when selectedClient changes
   useEffect(() => {
-    if (selectedUser && !userTargets) {
-      console.log('🔄 Auto-fetching user targets for previously selected user:', selectedUser.user_code);
-      fetchUserTargets(selectedUser.user_code);
+    if (selectedClient) {
+      console.log('🔄 Fetching user targets for selected client:', selectedClient.user_code);
+      fetchUserTargets(selectedClient.user_code);
     }
-  }, [selectedUser, userTargets]);
+  }, [selectedClient]);
 
   // Whenever menu changes, update shopping list
   useEffect(() => {
@@ -2436,54 +2796,32 @@ const MenuCreate = () => {
         }
       })()}
 
-      {/* User Selection */}
-              <Card>
-          <CardHeader>
-            <CardTitle>{translations.clientSelection || 'Select Client'}</CardTitle>
-            <CardDescription>
-              {translations.selectTargetClient || 'Choose which client to generate a menu for'}
-            </CardDescription>
-          </CardHeader>
+      {/* Client Selection - Now using global selection from sidebar */}
+      <Card>
+        <CardHeader>
+          <CardTitle>{translations.clientSelection || 'Selected Client'}</CardTitle>
+          <CardDescription>
+            {selectedClient 
+              ? `${translations.clientFromSidebar || 'Client selected from sidebar'}: ${selectedClient.full_name}`
+              : translations.selectClientInSidebar || 'Please select a client in the sidebar to generate a menu'
+            }
+          </CardDescription>
+        </CardHeader>
         <CardContent>
-          {loadingUsers ? (
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <Loader className="animate-spin h-4 w-4" />
-              {translations.loading || 'Loading clients...'}
+          {selectedClient ? (
+            <div className="p-3 bg-green-50 border border-green-200 rounded-md">
+              <div className="flex items-center gap-2 text-sm text-green-700">
+                <span>✓</span>
+                <span className="font-medium">{translations.selected || 'Selected'}: {selectedClient.full_name}</span>
+                <span className="text-green-600">({selectedClient.user_code})</span>
+              </div>
             </div>
           ) : (
-            <div className="space-y-3">
-              <select
-                value={selectedUser?.user_code || ''}
-                onChange={(e) => {
-                  const userCode = e.target.value;
-                  const user = users.find(u => u.user_code === userCode);
-                  setSelectedUser(user);
-
-                  // Fetch user targets when a user is selected
-                  if (userCode) {
-                    fetchUserTargets(userCode);
-                  } else {
-                    setUserTargets(null);
-                  }
-                }}
-                className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">{translations.selectAClient || 'Choose a client...'}</option>
-                {users.map((user) => (
-                  <option key={user.user_code} value={user.user_code}>
-                    {user.full_name} ({user.user_code})
-                  </option>
-                ))}
-              </select>
-              {selectedUser && (
-                <div className="p-3 bg-green-50 border border-green-200 rounded-md">
-                  <div className="flex items-center gap-2 text-sm text-green-700">
-                    <span>✓</span>
-                    <span className="font-medium">{translations.selected || 'Selected'}: {selectedUser.full_name}</span>
-                    <span className="text-green-600">({selectedUser.user_code})</span>
-                  </div>
-                </div>
-              )}
+            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+              <div className="flex items-center gap-2 text-sm text-yellow-700">
+                <span>⚠️</span>
+                <span>{translations.noClientSelected || 'No client selected'}</span>
+              </div>
             </div>
           )}
         </CardContent>
@@ -2491,7 +2829,7 @@ const MenuCreate = () => {
 
       {/* User Targets Display */}
       {/* Menu Generation Section */}
-      {selectedUser && userTargets && (
+      {selectedClient && userTargets && (
         <Card className="border-green-200 bg-green-50/30 mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-green-800">
@@ -2499,7 +2837,7 @@ const MenuCreate = () => {
               {translations.generateMenu || 'Generate Menu'}
             </CardTitle>
             <CardDescription className="text-green-600">
-              {translations.generateMenuFor ? `${translations.generateMenuFor} ${selectedUser.full_name}` : `Generate personalized menu for ${selectedUser.full_name}`}
+              {translations.generateMenuFor ? `${translations.generateMenuFor} ${selectedClient.full_name}` : `Generate personalized menu for ${selectedClient.full_name}`}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -2507,7 +2845,7 @@ const MenuCreate = () => {
               <div className="flex flex-wrap gap-4">
                 <Button
                   onClick={fetchMenu}
-                  disabled={loading || !selectedUser}
+                  disabled={loading || !selectedClient}
                   className="bg-green-600 hover:bg-green-700 text-white px-6 py-3"
                 >
                   {loading ? (
@@ -2517,6 +2855,23 @@ const MenuCreate = () => {
                   )}
                   {loading ? (translations.generating || 'Generating...') : (translations.generateMenu || 'Generate Menu')}
                 </Button>
+                
+                {selectedClient && (
+                  <Button
+                    onClick={() => fetchUserTargets(selectedClient.user_code)}
+                    disabled={loadingUserTargets}
+                    variant="outline"
+                    className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                    title="Refresh client targets"
+                  >
+                    {loadingUserTargets ? (
+                      <Loader className="animate-spin h-4 w-4 mr-2" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                    )}
+                    Refresh Targets
+                  </Button>
+                )}
                 
                 {menu && (
                   <>
@@ -2565,7 +2920,7 @@ const MenuCreate = () => {
       )}
 
       {/* Nutrition Targets Display */}
-      {selectedUser && (
+      {selectedClient && (
         <Card className="border-blue-200 bg-blue-50/30">
           <CardHeader>
                       <CardTitle className="flex items-center gap-2 text-blue-800">
@@ -2573,7 +2928,7 @@ const MenuCreate = () => {
             {translations.nutritionTargets || 'Client Nutritional Targets'}
           </CardTitle>
           <CardDescription className="text-blue-600">
-            {translations.fromDatabase ? `${translations.fromDatabase} ${selectedUser.full_name}` : `from database ${selectedUser.full_name}`}
+            {translations.fromDatabase ? `${translations.fromDatabase} ${selectedClient.full_name}` : `from database ${selectedClient.full_name}`}
           </CardDescription>
           </CardHeader>
           <CardContent>
@@ -2890,7 +3245,35 @@ const MenuCreate = () => {
                 )}
               </div>
             ) : (
-              <p className="text-blue-600">{translations.noTargetDataFound || 'No target data found for this client.'}</p>
+              <div className="space-y-3">
+                <p className="text-blue-600">{translations.noTargetDataFound || 'No target data found for this client.'}</p>
+                {error && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-red-700 text-sm font-medium">Error Details:</p>
+                    <p className="text-red-600 text-sm">{error}</p>
+                  </div>
+                )}
+                <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <p className="text-yellow-700 text-sm font-medium">Troubleshooting:</p>
+                  <ul className="text-yellow-600 text-sm mt-1 space-y-1">
+                    <li>• Check if the client exists in the database</li>
+                    <li>• Verify that the client has nutritional data (calories, macros)</li>
+                    <li>• Ensure the user_code is correct: {selectedClient?.user_code}</li>
+                    <li>• Try refreshing the page or selecting a different client</li>
+                  </ul>
+                  <div className="mt-3">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => fetchUserTargets(selectedClient?.user_code)}
+                      className="text-yellow-700 border-yellow-300 hover:bg-yellow-100"
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Retry Loading Targets
+                    </Button>
+                  </div>
+                </div>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -2962,7 +3345,7 @@ const MenuCreate = () => {
                   {translations.recommendations || 'Recommendations'}
                 </CardTitle>
                 <CardDescription className="text-purple-600">
-                  {translations.personalizedRecommendations || 'Personalized recommendations'} for {selectedUser?.full_name}
+                  {translations.personalizedRecommendations || 'Personalized recommendations'} for {selectedClient?.full_name}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -3100,13 +3483,13 @@ const MenuCreate = () => {
           <Button
             onClick={() => {
               console.log('🖱️ Save button clicked!');
-              if (!selectedUser) {
+              if (!selectedClient) {
                 alert('Please select a client before saving the menu.');
                 return;
               }
               handleSave();
             }}
-            disabled={saving || !selectedUser}
+            disabled={saving || !selectedClient}
             className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400"
           >
             {saving ? (
@@ -3186,6 +3569,15 @@ const MenuCreate = () => {
           </CardContent>
         </Card>
       )}
+
+      {/* Ingredient Portion Dialog */}
+      <IngredientPortionDialog
+        isOpen={showPortionDialog}
+        onClose={handleClosePortionDialog}
+        onConfirm={handleConfirmPortionDialog}
+        ingredient={selectedIngredientForDialog}
+        translations={translations}
+      />
     </div>
   );
 };
@@ -3207,5 +3599,5 @@ async function translateMenu(menu, targetLang = 'he') {
   return await response.json();
 }
 
-
 export default MenuCreate;
+

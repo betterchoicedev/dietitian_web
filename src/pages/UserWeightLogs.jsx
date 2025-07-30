@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useClient } from '@/contexts/ClientContext';
 import { WeightLogs, ChatUser } from '@/api/entities';
 import {
   Card,
@@ -90,10 +91,9 @@ const CHART_COLORS_ARRAY = Object.values(CHART_COLORS);
 
 export default function UserWeightLogs() {
   const { translations } = useLanguage();
+  const { selectedClient } = useClient();
   const [weightLogs, setWeightLogs] = useState([]);
   const [filteredLogs, setFilteredLogs] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [selectedUser, setSelectedUser] = useState('');
   const [dateRange, setDateRange] = useState('30'); // days
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -110,24 +110,10 @@ export default function UserWeightLogs() {
     { key: 'arm_circumference_cm', label: translations.armCm, icon: Ruler, color: CHART_COLORS.purple }
   ];
 
-  // Fetch users
-  useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        const users = await ChatUser.list();
-        setUsers(users || []);
-      } catch (err) {
-        setError(`Failed to load users: ${err.message}`);
-      }
-    };
-
-    fetchUsers();
-  }, []);
-
-  // Fetch weight logs
+  // Fetch weight logs when selectedClient changes
   useEffect(() => {
     const fetchWeightLogs = async () => {
-      if (!selectedUser) {
+      if (!selectedClient) {
         setWeightLogs([]);
         setFilteredLogs([]);
         setLoading(false);
@@ -138,7 +124,7 @@ export default function UserWeightLogs() {
         setLoading(true);
         setError(null);
 
-        const data = await WeightLogs.getByUserCode(selectedUser);
+        const data = await WeightLogs.getByUserCode(selectedClient.user_code);
 
         if (!data || data.length === 0) {
           setWeightLogs([]);
@@ -189,7 +175,7 @@ export default function UserWeightLogs() {
     };
 
     fetchWeightLogs();
-  }, [selectedUser]);
+  }, [selectedClient]);
 
   // Filter data based on date range and search
   useEffect(() => {
@@ -536,20 +522,24 @@ export default function UserWeightLogs() {
               <div className="space-y-2">
                 <Label className="text-sm font-medium text-foreground/80">
                   <User className="w-4 h-4 inline mr-2" />
-                  {translations.selectClient}
+                  {selectedClient ? translations.selectedClient : translations.selectClient}
                 </Label>
-                <Select value={selectedUser} onValueChange={setSelectedUser}>
-                  <SelectTrigger className="bg-white/80 backdrop-blur-sm border-border/60">
-                    <SelectValue placeholder={translations.selectClient} />
-                  </SelectTrigger>
-                  <SelectContent className="bg-white/95 backdrop-blur-xl border-border/60">
-                    {users.map((user) => (
-                      <SelectItem key={user.user_code} value={user.user_code}>
-                        {user.full_name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {selectedClient ? (
+                  <div className="p-3 bg-green-50 border border-green-200 rounded-md">
+                    <div className="flex items-center gap-2 text-sm text-green-700">
+                      <span>✓</span>
+                      <span className="font-medium">{translations.selected || 'Selected'}: {selectedClient.full_name}</span>
+                      <span className="text-green-600">({selectedClient.user_code})</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                    <div className="flex items-center gap-2 text-sm text-yellow-700">
+                      <span>⚠️</span>
+                      <span>{translations.selectClientInSidebar || 'Please select a client in the sidebar'}</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Date Range */}
@@ -785,13 +775,13 @@ export default function UserWeightLogs() {
                   <p className="text-danger">{error}</p>
                 </div>
               </div>
-            ) : !selectedUser ? (
+            ) : !selectedClient ? (
               <div className="flex items-center justify-center h-64">
                 <div className="text-center">
                   <div className="w-12 h-12 mx-auto mb-4 bg-info/10 rounded-xl flex items-center justify-center">
                     <User className="w-6 h-6 text-info" />
                   </div>
-                  <p className="text-muted-foreground">{translations.pleaseSelectClientToView}</p>
+                  <p className="text-muted-foreground">{translations.selectClientInSidebar || 'Please select a client in the sidebar to view weight logs'}</p>
                 </div>
               </div>
             ) : filteredLogs.length === 0 ? (

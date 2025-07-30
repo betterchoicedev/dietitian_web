@@ -1,11 +1,12 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { LanguageProvider } from '@/contexts/LanguageContext';
+import { ClientProvider } from '@/contexts/ClientContext';
 import Layout from '@/pages/Layout';
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
 import Dashboard from '@/pages/Dashboard';
-import Users from '@/pages/Users';
+import Users from '@/pages/users';
 import Chat from '@/pages/Chat';
 import DataGenerator from '@/pages/DataGenerator';
 import NutritionPlan from '@/pages/NutritionPlan';
@@ -42,40 +43,42 @@ function App() {
     <Router>
       <AuthProvider>
         <LanguageProvider>
-          <Routes>
-            {/* Public Routes */}
-            <Route path="/login" element={
-              <PublicRoute>
-                <Login />
-              </PublicRoute>
-            } />
-            <Route path="/register" element={
-              <PublicRoute>
-                <Register />
-              </PublicRoute>
-            } />
-            
-            {/* Root redirect to login */}
-            <Route path="/" element={<Navigate to="/login" replace />} />
-            
-            {/* Protected Routes - All wrapped in Layout */}
-            <Route path="/*" element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }>
-              <Route path="dashboard" element={<Dashboard />} />
-              <Route path="users" element={<Users />} />
-              <Route path="chat" element={<Chat />} />
-              <Route path="data-generator" element={<DataGenerator />} />
-              <Route path="nutrition-plan" element={<NutritionPlan />} />
-              <Route path="MenuCreate" element={<MenuCreate />} />
-              <Route path="MenuLoad" element={<MenuLoad />} />
-              <Route path="menuload" element={<Navigate to="/MenuLoad" replace />} />
-              <Route path="recipes" element={<RecipesPage />} />
-              <Route path="weight-logs" element={<UserWeightLogs />} />
-            </Route>
-          </Routes>
+          <ClientProvider>
+            <Routes>
+              {/* Public Routes */}
+              <Route path="/login" element={
+                <PublicRoute>
+                  <Login />
+                </PublicRoute>
+              } />
+              <Route path="/register" element={
+                <PublicRoute>
+                  <Register />
+                </PublicRoute>
+              } />
+              
+              {/* Root redirect to login */}
+              <Route path="/" element={<Navigate to="/login" replace />} />
+              
+              {/* Protected Routes - All wrapped in Layout */}
+              <Route path="/*" element={
+                <ProtectedRoute>
+                  <Layout />
+                </ProtectedRoute>
+              }>
+                <Route path="dashboard" element={<Dashboard />} />
+                <Route path="users" element={<Users />} />
+                <Route path="chat" element={<Chat />} />
+                <Route path="data-generator" element={<DataGenerator />} />
+                <Route path="nutrition-plan" element={<NutritionPlan />} />
+                <Route path="MenuCreate" element={<MenuCreate />} />
+                <Route path="MenuLoad" element={<MenuLoad />} />
+                <Route path="menuload" element={<Navigate to="/MenuLoad" replace />} />
+                <Route path="recipes" element={<RecipesPage />} />
+                <Route path="weight-logs" element={<UserWeightLogs />} />
+              </Route>
+            </Routes>
+          </ClientProvider>
         </LanguageProvider>
       </AuthProvider>
     </Router>

@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useClient } from '@/contexts/ClientContext';
 import { EventBus } from '@/utils/EventBus';
 import {
   Select,
@@ -316,6 +317,7 @@ const MenuLoad = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { language, translations } = useLanguage();
+  const { selectedClient } = useClient();
 
   // Convert saved menu format to editable format
   const convertToEditFormat = (savedMenu) => {
@@ -484,6 +486,12 @@ const MenuLoad = () => {
   }, []);
 
   const filteredMenus = menus.filter(menu => {
+    // If a client is selected globally, filter by that client
+    if (selectedClient) {
+      return menu.user_code === selectedClient.user_code;
+    }
+    
+    // Otherwise, use the existing search and filter logic
     const matchesSearch = 
       (menu.meal_plan_name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
        menu.user_code?.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -1831,27 +1839,48 @@ const MenuLoad = () => {
       <div className="flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-4">
         <div className="flex items-center space-x-2 w-full sm:w-auto">
           <Search className="w-5 h-5 text-gray-400" />
-          <Input
-            placeholder={translations.searchMenus || "Search by name or client code..."}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="flex-1"
-          />
+          {selectedClient ? (
+            <div className="flex-1 p-3 bg-green-50 border border-green-200 rounded-md">
+              <div className="flex items-center gap-2 text-sm text-green-700">
+                <span>✓</span>
+                <span className="font-medium">{translations.selectedClient || 'Selected Client'}: {selectedClient.full_name}</span>
+                <span className="text-green-600">({selectedClient.user_code})</span>
+              </div>
+              <div className="text-xs text-green-600 mt-1">
+                {translations.filteredBySelectedClient || 'Filtered by selected client'}
+              </div>
+            </div>
+          ) : (
+            <Input
+              placeholder={translations.searchMenus || "Search by name or client code..."}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="flex-1"
+            />
+          )}
         </div>
         
         <div className="flex items-center space-x-2 w-full sm:w-auto">
           <Filter className="w-5 h-5 text-gray-400" />
-          <Select value={filterUserCode} onValueChange={setFilterUserCode}>
-            <SelectTrigger className="w-full sm:w-[180px]">
-              <SelectValue placeholder={translations.filterByClient || "Filter by client"} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{translations.allClients || 'All Clients'}</SelectItem>
-              {userCodes.map(code => (
-                <SelectItem key={code} value={code}>{code}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {selectedClient ? (
+            <div className="w-full sm:w-[180px] p-3 bg-blue-50 border border-blue-200 rounded-md">
+              <div className="text-xs text-blue-700">
+                {translations.automaticFiltering || 'Automatic filtering by selected client'}
+              </div>
+            </div>
+          ) : (
+            <Select value={filterUserCode} onValueChange={setFilterUserCode}>
+              <SelectTrigger className="w-full sm:w-[180px]">
+                <SelectValue placeholder={translations.filterByClient || "Filter by client"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{translations.allClients || 'All Clients'}</SelectItem>
+                {userCodes.map(code => (
+                  <SelectItem key={code} value={code}>{code}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
         <Button

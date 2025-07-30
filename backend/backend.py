@@ -697,17 +697,31 @@ CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fa
    - Total fat: {preferences.get('macros', {}).get('fat', '80g')}g (±0% tolerance)
    - Total carbs: {preferences.get('macros', {}).get('carbs', '250g')}g (±0% tolerance)
 
-2. **PRECISE per-meal calculation:**  
-   per_cal  = daily_calories ÷ number_of_meals (exact division, no rounding)
-   per_pro  = daily_protein  ÷ number_of_meals (exact division, no rounding)
-   per_fat  = daily_fat      ÷ number_of_meals (exact division, no rounding)
-   per_carb = daily_carbs     ÷ number_of_meals (exact division, no rounding)
+2. **WEIGHTED per-meal calculation for main meals vs snacks:**  
+   **Main meals (Breakfast, Lunch, Dinner):** 25-30% of daily calories each
+   **Snacks:** 5-15% of daily calories each (distributed evenly among remaining calories)
+   
+   **Example distribution for 2000 calories:**
+   - Breakfast: 500-600 calories (25-30%)
+   - Lunch: 500-600 calories (25-30%) 
+   - Dinner: 500-600 calories (25-30%)
+   - Snacks: 200-500 calories total (10-25% distributed among snacks)
+   
+   **CRITICAL: Macro distribution MUST follow EXACTLY the same percentage as calories:**
+   - If a meal gets 25% of daily calories, it MUST get 25% of daily protein, 25% of daily fat, and 25% of daily carbs
+   - If a meal gets 10% of daily calories, it MUST get 10% of daily protein, 10% of daily fat, and 10% of daily carbs
+   - **Formula:** meal_macro = (meal_calories / daily_calories) × daily_macro_target
+   - **Example:** For 2000 calories, 150g protein, if breakfast = 500 calories (25%), then breakfast_protein = 25% × 150g = 37.5g
+   - **Example for 2516 calories, 189g protein, 84g fat, 252g carbs:**
+     - If breakfast = 629 calories (25%), then: breakfast_protein = 25% × 189g = 47.25g, breakfast_fat = 25% × 84g = 21g, breakfast_carbs = 25% × 252g = 63g
+   - Total must still equal daily targets exactly
 
 3. **PERFECT Meal distribution:**  
-    • For Breakfast, Morning Snack, Mid-Morning Snack, Lunch, Afternoon Snack, Mid-Afternoon Snack, Evening Snack, Late Night Snack: each must be EXACTLY at per-meal averages (±0% tolerance)
-    • Dinner (when included): must be EXACTLY at its calculated percentage of daily totals (±0% tolerance)
-    • **For low-fat diets (< 30g total fat):** Distribute fat with surgical precision - use lean proteins, minimal oils, fat-free dairy
-    • **For low-carb diets (< 100g total carbs):** Focus on protein and healthy fats, minimize grains and fruits with exact precision
+   • **Main meals (Breakfast, Lunch, Dinner):** Each must be 25-30% of daily calories and macros (±0% tolerance)
+   • **Snacks:** Each must be 5-15% of daily calories and macros (±0% tolerance)
+   • **MATHEMATICAL PRECISION:** Use the formula: meal_macro = (meal_calories / daily_calories) × daily_macro_target
+   • **For low-fat diets (< 30g total fat):** Distribute fat with surgical precision - use lean proteins, minimal oils, fat-free dairy
+   • **For low-carb diets (< 100g total carbs):** Focus on protein and healthy fats, minimize grains and fruits with exact precision
 
 4. **PERFECT Alternative match:** Main vs alternative must be EXACTLY equal for all macros (calories, protein, fat, carbs) (±0% tolerance)
 
@@ -717,6 +731,9 @@ CALORIE CALCULATION FORMULA: calories = (4 × protein) + (4 × carbs) + (9 × fa
    - If either main or alternative deviates by even 1 calorie or 1 gram, regenerate the entire template
    - Pay special attention to protein targets - ensure both options have EXACTLY the required protein
    - For high-protein diets (>150g), distribute protein with perfect mathematical precision across meals
+   - **VERIFY:** For each meal, check that (meal_protein / daily_protein) ≈ (meal_calories / daily_calories) within 0.1%
+   - **VERIFY:** For each meal, check that (meal_fat / daily_fat) ≈ (meal_calories / daily_calories) within 0.1%
+   - **VERIFY:** For each meal, check that (meal_carbs / daily_carbs) ≈ (meal_calories / daily_calories) within 0.1%
 
 6. **PERFECT VERIFICATION:** Before responding, verify that your template sums to EXACTLY the daily targets (0% deviation).
    If there is ANY deviation, regenerate the entire template with mathematically precise macro distribution.
@@ -1002,6 +1019,13 @@ def api_build_menu():
                         "CRITICAL: For 'household_measure', use realistic portion sizes that match the region's packaging standards. "
                         "For Israeli products: cottage cheese 250g containers, yogurt 150-200g containers, hummus 400g containers, etc. "
                         "Macros must match the template EXACTLY (±0% tolerance). Respond only with valid JSON."
+                        "**CRITICAL MATHEMATICAL PRECISION:** "
+                        "• The meal's macros MUST follow the exact same percentage as its calories "
+                        "• Formula: meal_macro = (meal_calories / daily_calories) × daily_macro_target "
+                        "• Example: If meal = 629 calories (25% of 2516), then meal_protein = 25% × 189g = 47.25g "
+                        "• Use exact calculations, no rounding, no approximations "
+                        "• Every macro must add up perfectly to the target values "
+                        "Respond only with valid JSON."
                     )
                     main_content = {
                         "meal_name": meal_name,
@@ -1112,6 +1136,13 @@ def api_build_menu():
                         "CRITICAL: For 'household_measure', use realistic portion sizes that match the region's packaging standards. "
                         "For Israeli products: cottage cheese 250g containers, yogurt 150-200g containers, hummus 400g containers, etc. "
                         "Macros must match the template EXACTLY (±0% tolerance). Respond only with valid JSON."
+                        "**CRITICAL MATHEMATICAL PRECISION:** "
+                        "• The meal's macros MUST follow the exact same percentage as its calories "
+                        "• Formula: meal_macro = (meal_calories / daily_calories) × daily_macro_target "
+                        "• Example: If meal = 629 calories (25% of 2516), then meal_protein = 25% × 189g = 47.25g "
+                        "• Use exact calculations, no rounding, no approximations "
+                        "• Every macro must add up perfectly to the target values "
+                        "Respond only with valid JSON."
                     )
                     alt_content = {
                         "meal_name": meal_name,

@@ -376,6 +376,25 @@ export const translations = {
     printMenu: 'Print Menu',
     shareMenu: 'Share Menu',
 
+    // Ingredient Portion Dialog
+    setPortion: 'Set Portion Size',
+    portionDialogDescription: 'Enter the amount in grams and a household measurement. The nutrition values will be automatically adjusted based on the 100g serving size from the database.',
+    amountInGrams: 'Amount (grams)',
+    householdMeasure: 'Household Measure',
+    householdMeasurePlaceholder: 'e.g., 1 cup, 2 tbsp, 1 medium apple',
+    adjustedNutrition: 'Adjusted Nutrition',
+    basedOn100g: 'Based on 100g serving',
+    ratio: 'Ratio',
+    pleaseFillAllFields: 'Please fill in all fields',
+    pleaseEnterValidAmount: 'Please enter a valid amount greater than 0',
+    editPortion: 'Edit portion size',
+    ingredient: 'Ingredient',
+    within5Percent: 'within ±5%',
+    within10Percent: 'within ±10%',
+    deleteIngredient: 'Delete ingredient',
+    makeMain: 'Make Main',
+    makeMainTooltip: 'Make this the main option',
+
     // Analytics & Reporting
     analyticsOverview: 'Analytics Overview',
     clientProgress: 'Client Progress',
@@ -1201,6 +1220,25 @@ export const translations = {
     deleteMenu: 'מחיקת תפריט',
     printMenu: 'הדפסת תפריט',
     shareMenu: 'שיתוף תפריט',
+
+    // Ingredient Portion Dialog
+    setPortion: 'קבע גודל מנה',
+    portionDialogDescription: 'הכנס את הכמות בגרמים ומידת בית. ערכי התזונה יתאימו אוטומטית בהתבסס על מנה של 100 גרם ממסד הנתונים.',
+    amountInGrams: 'כמות (גרמים)',
+    householdMeasure: 'מידת בית',
+    householdMeasurePlaceholder: 'למשל, כוס אחת, 2 כפות, תפוח בינוני אחד',
+    adjustedNutrition: 'תזונה מותאמת',
+    basedOn100g: 'מבוסס על מנה של 100 גרם',
+    ratio: 'יחס',
+    pleaseFillAllFields: 'אנא מלא את כל השדות',
+    pleaseEnterValidAmount: 'אנא הכנס כמות תקינה גדולה מ-0',
+    editPortion: 'ערוך גודל מנה',
+    ingredient: 'מרכיב',
+    within5Percent: 'בתוך ±5%',
+    within10Percent: 'בתוך ±10%',
+    deleteIngredient: 'מחק מרכיב',
+    makeMain: 'הפוך לעיקרי',
+    makeMainTooltip: 'הפוך את זה לאפשרות העיקרית',
 
     // Analytics & Reporting
     analyticsOverview: 'סקירת אנליטיקה',
