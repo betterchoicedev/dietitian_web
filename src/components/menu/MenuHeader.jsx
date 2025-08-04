@@ -25,7 +25,7 @@ export default function MenuHeader({
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <h1 className="text-2xl font-bold">Edit Menu Plan</h1>
+        <h1 className="text-2xl font-bold">Edit Meal Plan</h1>
       </div>
       <div className="flex items-center gap-3">
         <Select

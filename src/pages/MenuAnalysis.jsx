@@ -243,17 +243,17 @@ export default function MenuAnalysis() {
   if (!selectedMenu) {
     return (
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-2xl font-bold mb-6">Menu Analysis</h1>
+        <h1 className="text-2xl font-bold mb-6">Meal Plan Analysis</h1>
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-10">
             <FileText className="h-12 w-12 text-gray-300 mb-4" />
-            <h3 className="text-xl font-medium mb-2">No Menus Available</h3>
+            <h3 className="text-xl font-medium mb-2">No Meal Plans Available</h3>
             <p className="text-gray-500 mb-6">
-              You need to create a menu plan for this client first.
+              You need to create a meal plan for this client first.
             </p>
             <Link to={createPageUrl('MenuCreate')}>
               <Button className="bg-green-600 hover:bg-green-700">
-                Create Menu Plan
+                Create Meal Plan
               </Button>
             </Link>
           </CardContent>
@@ -265,9 +265,9 @@ export default function MenuAnalysis() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Menu Analysis</h1>
+        <h1 className="text-2xl font-bold">Meal Plan Analysis</h1>
         <p className="text-gray-500">
-          Analyzing {client?.full_name}'s menu plan
+          Analyzing {client?.full_name}'s meal plan
         </p>
       </div>
 

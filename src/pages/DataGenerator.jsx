@@ -194,7 +194,7 @@ export default function DataGenerator() {
       
       for (const client of clients) {
         const menu = {
-          name: `Weekly Menu Plan for ${client.full_name}`,
+          name: `Weekly Meal Plan for ${client.full_name}`,
           user_code: client.code,
           client_id: client.id,
           status: "published",
@@ -420,12 +420,12 @@ export default function DataGenerator() {
               Menus
             </CardTitle>
             <CardDescription>
-              Generate sample menu plans
+              Generate sample meal plans
             </CardDescription>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-gray-500">
-              This will create sample menu plans for each client with detailed meal information.
+              This will create sample meal plans for each client with detailed meal information.
             </p>
           </CardContent>
           <CardFooter>

@@ -107,7 +107,15 @@ app.get('/api/suggestions', async (req, res) => {
     const limitNum = parseInt(limit);
     const offset = (pageNum - 1) * limitNum;
 
+    console.log(`🔍 Fetching suggestions for: "${query}" (page: ${pageNum}, limit: ${limitNum}, offset: ${offset})`);
     const suggestions = await getIngredientSuggestions(query, limitNum, offset);
+    console.log(`✅ Suggestions returned: ${suggestions.length} results`);
+    
+    // Debug: Check if gtinUpc is included in suggestions
+    suggestions.forEach((suggestion, index) => {
+      console.log(`  Suggestion ${index}: ${suggestion.hebrew || suggestion.english} - gtinUpc: "${suggestion.gtinUpc}"`);
+    });
+    
     const hasMore = suggestions.length === limitNum;
 
     res.json({

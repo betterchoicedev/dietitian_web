@@ -251,8 +251,8 @@ export default function MenuTargetsCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Menu Targets</CardTitle>
-        <CardDescription>Set calorie and macro targets for this menu plan</CardDescription>
+        <CardTitle>Meal Plan Targets</CardTitle>
+        <CardDescription>Set calorie and macro targets for this meal plan</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         {/* Calorie Target */}

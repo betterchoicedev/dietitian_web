@@ -275,9 +275,9 @@ export default function ClientMenu() {
               <CardContent>
                 <div className="flex flex-col items-center">
                   <FileText className="h-12 w-12 text-gray-300 mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No menu plans found</h3>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No meal plans found</h3>
                   <p className="text-gray-500 max-w-md mx-auto mb-6">
-                    There are no menu plans created for this client yet. Create a new menu plan to get started.
+                    There are no meal plans created for this client yet. Create a new meal plan to get started.
                   </p>
                   <Button 
                     onClick={() => navigate(createPageUrl('MenuCreate'))}
@@ -295,7 +295,7 @@ export default function ClientMenu() {
                 <div>
                   <h2 className="text-xl font-semibold mb-4 flex items-center">
                     <Check className="text-green-500 mr-2 h-5 w-5" />
-                    Active Menu Plans
+                    Active Meal Plans
                   </h2>
                   <div className="grid gap-6 md:grid-cols-2">
                     {activeMenus.map(menu => (
@@ -330,7 +330,7 @@ export default function ClientMenu() {
                           <CardDescription>
                             <div className="flex flex-col space-y-1 mt-1">
                               <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-500">Menu Code:</span>
+                                <span className="text-xs text-gray-500">Meal Plan Code:</span>
                                 <MenuCodeDisplay menuCode={menu.menu_code || 'N/A'} />
                               </div>
                               <div className="flex items-center gap-1">
@@ -346,7 +346,7 @@ export default function ClientMenu() {
                         </CardHeader>
                         <CardFooter>
                           <Button variant="link" className="p-0 h-auto text-green-600" onClick={() => handleMenuClick(menu.id)}>
-                            View Menu
+                            View Meal Plan
                           </Button>
                         </CardFooter>
                       </Card>
@@ -359,7 +359,7 @@ export default function ClientMenu() {
                 <div>
                   <h2 className="text-xl font-semibold mb-4 flex items-center">
                     <Utensils className="text-blue-500 mr-2 h-5 w-5" />
-                    Published Menu Plans
+                    Published Meal Plans
                   </h2>
                   <div className="grid gap-6 md:grid-cols-2">
                     {publishedMenus.map(menu => (
@@ -394,7 +394,7 @@ export default function ClientMenu() {
                           <CardDescription>
                             <div className="flex flex-col space-y-1 mt-1">
                               <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-500">Menu Code:</span>
+                                <span className="text-xs text-gray-500">Meal Plan Code:</span>
                                 <MenuCodeDisplay menuCode={menu.menu_code || 'N/A'} />
                               </div>
                               <div className="flex items-center gap-1">
@@ -410,7 +410,7 @@ export default function ClientMenu() {
                         </CardHeader>
                         <CardFooter>
                           <Button variant="link" className="p-0 h-auto text-blue-600" onClick={() => handleMenuClick(menu.id)}>
-                            View Menu
+                            View Meal Plan
                           </Button>
                         </CardFooter>
                       </Card>
@@ -423,7 +423,7 @@ export default function ClientMenu() {
                 <div>
                   <h2 className="text-xl font-semibold mb-4 flex items-center">
                     <FileText className="text-yellow-500 mr-2 h-5 w-5" />
-                    Draft Menu Plans
+                    Draft Meal Plans
                   </h2>
                   <div className="grid gap-6 md:grid-cols-2">
                     {draftMenus.map(menu => (
@@ -458,7 +458,7 @@ export default function ClientMenu() {
                           <CardDescription>
                             <div className="flex flex-col space-y-1 mt-1">
                               <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-500">Menu Code:</span>
+                                <span className="text-xs text-gray-500">Meal Plan Code:</span>
                                 <MenuCodeDisplay menuCode={menu.menu_code || 'N/A'} />
                               </div>
                               <div className="flex items-center gap-1">
@@ -474,7 +474,7 @@ export default function ClientMenu() {
                         </CardHeader>
                         <CardFooter>
                           <Button variant="link" className="p-0 h-auto text-yellow-600" onClick={() => handleMenuClick(menu.id)}>
-                            View Menu
+                            View Meal Plan
                           </Button>
                         </CardFooter>
                       </Card>

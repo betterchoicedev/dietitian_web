@@ -108,7 +108,7 @@ export default function Dashboard() {
 
       // Activity from menus
       const allActivity = [
-        ...userMenus.map(m => ({ ...m, type: 'menu' }))
+        ...userMenus.map(m => ({ ...m, type: 'meal plan' }))
       ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 8);
       
       setRecentActivity(allActivity);
@@ -277,13 +277,13 @@ export default function Dashboard() {
               <div className="space-y-3">
                 <h4 className="font-semibold text-gray-900 flex items-center gap-2">
                   <User className="h-4 w-4" />
-                  {translations.basicInfo || 'Basic Information'}
+                  {translations.basicInformation || 'Basic Information'}
                 </h4>
                 <div className="space-y-2 text-sm">
-                  <p><span className="font-medium">Name:</span> {selectedClient.full_name}</p>
-                  <p><span className="font-medium">Code:</span> {selectedClient.user_code}</p>
-                  <p><span className="font-medium">Age:</span> {selectedClient.age || 'N/A'}</p>
-                  <p><span className="font-medium">Gender:</span> {selectedClient.gender || 'N/A'}</p>
+                  <p><span className="font-medium">{translations.name || 'Name'}:</span> {selectedClient.full_name}</p>
+                  <p><span className="font-medium">{translations.clientCode || 'Code'}:</span> {selectedClient.user_code}</p>
+                  <p><span className="font-medium">{translations.age || 'Age'}:</span> {selectedClient.age || 'N/A'}</p>
+                  <p><span className="font-medium">{translations.gender || 'Gender'}:</span> {selectedClient.gender || 'N/A'}</p>
                 </div>
               </div>
 
@@ -294,8 +294,8 @@ export default function Dashboard() {
                   {translations.physicalStats || 'Physical Stats'}
                 </h4>
                 <div className="space-y-2 text-sm">
-                  <p><span className="font-medium">Weight:</span> {selectedClient.weight_kg || 'N/A'} kg</p>
-                  <p><span className="font-medium">Height:</span> {selectedClient.height_cm || 'N/A'} cm</p>
+                  <p><span className="font-medium">{translations.weightKg || 'Weight'}:</span> {selectedClient.weight_kg || 'N/A'} kg</p>
+                  <p><span className="font-medium">{translations.heightCm || 'Height'}:</span> {selectedClient.height_cm || 'N/A'} cm</p>
                   <p><span className="font-medium">BMI:</span> {
                     selectedClient.weight_kg && selectedClient.height_cm 
                       ? ((selectedClient.weight_kg / Math.pow(selectedClient.height_cm / 100, 2)).toFixed(1))
@@ -311,10 +311,10 @@ export default function Dashboard() {
                   {translations.nutritionTargets || 'Nutrition Targets'}
                 </h4>
                 <div className="space-y-2 text-sm">
-                  <p><span className="font-medium">Daily Calories:</span> {selectedClient.dailyTotalCalories || 'N/A'} kcal</p>
-                  <p><span className="font-medium">Meals:</span> {selectedClient.number_of_meals || 'N/A'}</p>
-                  <p><span className="font-medium">Goal:</span> {selectedClient.goal || 'N/A'}</p>
-                  <p><span className="font-medium">Activity:</span> {selectedClient.Activity_level || 'N/A'}</p>
+                  <p><span className="font-medium">{translations.dailyTotalCalories || 'Daily Calories'}:</span> {selectedClient.dailyTotalCalories || 'N/A'} kcal</p>
+                  <p><span className="font-medium">{translations.numberOfMeals || 'Meals'}:</span> {selectedClient.number_of_meals || 'N/A'}</p>
+                  <p><span className="font-medium">{translations.goal || 'Goal'}:</span> {selectedClient.goal || 'N/A'}</p>
+                  <p><span className="font-medium">{translations.activityLevel || 'Activity'}:</span> {selectedClient.Activity_level || 'N/A'}</p>
                 </div>
               </div>
 
@@ -322,12 +322,12 @@ export default function Dashboard() {
               <div className="space-y-3">
                 <h4 className="font-semibold text-gray-900 flex items-center gap-2">
                   <Mail className="h-4 w-4" />
-                  {translations.contactInfo || 'Contact Info'}
+                  {translations.contactInformation || 'Contact Info'}
                 </h4>
                 <div className="space-y-2 text-sm">
-                  <p><span className="font-medium">Email:</span> {selectedClient.email || 'N/A'}</p>
-                  <p><span className="font-medium">Phone:</span> {selectedClient.phone_number || 'N/A'}</p>
-                  <p><span className="font-medium">City:</span> {selectedClient.city || 'N/A'}</p>
+                  <p><span className="font-medium">{translations.email || 'Email'}:</span> {selectedClient.email || 'N/A'}</p>
+                  <p><span className="font-medium">{translations.phoneNumber || 'Phone'}:</span> {selectedClient.phone_number || 'N/A'}</p>
+                  <p><span className="font-medium">{translations.city || 'City'}:</span> {selectedClient.city || 'N/A'}</p>
                 </div>
               </div>
             </div>
@@ -342,12 +342,12 @@ export default function Dashboard() {
                 <div className="flex flex-wrap gap-2">
                   {selectedClient.food_allergies && (
                     <Badge variant="destructive">
-                      {translations.allergies || 'Allergies'}: {Array.isArray(selectedClient.food_allergies) ? selectedClient.food_allergies.join(', ') : selectedClient.food_allergies}
+                      {translations.foodAllergies || 'Allergies'}: {Array.isArray(selectedClient.food_allergies) ? selectedClient.food_allergies.join(', ') : selectedClient.food_allergies}
                     </Badge>
                   )}
                   {selectedClient.food_limitations && (
                     <Badge variant="secondary">
-                      {translations.limitations || 'Limitations'}: {Array.isArray(selectedClient.food_limitations) ? selectedClient.food_limitations.join(', ') : selectedClient.food_limitations}
+                      {translations.foodLimitations || 'Limitations'}: {Array.isArray(selectedClient.food_limitations) ? selectedClient.food_limitations.join(', ') : selectedClient.food_limitations}
                     </Badge>
                   )}
                 </div>
@@ -499,9 +499,9 @@ export default function Dashboard() {
                   recentActivity.map((item, index) => (
                     <div key={index} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
                       <div className={`h-10 w-10 rounded-full flex items-center justify-center ${
-                        item.type === 'menu' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'
+                        item.type === 'meal plan' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'
                       }`}>
-                        {item.type === 'menu' ? (
+                        {item.type === 'meal plan' ? (
                           <ChefHat className="h-5 w-5" />
                         ) : (
                           <MessageSquare className="h-5 w-5" />
@@ -509,11 +509,11 @@ export default function Dashboard() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-900 truncate">
-                          {item.type === 'menu' ? item.meal_plan_name || item.name || 'Menu Plan' : 'Chat Session'}
+                          {item.type === 'meal plan' ? item.meal_plan_name || item.name || 'Meal Plan' : 'Chat Session'}
                         </p>
                         <p className="text-xs text-gray-500">
                           {new Date(item.created_at).toLocaleDateString()} • 
-                          {item.type === 'menu' ? ` ${item.daily_total_calories || item.total_calories || 0} cal` : ` ${item.messages?.length || 0} messages`}
+                          {item.type === 'meal plan' ? ` ${item.daily_total_calories || item.total_calories || 0} cal` : ` ${item.messages?.length || 0} messages`}
                         </p>
                       </div>
                       <ArrowUpRight className="h-4 w-4 text-gray-400" />
@@ -551,7 +551,7 @@ export default function Dashboard() {
                   {recentMenus.slice(0, 3).map((menu, index) => (
                     <div key={index} className="flex items-center justify-between bg-white p-3 rounded-lg">
                       <div>
-                        <p className="font-medium text-gray-900">{menu.meal_plan_name || menu.name || 'Untitled Menu'}</p>
+                        <p className="font-medium text-gray-900">{menu.meal_plan_name || menu.name || 'Untitled Meal Plan'}</p>
                         <p className="text-sm text-gray-500">{menu.daily_total_calories || menu.total_calories || 0} {translations.kcal || 'kcal'}</p>
                       </div>
                       <div className="text-right">

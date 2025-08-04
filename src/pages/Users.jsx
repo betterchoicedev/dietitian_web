@@ -274,8 +274,8 @@ export default function Clients() {
     }
   }, [formData.weight_kg]);
 
-  // Mifflin-St Jeor calculation function (more accurate than Harris-Benedict)
-  const calculateMifflinStJeor = (age, gender, weight, height, activityLevel, goal) => {
+  // Harris-Benedict calculation function (original formula)
+  const calculateHarrisBenedict = (age, gender, weight, height, activityLevel, goal) => {
     if (!age || !gender || !weight || !height || !activityLevel) {
       return null;
     }
@@ -286,15 +286,15 @@ export default function Clients() {
       heightInCm = heightInCm * 100;
     }
 
-    // Calculate BMR using Mifflin-St Jeor equation (more accurate)
+    // Calculate BMR using Harris-Benedict equation
     let bmr = 0;
     if (gender === 'male') {
-      bmr = (10 * parseFloat(weight)) + (6.25 * heightInCm) - (5 * parseFloat(age)) + 5;
+      bmr = 88.362 + (13.397 * parseFloat(weight)) + (4.799 * heightInCm) - (5.677 * parseFloat(age));
     } else {
-      bmr = (10 * parseFloat(weight)) + (6.25 * heightInCm) - (5 * parseFloat(age)) - 161;
+      bmr = 447.593 + (9.247 * parseFloat(weight)) + (3.098 * heightInCm) - (4.330 * parseFloat(age));
     }
 
-    // Apply activity multiplier (more conservative values)
+    // Apply activity multiplier
     let activityMultiplier = 1.2; // Sedentary as default
     switch (activityLevel) {
       case 'sedentary': activityMultiplier = 1.2; break;
@@ -307,11 +307,11 @@ export default function Clients() {
     // Calculate TDEE (Total Daily Energy Expenditure)
     let tdee = bmr * activityMultiplier;
 
-    // Adjust for goal (more conservative adjustments)
+    // Adjust for goal
     switch (goal) {
-      case 'lose': tdee -= 300; break; // Reduced from 500 to 300
-      case 'gain': tdee += 300; break; // Reduced from 500 to 300
-      case 'muscle': tdee += 200; break; // Reduced from 300 to 200
+      case 'lose': tdee -= 500; break;
+      case 'gain': tdee += 500; break;
+      case 'muscle': tdee += 300; break;
       // 'maintain' and 'health' don't change the calculation
     }
 
@@ -320,7 +320,7 @@ export default function Clients() {
 
   // Auto-calculate calories when relevant fields change
   useEffect(() => {
-    const calculatedCalories = calculateMifflinStJeor(
+    const calculatedCalories = calculateHarrisBenedict(
       formData.age,
       formData.gender,
       formData.weight_kg,
@@ -372,6 +372,48 @@ export default function Clients() {
       setFormData(prev => ({ ...prev, dailyTotalCalories: '' }));
     }
   }, [formData.age, formData.gender, formData.weight_kg, formData.height_cm, formData.Activity_level, formData.goal]);
+
+  // Handle manual calorie changes and recalculate macros
+  useEffect(() => {
+    const calories = parseInt(formData.dailyTotalCalories) || 0;
+    if (calories > 0) {
+      // Get current percentages
+      const currentPercentages = {
+        protein: macroInputs.protein.percentage,
+        carbs: macroInputs.carbs.percentage,
+        fat: macroInputs.fat.percentage
+      };
+      
+      // If we have existing percentages, recalculate grams based on new calories
+      if (currentPercentages.protein > 0 || currentPercentages.carbs > 0 || currentPercentages.fat > 0) {
+        const weight = parseFloat(formData.weight_kg) || 0;
+        const updatedMacros = {
+          protein: {
+            percentage: currentPercentages.protein,
+            grams: Math.round(((currentPercentages.protein / 100) * calories) / 4),
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.protein / 100) * calories) / 4) / weight * 10) / 10 : 0
+          },
+          carbs: {
+            percentage: currentPercentages.carbs,
+            grams: Math.round(((currentPercentages.carbs / 100) * calories) / 4),
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.carbs / 100) * calories) / 4) / weight * 10) / 10 : 0
+          },
+          fat: {
+            percentage: currentPercentages.fat,
+            grams: Math.round(((currentPercentages.fat / 100) * calories) / 9),
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.fat / 100) * calories) / 9) / weight * 10) / 10 : 0
+          }
+        };
+        
+        setMacroInputs(updatedMacros);
+        setMacroSliders({
+          protein: updatedMacros.protein.grams,
+          carbs: updatedMacros.carbs.grams,
+          fat: updatedMacros.fat.grams
+        });
+      }
+    }
+  }, [formData.dailyTotalCalories]);
 
   useEffect(() => {
     loadClients();
@@ -815,7 +857,7 @@ export default function Clients() {
     
     // Recalculate calories after a short delay to ensure form data is set
     setTimeout(() => {
-      const calculatedCalories = calculateMifflinStJeor(
+      const calculatedCalories = calculateHarrisBenedict(
         formData.age,
         formData.gender,
         formData.weight_kg,
@@ -1205,6 +1247,7 @@ export default function Clients() {
                     <SelectItem value="moderate">{translations.moderateActivity}</SelectItem>
                     <SelectItem value="very">{translations.veryActive}</SelectItem>
                     <SelectItem value="extra">{translations.extraActive}</SelectItem>
+                    <SelectItem value="toning">{translations.toning}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1760,9 +1803,8 @@ export default function Clients() {
                         <SelectItem value="sedentary">{translations.sedentary}</SelectItem>
                         <SelectItem value="light">{translations.lightActivity}</SelectItem>
                         <SelectItem value="moderate">{translations.moderateActivity}</SelectItem>
-                        <SelectItem value="very">{translations.veryActive}</SelectItem>
+                        <SelectItem value="very">{translations.veryActive} </SelectItem>
                         <SelectItem value="extra">{translations.extraActive}</SelectItem>
-                        <SelectItem value="toning">{translations.toning}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1800,12 +1842,12 @@ export default function Clients() {
                       id="dailyTotalCalories"
                       type="number"
                       value={formData.dailyTotalCalories}
-                      readOnly
-                      className={`${hasRequiredFieldsForCalculation() ? 'bg-gray-50' : 'bg-yellow-50'} cursor-not-allowed`}
+                      onChange={(e) => setFormData({...formData, dailyTotalCalories: e.target.value})}
+                      className={`${hasRequiredFieldsForCalculation() ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}
                       placeholder={hasRequiredFieldsForCalculation() ? translations.autoCalculated : translations.fillRequiredFieldsToCalculate}
                     />
                     <p className="text-xs text-gray-500">
-                      {translations.mifflinStJeorInfo}
+                      {translations.harrisBenedictInfo || 'Calculated using Harris-Benedict equation'}
                     </p>
                   </div>
                   <div className="space-y-2">

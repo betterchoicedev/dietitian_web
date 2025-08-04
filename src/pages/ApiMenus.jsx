@@ -40,7 +40,7 @@ export default function ApiMenus() {
       const menus = await Menu.filter({ user_code: userCode.trim() }, '-updated_date');
       
       if (menus.length === 0) {
-        setError("No menus found for this user code");
+        setError("No meal plans found for this user code");
         setIsLoading(false);
         return;
       }
@@ -108,9 +108,9 @@ export default function ApiMenus() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Menu API</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Meal Plan API</h1>
         <p className="mt-1 text-sm text-gray-500">
-          Test and retrieve menu information for clients via API
+          Test and retrieve meal plan information for clients via API
         </p>
       </div>
 
@@ -118,7 +118,7 @@ export default function ApiMenus() {
         <CardHeader>
           <CardTitle>API Endpoint</CardTitle>
           <CardDescription>
-            Use this endpoint to retrieve menu information for a specific user code
+            Use this endpoint to retrieve meal plan information for a specific user code
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -127,7 +127,7 @@ export default function ApiMenus() {
           </div>
           
           <p className="text-sm text-gray-500">
-            This endpoint returns the active menu for the specified user code. If no active menu exists, it returns the most recently updated menu.
+            This endpoint returns the active meal plan for the specified user code. If no active meal plan exists, it returns the most recently updated meal plan.
           </p>
           
           <div className="flex items-center gap-2">

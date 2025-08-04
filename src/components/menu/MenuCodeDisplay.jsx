@@ -11,8 +11,8 @@ export default function MenuCodeDisplay({ menuCode }) {
   const copyToClipboard = () => {
     navigator.clipboard.writeText(menuCode);
     toast({
-      title: "Menu code copied",
-      description: "Menu code has been copied to your clipboard",
+      title: "Meal Plan code copied",
+      description: "Meal Plan code has been copied to your clipboard",
       duration: 2000
     });
   };
@@ -35,7 +35,7 @@ export default function MenuCodeDisplay({ menuCode }) {
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            <p>Copy menu code</p>
+            <p>Copy meal plan code</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>

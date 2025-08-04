@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { Menu } from '@/api/entities';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { supabase } from '@/lib/supabase';
+import { supabase, secondSupabase } from '@/lib/supabase';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useClient } from '@/contexts/ClientContext';
 import { EventBus } from '@/utils/EventBus';
@@ -105,24 +105,15 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
     setIsLoading(true);
     try {
-      // Try MenuCreate API first, fallback to original API
-      let response = await fetch(`https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/suggestions?query=${encodeURIComponent(query)}`);
+      // Use only the external API endpoint
+      const response = await fetch(`https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/suggestions?query=${encodeURIComponent(query)}`);
       
       if (response.ok) {
         const data = await response.json();
-        setSuggestions(data || []);
+        setSuggestions(data.suggestions || data || []);
       } else {
-        // Fallback to original API
-        response = await fetch('/api/autocomplete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ingredient_name: query, limit: 5 })
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          setSuggestions(data.suggestions || []);
-        }
+        console.error('Failed to fetch suggestions from external API:', response.status);
+        setSuggestions([]);
       }
     } catch (error) {
       console.error('Error fetching suggestions:', error);
@@ -315,6 +306,8 @@ const MenuLoad = () => {
   const [expiredCheckResult, setExpiredCheckResult] = useState(null);
   const [generatingAlt, setGeneratingAlt] = useState({});
   const [loading, setLoading] = useState(false);
+  const [userTargets, setUserTargets] = useState(null);
+  const [loadingUserTargets, setLoadingUserTargets] = useState(false);
   const navigate = useNavigate();
   const { language, translations } = useLanguage();
   const { selectedClient } = useClient();
@@ -404,22 +397,131 @@ const MenuLoad = () => {
       carbs: 0
     };
 
-    const result = {
+    return {
       meals: convertedMeals,
-      totals: {
-        calories: typeof totals.calories === 'string' ? parseInt(totals.calories) || 0 : totals.calories,
-        protein: typeof totals.protein === 'string' ? parseInt(totals.protein) || 0 : totals.protein,
-        fat: typeof totals.fat === 'string' ? parseInt(totals.fat) || 0 : totals.fat,
-        carbs: typeof totals.carbs === 'string' ? parseInt(totals.carbs) || 0 : totals.carbs
-      },
-      note: savedMenu.meal_plan?.note || savedMenu.note || '',
-      id: savedMenu.id,
-      meal_plan_name: savedMenu.meal_plan_name,
-      user_code: savedMenu.user_code
+      totals: totals,
+      note: savedMenu.meal_plan?.note || savedMenu.note || ''
     };
-    
-    console.log('Converted menu result:', result);
-    return result;
+  };
+
+  // Fetch user targets from the database
+  const fetchUserTargets = async (userCode) => {
+    if (!userCode) {
+      console.warn('No user code provided for fetchUserTargets');
+      return null;
+    }
+
+    setLoadingUserTargets(true);
+    setError(null);
+
+    try {
+      console.log('🔍 Testing database connectivity...');
+      const { data: testData, error: testError } = await supabase
+        .from('chat_users')
+        .select('user_code')
+        .limit(1);
+      
+      console.log('🔍 Database connectivity test:', { testData, testError });
+      
+      if (testError) {
+        console.error('❌ Database connectivity issue:', testError);
+        setError('Database connection issue: ' + testError.message);
+        return null;
+      }
+
+      console.log('🔍 Fetching user targets for:', userCode);
+
+      const { data, error } = await supabase
+        .from('chat_users')
+        .select('dailyTotalCalories, macros, region, food_allergies, food_limitations, age, gender, weight_kg, height_cm, client_preference')
+        .eq('user_code', userCode)
+        .single();
+
+      console.log('📊 Database response:', { data, error });
+
+      if (error) {
+        console.error('❌ Error fetching user targets:', error);
+        if (error.code === 'PGRST116') {
+          // No rows returned
+          console.error('❌ No user found with code:', userCode);
+          setError(`No user found with code: ${userCode}. Please check if the user exists in the database.`);
+        } else {
+          setError('Failed to load user targets: ' + error.message);
+        }
+        return null;
+      }
+
+      if (!data) {
+        console.error('❌ No data returned from database');
+        setError('No data returned from database for user: ' + userCode);
+        return null;
+      }
+
+      console.log('✅ Fetched user targets:', data);
+
+      // Check if essential fields are missing
+      const missingFields = [];
+      if (!data.dailyTotalCalories) missingFields.push('dailyTotalCalories');
+      if (!data.macros) missingFields.push('macros');
+      
+      if (missingFields.length > 0) {
+        console.warn('⚠️ Missing essential fields:', missingFields);
+        console.log('Available data:', data);
+      }
+
+      // Parse macros if it's a string
+      let parsedMacros = data.macros;
+      if (typeof parsedMacros === 'string') {
+        try {
+          parsedMacros = JSON.parse(parsedMacros);
+        } catch (e) {
+          console.warn('Failed to parse macros JSON:', e);
+          parsedMacros = { protein: "150g", fat: "80g", carbs: "250g" };
+        }
+      }
+
+      // Parse arrays if they're strings
+      const parseArrayField = (field) => {
+        if (Array.isArray(field)) return field;
+        if (typeof field === 'string') {
+          try {
+            return JSON.parse(field);
+          } catch (e) {
+            return field.split(',').map(item => item.trim()).filter(Boolean);
+          }
+        }
+        return [];
+      };
+
+      const userTargetsData = {
+        calories: data.dailyTotalCalories || 2000,
+        macros: {
+          protein: parseFloat(parsedMacros?.protein?.replace('g', '') || '150'),
+          fat: parseFloat(parsedMacros?.fat?.replace('g', '') || '80'),
+          carbs: parseFloat(parsedMacros?.carbs?.replace('g', '') || '250')
+        },
+        region: data.region || 'israel',
+        allergies: parseArrayField(data.food_allergies),
+        limitations: parseArrayField(data.food_limitations),
+        age: data.age,
+        gender: data.gender,
+        weight_kg: data.weight_kg,
+        height_cm: data.height_cm,
+        client_preference: parseArrayField(data.client_preference)
+      };
+
+      console.log('✅ Processed user targets:', userTargetsData);
+      setUserTargets(userTargetsData);
+      setError(null); // Clear any errors on success
+      return userTargetsData;
+
+    } catch (error) {
+      console.error('❌ Error in fetchUserTargets:', error);
+      setError('Failed to load client nutritional targets');
+      return null;
+    } finally {
+      setLoadingUserTargets(false);
+    }
   };
 
   // Calculate meal totals
@@ -517,13 +619,20 @@ const MenuLoad = () => {
   };
 
   const handleMenuSelect = (menu) => {
-    const converted = convertToEditFormat(menu);
-    if (converted) {
-      setSelectedMenu(menu);
-      setEditedMenu(converted);
+    console.log('Selected menu:', menu);
+    setSelectedMenu(menu);
+    
+    const convertedMenu = convertToEditFormat(menu);
+    if (convertedMenu) {
+      setEditedMenu(convertedMenu);
       setIsEditing(true);
+      
+      // Fetch user targets for the selected menu's user
+      if (menu.user_code) {
+        fetchUserTargets(menu.user_code);
+      }
     } else {
-      setError('This menu format is not supported for editing');
+      setError('Failed to load menu data');
     }
   };
 
@@ -727,7 +836,7 @@ const MenuLoad = () => {
       
       const updatedMenu = {
         id: selectedMenu.id,
-        meal_plan_name: editedMenu.meal_plan_name || 'Updated Menu Plan',
+        meal_plan_name: editedMenu.meal_plan_name || 'Updated Meal Plan',
         user_code: editedMenu.user_code,
         meal_plan: {
           note: editedMenu.note || '',
@@ -854,6 +963,38 @@ const MenuLoad = () => {
       const result = await Menu.update(selectedMenuForStatus.id, updateData);
       console.log('✅ Menu status updated successfully:', result);
       
+      // If status is being set to 'active', add to the second Supabase table
+      if (statusForm.status === 'active') {
+        try {
+          // Get the meal plan data from the selected menu
+          const mealPlanData = selectedMenuForStatus.meal_plan;
+          
+          if (mealPlanData) {
+            // Insert into the second Supabase table
+            const { data: secondTableData, error: secondTableError } = await secondSupabase
+              .from('meal_plans')
+              .insert({
+                user_code: selectedMenuForStatus.user_code,
+                meal_plan: mealPlanData
+              });
+
+            if (secondTableError) {
+              console.error('Error adding to second table:', secondTableError);
+              // Don't fail the entire operation, just log the error
+              console.warn('Failed to add meal plan to second table, but status was updated successfully');
+            } else {
+              console.log('✅ Meal plan added to second table successfully:', secondTableData);
+            }
+          } else {
+            console.warn('No meal plan data found in selected menu');
+          }
+        } catch (secondTableError) {
+          console.error('Error adding to second table:', secondTableError);
+          // Don't fail the entire operation, just log the error
+          console.warn('Failed to add meal plan to second table, but status was updated successfully');
+        }
+      }
+      
       alert('Menu status updated successfully!');
       setShowStatusModal(false);
       setSelectedMenuForStatus(null);
@@ -900,8 +1041,26 @@ const MenuLoad = () => {
   // PDF download function
   async function downloadPdf(menu) {
     try {
+      // Get user's full name if we have a user code
+      let userName = 'Client';
+      if (selectedMenu?.user_code) {
+        try {
+          const { data: userData, error: userError } = await supabase
+            .from('chat_users')
+            .select('full_name')
+            .eq('user_code', selectedMenu.user_code)
+            .single();
+          
+          if (!userError && userData?.full_name) {
+            userName = userData.full_name;
+          }
+        } catch (error) {
+          console.warn('Could not fetch user name for PDF:', error);
+        }
+      }
+      
       // Create HTML content for the PDF
-      const htmlContent = generateMenuHtml(menu);
+      const htmlContent = generateMenuHtml(menu, userName);
       
       // Create a blob from the HTML content
       const blob = new Blob([htmlContent], { type: 'text/html' });
@@ -928,8 +1087,10 @@ const MenuLoad = () => {
     }
   }
 
-  function generateMenuHtml(menu) {
-    const today = new Date().toLocaleDateString('en-US', { 
+  function generateMenuHtml(menu, userName = 'Client') {
+    // Get current date in Hebrew
+    const today = new Date();
+    const hebrewDate = today.toLocaleDateString('he-IL', { 
       year: 'numeric', 
       month: 'long', 
       day: 'numeric' 
@@ -960,7 +1121,7 @@ const MenuLoad = () => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetterChoice - Meal Plan</title>
+    <title>BetterChoice - תפריט אישי</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Hebrew:wght@400;700&family=Inter:wght@400;600;700&display=swap');
         
@@ -971,287 +1132,204 @@ const MenuLoad = () => {
         }
         
         body {
-            font-family: 'Inter', 'Noto Sans Hebrew', sans-serif;
+            font-family: 'Noto Sans Hebrew', 'Inter', sans-serif;
             line-height: 1.6;
-            color: #1f2937;
+            color: #333;
             background: white;
-            padding: 20px;
-            max-width: 800px;
-            margin: 0 auto;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .page {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
         
         .header {
+            background: #e8f5e8;
+            padding: 20px;
             text-align: center;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 2px solid #059669;
         }
         
-        .header h1 {
-            color: #059669;
+        .logo {
+            width: 50px;
+            height: 50px;
+            background: #4CAF50;
+            border-radius: 50%;
+            margin: 0 auto 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 20px;
+        }
+        
+        .main-title {
             font-size: 28px;
             font-weight: 700;
-            margin-bottom: 10px;
+            color: #333;
+            margin-bottom: 8px;
         }
         
-        .header p {
-            color: #6b7280;
-            font-size: 14px;
-        }
-        
-        .totals-section {
-            background: #f0fdf4;
-            border: 1px solid #bbf7d0;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 30px;
-        }
-        
-        .totals-section h3 {
-            color: #059669;
-            font-size: 18px;
-            margin-bottom: 15px;
-            font-weight: 600;
-        }
-        
-        .macros-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 15px;
-        }
-        
-        .macro-item {
-            text-align: center;
-            padding: 10px;
-            border-radius: 8px;
-            background: white;
-        }
-        
-        .macro-value {
+        .user-name {
             font-size: 20px;
-            font-weight: 700;
-            margin-bottom: 5px;
+            font-weight: 600;
+            color: #4CAF50;
+            margin-bottom: 8px;
         }
         
-        .macro-label {
-            font-size: 12px;
-            color: #6b7280;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+        .date {
+            font-size: 16px;
+            font-weight: 500;
+            color: #666;
+            margin-bottom: 8px;
         }
         
-        .calories { color: #059669; }
-        .protein { color: #2563eb; }
-        .carbs { color: #fb923c; }
-        .fat { color: #facc15; }
+        .content {
+            flex: 1;
+            padding: 20px;
+        }
         
         .meal-section {
-            margin-bottom: 30px;
+            margin-bottom: 20px;
             page-break-inside: avoid;
         }
         
         .meal-title {
-            color: #059669;
-            font-size: 22px;
+            font-size: 18px;
             font-weight: 700;
-            margin-bottom: 15px;
-            padding-bottom: 8px;
-            border-bottom: 2px solid #d1fae5;
+            color: #666;
+            text-align: right;
+            margin-bottom: 12px;
+            padding-bottom: 4px;
+            border-bottom: 2px dashed #ddd;
+        }
+        
+        .meal-subtitle {
+            font-size: 14px;
+            font-weight: 600;
+            color: #4CAF50;
+            text-align: right;
+            margin-bottom: 8px;
+        }
+        
+        .meal-options {
+            margin-right: 20px;
         }
         
         .meal-option {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 15px;
-        }
-        
-        .option-title {
-            font-size: 16px;
-            font-weight: 600;
-            color: #1f2937;
-            margin-bottom: 10px;
-        }
-        
-        .option-type {
-            display: inline-block;
-            background: #059669;
-            color: white;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-        
-        .option-type.alternative {
-            background: #2563eb;
-        }
-        
-        .nutrition-info {
-            display: flex;
-            gap: 15px;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
-        }
-        
-        .nutrition-item {
+            margin-bottom: 6px;
             font-size: 14px;
-            color: #6b7280;
+            line-height: 1.4;
         }
         
-        .nutrition-item strong {
-            color: #1f2937;
+        .option-number {
+            font-weight: 600;
+            color: #4CAF50;
+            margin-left: 8px;
         }
         
-        .ingredients-list {
-            list-style: none;
+        .option-text {
+            color: #333;
         }
         
-        .ingredients-list li {
-            padding: 8px 0;
-            border-bottom: 1px solid #f1f5f9;
-            font-size: 14px;
+        .highlighted {
+            text-decoration: underline;
+            text-decoration-color: #ff4444;
+            text-decoration-thickness: 2px;
         }
         
-        .ingredients-list li:last-child {
-            border-bottom: none;
-        }
-        
-        .ingredient-item {
-            font-weight: 500;
-            color: #1f2937;
-        }
-        
-        .ingredient-details {
-            color: #6b7280;
-            font-size: 13px;
-            margin-top: 2px;
+        .bold-note {
+            font-weight: 700;
+            color: #333;
         }
         
         .footer {
-            text-align: center;
-            margin-top: 40px;
-            padding-top: 20px;
-            border-top: 1px solid #e5e7eb;
-            color: #6b7280;
-            font-size: 12px;
+            background: #e8f5e8;
+            padding: 15px;
+            text-align: right;
+        }
+        
+        .contact-info {
+            color: white;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+        
+        .contact-info div {
+            margin-bottom: 5px;
         }
         
         @media print {
-            body {
-                padding: 0;
-                max-width: none;
+            /* Disable browser headers and footers */
+            @page {
                 margin: 0;
+                size: A4;
+            }
+            
+            body {
                 font-size: 12px;
+                margin: 0;
+                padding: 0;
             }
             
             .header {
-                margin-bottom: 20px;
-                padding-bottom: 15px;
+                padding: 20px;
             }
             
-            .header h1 {
-                font-size: 24px;
+            .logo {
+                width: 50px;
+                height: 50px;
+                font-size: 20px;
+                margin-bottom: 15px;
+            }
+            
+            .main-title {
+                font-size: 28px;
                 margin-bottom: 8px;
             }
             
-            .header p {
-                font-size: 12px;
+            .user-name {
+                font-size: 20px;
+                margin-bottom: 8px;
             }
             
-            .totals-section {
-                margin-bottom: 20px;
-                padding: 15px;
-            }
-            
-            .totals-section h3 {
+            .date {
                 font-size: 16px;
-                margin-bottom: 12px;
+                margin-bottom: 8px;
             }
             
-            .macro-value {
-                font-size: 18px;
-            }
-            
-            .macro-label {
-                font-size: 10px;
-            }
-            
-            .meal-section {
-                page-break-inside: avoid;
-                margin-bottom: 20px;
+            .content {
+                padding: 20px;
             }
             
             .meal-title {
                 font-size: 18px;
                 margin-bottom: 12px;
-                padding-bottom: 6px;
             }
             
-            .meal-option {
-                page-break-inside: avoid;
-                margin-bottom: 12px;
-                padding: 15px;
-            }
-            
-            .option-title {
+            .meal-subtitle {
                 font-size: 14px;
                 margin-bottom: 8px;
             }
             
-            .option-type {
-                font-size: 10px;
-                padding: 3px 10px;
-                margin-bottom: 8px;
-            }
-            
-            .nutrition-info {
-                gap: 12px;
-                margin-bottom: 12px;
-            }
-            
-            .nutrition-item {
-                font-size: 12px;
-            }
-            
-            .ingredients-list li {
-                padding: 6px 0;
-                font-size: 12px;
-            }
-            
-            .ingredient-item {
-                font-size: 12px;
-            }
-            
-            .ingredient-details {
-                font-size: 11px;
+            .meal-option {
+                font-size: 14px;
+                margin-bottom: 6px;
             }
             
             .footer {
-                margin-top: 30px;
-                padding-top: 15px;
-                font-size: 10px;
+                padding: 15px;
             }
             
-            /* Force page breaks at logical points */
-            .meal-section:nth-child(3n) {
-                page-break-before: auto;
+            .contact-info {
+                font-size: 12px;
             }
             
-            /* Ensure headers don't break */
-            .meal-title {
-                page-break-after: avoid;
-            }
-            
-            /* Keep nutrition info with meal titles */
-            .nutrition-info {
-                page-break-inside: avoid;
-            }
-            
-            /* Keep ingredients with their meal options */
-            .ingredients-list {
+            /* Keep meal sections together but allow natural flow */
+            .meal-section {
                 page-break-inside: avoid;
             }
         }
@@ -1261,146 +1339,118 @@ const MenuLoad = () => {
             text-align: right;
         }
         
-        [dir="rtl"] .macros-grid {
-            direction: rtl;
+        [dir="rtl"] .meal-options {
+            margin-right: 0;
+            margin-left: 20px;
         }
         
-        [dir="rtl"] .nutrition-info {
-            direction: rtl;
-        }
-        
-        [dir="rtl"] .header {
-            text-align: center;
-        }
-        
-        [dir="rtl"] .footer {
-            text-align: center;
+        [dir="rtl"] .option-number {
+            margin-left: 0;
+            margin-right: 8px;
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>BetterChoice - Meal Plan</h1>
-        <p>Personalized Nutrition Menu • Generated on ${today}</p>
-    </div>
-    
-    <div class="totals-section">
-        <h3>Daily Nutritional Summary</h3>
-        <div class="macros-grid">
-            <div class="macro-item">
-                <div class="macro-value calories">${totals.calories || 0}</div>
-                <div class="macro-label">Calories</div>
+    <div class="page">
+        <div class="header">
+            <div class="logo">BC</div>
+            <div class="main-title">תפריט אישי</div>
+            <div class="user-name">${userName}</div>
+            <div class="date">${hebrewDate}</div>
             </div>
-            <div class="macro-item">
-                <div class="macro-value protein">${totals.protein || 0}g</div>
-                <div class="macro-label">Protein</div>
-            </div>
-            <div class="macro-item">
-                <div class="macro-value carbs">${totals.carbs || 0}g</div>
-                <div class="macro-label">Carbs</div>
-            </div>
-            <div class="macro-item">
-                <div class="macro-value fat">${totals.fat || 0}g</div>
-                <div class="macro-label">Fat</div>
-            </div>
-        </div>
-    </div>
-    
-    ${menu.meals ? menu.meals.map((meal, index) => `
-        <div class="meal-section">
-            <h2 class="meal-title">${meal.meal || `Meal ${index + 1}`}</h2>
-            
-            ${meal.main ? `
-                <div class="meal-option">
-                    <div class="option-type">Main Option</div>
-                    <div class="option-title">${meal.main.meal_title || 'Main Meal'}</div>
-                    ${meal.main.nutrition ? `
-                        <div class="nutrition-info">
-                            <span class="nutrition-item"><strong>${meal.main.nutrition.calories || 0}</strong> kcal</span>
-                            <span class="nutrition-item"><strong>${meal.main.nutrition.protein || 0}g</strong> protein</span>
-                            <span class="nutrition-item"><strong>${meal.main.nutrition.carbs || 0}g</strong> carbs</span>
-                            <span class="nutrition-item"><strong>${meal.main.nutrition.fat || 0}g</strong> fat</span>
+        
+        <div class="content">
+            ${menu.meals ? menu.meals.map((meal, index) => {
+                // Get meal name in Hebrew or English
+                const mealName = meal.meal || `Meal ${index + 1}`;
+                const isSnack = mealName.toLowerCase().includes('snack') || mealName.toLowerCase().includes('ביניים');
+                
+                return `
+                    <div class="meal-section">
+                        <h2 class="meal-title">${mealName}</h2>
+                        ${isSnack ? '<div class="meal-subtitle">לבחירתך מתי</div>' : ''}
+                        
+                        <div class="meal-options">
+                            ${(() => {
+                                let optionNumber = 1;
+                                let options = [];
+                                
+                                // Add main meal
+                                if (meal.main && meal.main.ingredients && meal.main.ingredients.length > 0) {
+                                    const mainIngredients = meal.main.ingredients.map(ing => {
+                                        let text = ing.item || 'Ingredient';
+                                        // Highlight specific words (brands, types, etc.)
+                                        text = text.replace(/\b(וגן|קוביה|בישבת|טורטיות|סולוג|מולך|אלשבע|בולים)\b/g, '<span class="highlighted">$1</span>');
+                                        
+                                        // Add household measure if available
+                                        if (ing.household_measure) {
+                                            text += ` (${ing.household_measure})`;
+                                        }
+                                        
+                                        return text;
+                                    }).join(', ');
+                                    options.push(`<div class="meal-option"><span class="option-number">${optionNumber}.</span><span class="option-text">${mainIngredients}</span></div>`);
+                                    optionNumber++;
+                                }
+                                
+                                // Add alternative meal
+                                if (meal.alternative && meal.alternative.ingredients && meal.alternative.ingredients.length > 0) {
+                                    const altIngredients = meal.alternative.ingredients.map(ing => {
+                                        let text = ing.item || 'Ingredient';
+                                        text = text.replace(/\b(וגן|קוביה|בישבת|טורטיות|סולוג|מולך|אלשבע|בולים)\b/g, '<span class="highlighted">$1</span>');
+                                        
+                                        // Add household measure if available
+                                        if (ing.household_measure) {
+                                            text += ` (${ing.household_measure})`;
+                                        }
+                                        
+                                        return text;
+                                    }).join(', ');
+                                    options.push(`<div class="meal-option"><span class="option-number">${optionNumber}.</span><span class="option-text">${altIngredients}</span></div>`);
+                                    optionNumber++;
+                                }
+                                
+                                // Add additional alternatives
+                                if (meal.alternatives && meal.alternatives.length > 0) {
+                                    meal.alternatives.forEach(alt => {
+                                        if (alt.ingredients && alt.ingredients.length > 0) {
+                                            const altIngredients = alt.ingredients.map(ing => {
+                                                let text = ing.item || 'Ingredient';
+                                                text = text.replace(/\b(וגן|קוביה|בישבת|טורטיות|סולוג|מולך|אלשבע|בולים)\b/g, '<span class="highlighted">$1</span>');
+                                                
+                                                // Add household measure if available
+                                                if (ing.household_measure) {
+                                                    text += ` (${ing.household_measure})`;
+                                                }
+                                                
+                                                return text;
+                                            }).join(', ');
+                                            options.push(`<div class="meal-option"><span class="option-number">${optionNumber}.</span><span class="option-text">${altIngredients}</span></div>`);
+                                            optionNumber++;
+                                        }
+                                    });
+                                }
+                                
+                                // Add special note for lunch if it exists
+                                if (mealName.toLowerCase().includes('lunch') || mealName.toLowerCase().includes('צהרים')) {
+                                    options.push(`<div class="meal-option"><span class="bold-note">**אם רוצה אז להוסיף לך חלבון וירקות**</span></div>`);
+                                }
+                                
+                                return options.join('');
+                            })()}
                         </div>
-                    ` : ''}
-                    ${meal.main.ingredients && meal.main.ingredients.length > 0 ? `
-                        <ul class="ingredients-list">
-                            ${meal.main.ingredients.map(ingredient => `
-                                <li>
-                                    <div class="ingredient-item">${ingredient.item || 'Ingredient'}</div>
-                                    ${ingredient.quantity || ingredient.unit || ingredient.household_measure ? `
-                                        <div class="ingredient-details">
-                                            ${ingredient.quantity ? `${ingredient.quantity} ` : ''}${ingredient.unit ? `${ingredient.unit} ` : ''}${ingredient.household_measure ? `(${ingredient.household_measure})` : ''}
                                         </div>
-                                    ` : ''}
-                                </li>
-                            `).join('')}
-                        </ul>
-                    ` : ''}
+                `;
+            }).join('') : ''}
                 </div>
-            ` : ''}
-            
-            ${meal.alternative ? `
-                <div class="meal-option">
-                    <div class="option-type alternative">Alternative Option</div>
-                    <div class="option-title">${meal.alternative.meal_title || 'Alternative Meal'}</div>
-                    ${meal.alternative.nutrition ? `
-                        <div class="nutrition-info">
-                            <span class="nutrition-item"><strong>${meal.alternative.nutrition.calories || 0}</strong> kcal</span>
-                            <span class="nutrition-item"><strong>${meal.alternative.nutrition.protein || 0}g</strong> protein</span>
-                            <span class="nutrition-item"><strong>${meal.alternative.nutrition.carbs || 0}g</strong> carbs</span>
-                            <span class="nutrition-item"><strong>${meal.alternative.nutrition.fat || 0}g</strong> fat</span>
-                        </div>
-                    ` : ''}
-                    ${meal.alternative.ingredients && meal.alternative.ingredients.length > 0 ? `
-                        <ul class="ingredients-list">
-                            ${meal.alternative.ingredients.map(ingredient => `
-                                <li>
-                                    <div class="ingredient-item">${ingredient.item || 'Ingredient'}</div>
-                                    ${ingredient.quantity || ingredient.unit || ingredient.household_measure ? `
-                                        <div class="ingredient-details">
-                                            ${ingredient.quantity ? `${ingredient.quantity} ` : ''}${ingredient.unit ? `${ingredient.unit} ` : ''}${ingredient.household_measure ? `(${ingredient.household_measure})` : ''}
-                                        </div>
-                                    ` : ''}
-                                </li>
-                            `).join('')}
-                        </ul>
-                    ` : ''}
-                </div>
-            ` : ''}
-            
-            ${meal.alternatives && meal.alternatives.length > 0 ? meal.alternatives.map((alt, altIndex) => `
-                <div class="meal-option">
-                    <div class="option-type alternative">Additional Alternative ${altIndex + 2}</div>
-                    <div class="option-title">${alt.meal_title || 'Additional Alternative'}</div>
-                    ${alt.nutrition ? `
-                        <div class="nutrition-info">
-                            <span class="nutrition-item"><strong>${alt.nutrition.calories || 0}</strong> kcal</span>
-                            <span class="nutrition-item"><strong>${alt.nutrition.protein || 0}g</strong> protein</span>
-                            <span class="nutrition-item"><strong>${alt.nutrition.carbs || 0}g</strong> carbs</span>
-                            <span class="nutrition-item"><strong>${alt.nutrition.fat || 0}g</strong> fat</span>
-                        </div>
-                    ` : ''}
-                    ${alt.ingredients && alt.ingredients.length > 0 ? `
-                        <ul class="ingredients-list">
-                            ${alt.ingredients.map(ingredient => `
-                                <li>
-                                    <div class="ingredient-item">${ingredient.item || 'Ingredient'}</div>
-                                    ${ingredient.quantity || ingredient.unit || ingredient.household_measure ? `
-                                        <div class="ingredient-details">
-                                            ${ingredient.quantity ? `${ingredient.quantity} ` : ''}${ingredient.unit ? `${ingredient.unit} ` : ''}${ingredient.household_measure ? `(${ingredient.household_measure})` : ''}
-                                        </div>
-                                    ` : ''}
-                                </li>
-                            `).join('')}
-                        </ul>
-                    ` : ''}
-                </div>
-            `).join('') : ''}
-        </div>
-    `).join('') : ''}
     
     <div class="footer">
-        <p>© BetterChoice 2025 • Personalized Nutrition Planning</p>
+            <div class="contact-info">
+                <div>כתובת: משכית 10, הרצליה</div>
+                <div>לקביעת תור: 054-3066442</div>
+                <div>א"ל: galbecker106@gmail.com</div>
+            </div>
+        </div>
     </div>
 </body>
 </html>`;
@@ -1695,6 +1745,322 @@ const MenuLoad = () => {
           </Card>
         )}
 
+        {/* Nutrition Targets Display */}
+        {selectedMenu && selectedMenu.user_code && (
+          <Card className="border-blue-200 bg-blue-50/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-blue-800">
+                <span>🎯</span>
+                {translations.nutritionTargets || 'Client Nutritional Targets'}
+              </CardTitle>
+              <CardDescription className="text-blue-600">
+                {translations.fromDatabase ? `${translations.fromDatabase} ${selectedMenu.user_code}` : `from database ${selectedMenu.user_code}`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loadingUserTargets ? (
+                <div className="flex items-center gap-2 text-sm text-blue-600">
+                  <Loader className="animate-spin h-4 w-4" />
+                  {translations.loadingClientTargets || 'Loading client targets...'}
+                </div>
+              ) : userTargets ? (
+                <div className="space-y-4">
+                  {/* Target Macros */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200 text-center">
+                      <p className="text-sm text-blue-600 font-medium mb-2">{translations.calories || 'Calories'}</p>
+                      <p className="text-2xl font-bold text-blue-700">
+                        {userTargets.calories}
+                        <span className="text-sm font-normal text-blue-600 ml-1">{translations.calories || 'kcal'}</span>
+                      </p>
+                    </div>
+                    <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200 text-center">
+                      <p className="text-sm text-blue-600 font-medium mb-2">{translations.protein || 'Protein'}</p>
+                      <p className="text-2xl font-bold text-blue-700">
+                        {userTargets.macros.protein}
+                        <span className="text-sm font-normal text-blue-600 ml-1">g</span>
+                      </p>
+                    </div>
+                    <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200 text-center">
+                      <p className="text-sm text-blue-600 font-medium mb-2">{translations.fat || 'Fat'}</p>
+                      <p className="text-2xl font-bold text-blue-700">
+                        {userTargets.macros.fat}
+                        <span className="text-sm font-normal text-blue-600 ml-1">g</span>
+                      </p>
+                    </div>
+                    <div className="p-4 bg-white rounded-lg shadow-sm border border-blue-200 text-center">
+                      <p className="text-sm text-blue-600 font-medium mb-2">{translations.carbs || 'Carbs'}</p>
+                      <p className="text-2xl font-bold text-blue-700">
+                        {userTargets.macros.carbs}
+                        <span className="text-sm font-normal text-blue-600 ml-1">g</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Client Information */}
+                  {(userTargets.age || userTargets.gender || userTargets.weight_kg || userTargets.height_cm) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {userTargets.age && (
+                        <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
+                          <p className="text-sm text-gray-600 font-medium mb-1">{translations.age || 'Age'}</p>
+                          <p className="text-lg font-semibold text-gray-800">{userTargets.age} {translations.yearsOld || 'years'}</p>
+                        </div>
+                      )}
+                      {userTargets.gender && (
+                        <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
+                          <p className="text-sm text-gray-600 font-medium mb-1">{translations.gender || 'Gender'}</p>
+                          <p className="text-lg font-semibold text-gray-800">{userTargets.gender}</p>
+                        </div>
+                      )}
+                      {userTargets.weight_kg && (
+                        <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
+                          <p className="text-sm text-gray-600 font-medium mb-1">{translations.weight || 'Weight'}</p>
+                          <p className="text-lg font-semibold text-gray-800">{userTargets.weight_kg} kg</p>
+                        </div>
+                      )}
+                      {userTargets.height_cm && (
+                        <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
+                          <p className="text-sm text-gray-600 font-medium mb-1">{translations.height || 'Height'}</p>
+                          <p className="text-lg font-semibold text-gray-800">{userTargets.height_cm} cm</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Dietary Restrictions */}
+                  {(userTargets.allergies.length > 0 || userTargets.limitations.length > 0) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {userTargets.allergies.length > 0 && (
+                        <div className="p-3 bg-white rounded-lg shadow-sm border border-red-200">
+                          <p className="text-sm text-red-700 font-medium mb-2 flex items-center gap-2">
+                            <span>⚠️</span>
+                            {translations.dietaryAllergies || 'Food Allergies'}
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {userTargets.allergies.map((allergy, idx) => (
+                              <Badge key={idx} variant="outline" className="bg-red-50 border-red-200 text-red-700 text-xs">
+                                {allergy}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {userTargets.limitations.length > 0 && (
+                        <div className="p-3 bg-white rounded-lg shadow-sm border border-orange-200">
+                          <p className="text-sm text-orange-700 font-medium mb-2 flex items-center gap-2">
+                            <span>🚫</span>
+                            {translations.dietaryRestrictions || 'Dietary Restrictions'}
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {userTargets.limitations.map((limitation, idx) => (
+                              <Badge key={idx} variant="outline" className="bg-orange-50 border-orange-200 text-orange-700 text-xs">
+                                {limitation}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Client Preferences */}
+                  {userTargets.client_preference && userTargets.client_preference.length > 0 && (
+                    <div className="p-3 bg-white rounded-lg shadow-sm border border-green-200">
+                      <p className="text-sm text-green-700 font-medium mb-2 flex items-center gap-2">
+                        <span>❤️</span>
+                        {translations.clientPreferences || 'Client Preferences'}
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        {userTargets.client_preference.map((pref, idx) => (
+                          <Badge key={idx} variant="outline" className="bg-green-50 border-green-200 text-green-700 text-xs">
+                            {pref}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Target vs Generated Menu Comparison */}
+                  {editedMenu && editedMenu.totals && (
+                    <div className="space-y-4">
+                      <h4 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                        <span>📊</span>
+                        {translations.targetVsGenerated || 'Target vs Generated Menu Comparison'}
+                      </h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {/* Calories Comparison */}
+                        <div className="p-4 bg-white rounded-lg border border-blue-200">
+                          <p className="text-sm text-gray-600 font-medium mb-2">{translations.calories || 'Calories'}</p>
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-blue-600">{translations.target || 'Target'}:</span>
+                              <span className="font-bold text-blue-700">{userTargets.calories}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-green-600">{translations.generated || 'Generated'}:</span>
+                              <span className="font-bold text-green-700">{editedMenu.totals.calories}</span>
+                            </div>
+                            <div className="flex justify-between items-center pt-1 border-t border-gray-100">
+                              <span className="text-xs text-gray-500">{translations.difference || 'Difference'}:</span>
+                              <span className={`text-sm font-medium ${Math.abs(editedMenu.totals.calories - userTargets.calories) <= userTargets.calories * 0.05
+                                  ? 'text-green-600'
+                                  : 'text-red-600'
+                                }`}>
+                                {`${editedMenu.totals.calories - userTargets.calories > 0 ? '+' : ''}${((editedMenu.totals.calories - userTargets.calories) / userTargets.calories * 100)
+                                    .toFixed(1)
+                                  }%`}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Protein Comparison */}
+                        <div className="p-4 bg-white rounded-lg border border-blue-200">
+                          <p className="text-sm text-gray-600 font-medium mb-2">{translations.protein || 'Protein'} (g)</p>
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center">
+                            <span className="text-sm text-blue-600">{translations.target || 'Target'}:</span>
+                            <span className="font-bold text-blue-700">{userTargets.macros.protein}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                            <span className="text-sm text-green-600">{translations.generated || 'Generated'}:</span>
+                            <span className="font-bold text-green-700">{editedMenu.totals.protein}</span>
+                            </div>
+                            <div className="flex justify-between items-center pt-1 border-t border-gray-100">
+                            <span className="text-xs text-gray-500">{translations.difference || 'Difference'}:</span>
+                            <span className={`text-sm font-medium ${Math.abs(editedMenu.totals.protein - userTargets.macros.protein) <= userTargets.macros.protein * 0.05
+                                  ? 'text-green-600'
+                                  : 'text-red-600'
+                                }`}>
+                                {`${editedMenu.totals.protein - userTargets.macros.protein > 0 ? '+' : ''}${((editedMenu.totals.protein - userTargets.macros.protein)
+                                    / userTargets.macros.protein
+                                    * 100
+                                  ).toFixed(1)
+                                  }%`}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Fat Comparison */}
+                        <div className="p-4 bg-white rounded-lg border border-blue-200">
+                          <p className="text-sm text-gray-600 font-medium mb-2">{translations.fat || 'Fat'} (g)</p>
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-blue-600">{translations.target || 'Target'}:</span>
+                              <span className="font-bold text-blue-700">{userTargets.macros.fat}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-green-600">{translations.generated || 'Generated'}:</span>
+                              <span className="font-bold text-green-700">{editedMenu.totals.fat}</span>
+                            </div>
+                            <div className="flex justify-between items-center pt-1 border-t border-gray-100">
+                              <span className="text-xs text-gray-500">{translations.difference || 'Difference'}:</span>
+                              <span className={`text-sm font-medium ${Math.abs(editedMenu.totals.fat - userTargets.macros.fat) <= userTargets.macros.fat * 0.05
+                                  ? 'text-green-600'
+                                  : 'text-red-600'
+                                }`}>
+                                {`${editedMenu.totals.fat - userTargets.macros.fat > 0 ? '+' : ''}${((editedMenu.totals.fat - userTargets.macros.fat)
+                                    / userTargets.macros.fat
+                                    * 100
+                                  ).toFixed(1)
+                                  }%`}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Carbs Comparison */}
+                        <div className="p-4 bg-white rounded-lg border border-blue-200">
+                          <p className="text-sm text-gray-600 font-medium mb-2">{translations.carbs || 'Carbs'} (g)</p>
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-blue-600">{translations.target || 'Target'}:</span>
+                              <span className="font-bold text-blue-700">{userTargets.macros.carbs}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-green-600">{translations.generated || 'Generated'}:</span>
+                              <span className="font-bold text-green-700">{editedMenu.totals.carbs}</span>
+                            </div>
+                            <div className="flex justify-between items-center pt-1 border-t border-gray-100">
+                              <span className="text-xs text-gray-500">{translations.difference || 'Difference'}:</span>
+                              <span className={`text-sm font-medium ${Math.abs(editedMenu.totals.carbs - userTargets.macros.carbs) <= userTargets.macros.carbs * 0.05
+                                  ? 'text-green-600'
+                                  : 'text-red-600'
+                                }`}>
+                                {`${editedMenu.totals.carbs - userTargets.macros.carbs > 0 ? '+' : ''}${((editedMenu.totals.carbs - userTargets.macros.carbs)
+                                    / userTargets.macros.carbs
+                                    * 100
+                                  ).toFixed(1)
+                                  }%`}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Overall Accuracy Indicator */}
+                      <div className="mt-6 p-4 rounded-lg bg-gradient-to-r from-blue-50 to-green-50 border border-blue-200">
+                        <div className="flex items-center justify-between">
+                          <span className="text-base font-medium text-gray-700">{translations.menuAccuracy || 'Menu Accuracy'}:</span>
+                          <div className="flex items-center gap-3">
+                            {(() => {
+                              // Calculate percentage differences for each metric
+                              const caloriesDiff = Math.abs((editedMenu.totals.calories - userTargets.calories) / userTargets.calories * 100);
+                              const proteinDiff = Math.abs((editedMenu.totals.protein - userTargets.macros.protein) / userTargets.macros.protein * 100);
+                              const fatDiff = Math.abs((editedMenu.totals.fat - userTargets.macros.fat) / userTargets.macros.fat * 100);
+                              const carbsDiff = Math.abs((editedMenu.totals.carbs - userTargets.macros.carbs) / userTargets.macros.carbs * 100);
+
+                              // Calculate accuracy based on how close each value is to target
+                              // Perfect accuracy (100%) when all differences are 0%
+                              // 0% accuracy when any difference is 50% or more
+                              const maxDiff = Math.max(caloriesDiff, proteinDiff, fatDiff, carbsDiff);
+                              const avgDiff = (caloriesDiff + proteinDiff + fatDiff + carbsDiff) / 4;
+                              
+                              // Calculate accuracy: 100% - (average difference * 2) to make it more sensitive
+                              // Cap at 100% and floor at 0%
+                              const accuracy = Math.max(0, Math.min(100, 100 - (avgDiff * 1.5)));
+
+                              // Count how many are within acceptable ranges
+                              const within5Percent = [caloriesDiff <= 5, proteinDiff <= 5, fatDiff <= 5, carbsDiff <= 5].filter(Boolean).length;
+                              const within10Percent = [caloriesDiff <= 10, proteinDiff <= 10, fatDiff <= 10, carbsDiff <= 10].filter(Boolean).length;
+
+                              return (
+                                <>
+                                  <div className={`px-4 py-2 rounded-full text-base font-medium ${accuracy >= 80 ? 'bg-green-100 text-green-700 border border-green-200' :
+                                      accuracy >= 60 ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
+                                        'bg-red-100 text-red-700 border border-red-200'
+                                    }`}>
+                                    {Math.round(accuracy)}% {translations.accurate || 'Accurate'}
+                                  </div>
+                                  <span className="text-sm text-gray-500">
+                                    ({within5Percent}/4 {translations.within5Percent || 'within ±5%'}, {within10Percent}/4 within ±10%)
+                                  </span>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-blue-600">{translations.noTargetDataFound || 'No target data found for this client.'}</p>
+                  {error && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <p className="text-red-700 text-sm font-medium">Error Details:</p>
+                      <p className="text-red-600 text-sm">{error}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         <div className="space-y-6">
           {editedMenu.meals.map((meal, mealIdx) => (
             <Card key={mealIdx} className="overflow-hidden">
@@ -1808,19 +2174,19 @@ const MenuLoad = () => {
       {expiredCheckResult && (
         <Alert variant={expiredCheckResult.found > 0 ? "default" : "secondary"}>
           <AlertTitle>
-            {expiredCheckResult.found > 0 ? 'Expired Menus Found' : 'No Expired Menus'}
+            {expiredCheckResult.found > 0 ? 'Expired Meal plans Found' : 'No Expired Meal plans'}
           </AlertTitle>
           <AlertDescription>
             {expiredCheckResult.found > 0 ? (
               <div className="space-y-2">
-                <p>Found {expiredCheckResult.found} expired menu(s).</p>
-                <p>Successfully updated {expiredCheckResult.updated} menu(s) to expired status.</p>
+                <p>Found {expiredCheckResult.found} expired Meal plan(s).</p>
+                <p>Successfully updated {expiredCheckResult.updated} Meal plan(s) to expired status.</p>
                 {expiredCheckResult.errors > 0 && (
-                  <p className="text-red-600">Failed to update {expiredCheckResult.errors} menu(s).</p>
+                  <p className="text-red-600">Failed to update {expiredCheckResult.errors} Meal plan(s).</p>
                 )}
                 {expiredCheckResult.menus.length > 0 && (
                   <div>
-                    <p className="font-medium">Updated menus:</p>
+                    <p className="font-medium">Updated Meal plans:</p>
                     <ul className="list-disc list-inside text-sm">
                       {expiredCheckResult.menus.map((name, idx) => (
                         <li key={idx}>{name}</li>
@@ -1830,7 +2196,7 @@ const MenuLoad = () => {
                 )}
               </div>
             ) : (
-              <p>No expired menus found. All active menus are still within their active period.</p>
+              <p>No expired Meal Plans found. All active menus are still within their active period.</p>
             )}
           </AlertDescription>
         </Alert>

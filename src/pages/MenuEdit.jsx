@@ -97,7 +97,7 @@ export default function MenuEdit() {
               recommendations: menu.recommendations
             });
           } catch (updateError) {
-            console.error("Error updating menu code:", updateError);
+            console.error("Error updating meal plan code:", updateError);
           }
         }
         
@@ -360,7 +360,7 @@ export default function MenuEdit() {
           <AlertDialogHeader>
             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete this menu plan. This action cannot be undone.
+              This will permanently delete this meal plan. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

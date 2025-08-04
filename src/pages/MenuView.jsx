@@ -160,7 +160,7 @@ ${key}: ${value}`).join('\n')}
           </Button>
           <div>
                     <h1 className="text-2xl font-bold">{menu.meal_plan_name}</h1>
-        <p className="text-sm text-gray-500">Menu Code: {menu.menu_code}</p>
+        <p className="text-sm text-gray-500">Meal Plan Code: {menu.menu_code}</p>
           </div>
         </div>
         

@@ -115,7 +115,8 @@ export async function getIngredientSuggestions(query, limit = 10, offset = 0) {
           Energy,
           Protein,
           Total_lipid__fat_,
-          Carbohydrate__by_difference
+          Carbohydrate__by_difference,
+          gtinUpc
         FROM foods_storage WITH (NOLOCK)
         WHERE english_name LIKE N'%' + @search + '%'
            OR hebrew_name LIKE N'%' + @search + '%'
@@ -142,7 +143,8 @@ export async function getIngredientSuggestions(query, limit = 10, offset = 0) {
       Energy: row.Energy,
       Protein: row.Protein,
       Total_lipid__fat_: row.Total_lipid__fat_,
-      Carbohydrate: row.Carbohydrate__by_difference
+      Carbohydrate: row.Carbohydrate__by_difference,
+      gtinUpc: row.gtinUpc
     }));
   } catch (err) {
     const endTime = Date.now();
@@ -174,7 +176,8 @@ export async function getIngredientNutrition(englishName) {
           Total_lipid__fat_,
           Carbohydrate__by_difference,
           english_name,
-          hebrew_name
+          hebrew_name,
+          gtinUpc
         FROM foods_storage WITH (NOLOCK)
         WHERE english_name = @name
       `);
@@ -189,7 +192,8 @@ export async function getIngredientNutrition(englishName) {
         Total_lipid__fat_: 0,
         Carbohydrate: 0,
         english_name: englishName,
-        hebrew_name: ''
+        hebrew_name: '',
+        gtinUpc: null
       };
     }
 

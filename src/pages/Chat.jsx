@@ -11,8 +11,9 @@ import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Image as ImageIcon, Send, Loader2, MessageSquare, InfoIcon, RefreshCw, Users } from 'lucide-react';
+import { Image as ImageIcon, Send, Loader2, MessageSquare, InfoIcon, RefreshCw, Users, X } from 'lucide-react';
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 export default function Chat() {
   const { language, translations } = useLanguage();
@@ -33,6 +34,8 @@ export default function Chat() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [conversationId, setConversationId] = useState(null);
   const [firstMessageId, setFirstMessageId] = useState(null); // for pagination
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  const [currentImageUrl, setCurrentImageUrl] = useState(null);
 
   const toBase64 = file =>
     new Promise(resolve => {
@@ -41,6 +44,17 @@ export default function Chat() {
       reader.onload = () => resolve(reader.result.split(',')[1]);
     });
 
+  // Function to handle image click and open modal
+  const handleImageClick = (imageUrl) => {
+    setCurrentImageUrl(imageUrl);
+    setIsImageModalOpen(true);
+  };
+
+  // Function to close image modal
+  const closeImageModal = () => {
+    setIsImageModalOpen(false);
+    setCurrentImageUrl(null);
+  };
 
 
   const handleRefresh = () => {
@@ -483,6 +497,69 @@ Your task is to respond to the user's message below, taking into account their s
     }
   };
 
+  // Function to extract image URLs from message content
+  const extractImageFromContent = (content) => {
+    if (!content) return { text: content, imageUrl: null };
+    
+    // Look for image URLs in the content
+    const imageUrlRegex = /https?:\/\/[^\s]+\.(jpg|jpeg|png|gif|webp)(\?[^\s]*)?/gi;
+    const matches = content.match(imageUrlRegex);
+    
+    if (matches && matches.length > 0) {
+      // Remove the image URL from the text content
+      const textWithoutImage = content.replace(imageUrlRegex, '').trim();
+      return { text: textWithoutImage, imageUrl: matches[0] };
+    }
+    
+    return { text: content, imageUrl: null };
+  };
+
+  // Function to render message content with images
+  const renderMessageContent = (msg) => {
+    const { text, imageUrl } = extractImageFromContent(msg.content);
+    const hasDirectImage = msg.image_url;
+    const hasContentImage = imageUrl;
+    
+    return (
+      <>
+        {/* Show direct image first (from image upload) */}
+        {hasDirectImage && (
+          <div className="mb-3">
+            <img
+              src={hasDirectImage}
+              alt={translations.uploadedFood}
+              className="rounded-lg max-w-full max-h-64 object-cover shadow-sm border border-gray-200 cursor-pointer hover:opacity-90 transition-opacity duration-200"
+              onClick={() => handleImageClick(hasDirectImage)}
+              onError={(e) => {
+                e.target.style.display = 'none';
+                console.error('Failed to load direct image:', hasDirectImage);
+              }}
+            />
+          </div>
+        )}
+        
+        {/* Show image from content */}
+        {hasContentImage && !hasDirectImage && (
+          <div className="mb-3">
+            <img
+              src={hasContentImage}
+              alt="Message image"
+              className="rounded-lg max-w-full max-h-64 object-cover shadow-sm border border-gray-200 cursor-pointer hover:opacity-90 transition-opacity duration-200"
+              onClick={() => handleImageClick(hasContentImage)}
+              onError={(e) => {
+                e.target.style.display = 'none';
+                console.error('Failed to load content image:', hasContentImage);
+              }}
+            />
+          </div>
+        )}
+        
+        {/* Show text content */}
+        <div className="whitespace-pre-wrap">{text}</div>
+      </>
+    );
+  };
+
   useEffect(() => {
     // Only scroll to bottom if not loading more (i.e., after initial load or sending)
     if (!isLoadingMore && messages.length > 0) {
@@ -633,14 +710,7 @@ Your task is to respond to the user's message below, taking into account their s
                               : 'bg-gray-100 text-gray-900'
                             }`}
                         >
-                          {msg.image_url && (
-                            <img
-                              src={msg.image_url}
-                              alt={translations.uploadedFood}
-                              className="rounded-lg mb-2 max-w-full"
-                            />
-                          )}
-                          <div className="whitespace-pre-wrap">{msg.content}</div>
+                          {renderMessageContent(msg)}
                         </div>
                       </div>
                     ))
@@ -714,6 +784,40 @@ Your task is to respond to the user's message below, taking into account their s
             </CardContent>
           </Card>
         )}
+
+        {/* Image Modal */}
+        <Dialog open={isImageModalOpen} onOpenChange={setIsImageModalOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] p-0">
+            <DialogHeader className="p-4 pb-0">
+              <div className="flex items-center justify-between">
+                <DialogTitle>{translations.imageViewer || 'Image Viewer'}</DialogTitle>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={closeImageModal}
+                  className="h-8 w-8"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </DialogHeader>
+            <div className="p-4 pt-0">
+              {currentImageUrl && (
+                <div className="flex justify-center">
+                  <img
+                    src={currentImageUrl}
+                    alt="Full size image"
+                    className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-lg"
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      console.error('Failed to load modal image:', currentImageUrl);
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

@@ -204,7 +204,8 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
       protein: currentIngredient?.protein || 0,
       fat: currentIngredient?.fat || 0,
       carbs: currentIngredient?.carbs || 0,
-      'brand of pruduct': currentIngredient?.['brand of pruduct'] || ''
+      'brand of pruduct': currentIngredient?.['brand of pruduct'] || '',
+      UPC: currentIngredient?.UPC || currentIngredient?.gtinUpc || null
     };
     
     onChange(updatedValues, mealIndex, optionIndex, ingredientIndex);
@@ -238,6 +239,8 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
       
       const nutritionData = await response.json();
       console.log('📊 Nutrition data received:', nutritionData);
+      console.log('🔍 Suggestion data:', suggestion);
+      console.log('🔍 UPC values - suggestion.gtinUpc:', suggestion.gtinUpc, 'nutritionData.gtinUpc:', nutritionData.gtinUpc);
 
       const updatedValues = {
         item: suggestion.hebrew || suggestion.english,
@@ -246,10 +249,12 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
         protein: nutritionData.Protein || 0,
         fat: nutritionData.Total_lipid__fat_ || 0,
         carbs: nutritionData.Carbohydrate || 0,
-        'brand of pruduct': nutritionData.brand || ''
+        'brand of pruduct': nutritionData.brand || '',
+        UPC: suggestion.gtinUpc || nutritionData.gtinUpc || null
       };
       
       console.log('✅ Updated values:', updatedValues);
+      console.log('🔍 Final UPC value:', updatedValues.UPC);
 
       // First update the ingredient with the basic data
       onChange(updatedValues, mealIndex, optionIndex, ingredientIndex);
@@ -285,7 +290,14 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
         dir="rtl"
         title="Click to edit ingredient"
       >
-        {value}
+        <div className="flex items-center gap-1">
+          <span>{value}</span>
+          {currentIngredient && currentIngredient["brand of pruduct"] && (
+            <span className="text-xs text-gray-500 font-medium">
+              ({currentIngredient["brand of pruduct"]})
+            </span>
+          )}
+        </div>
       </div>
     );
   }
@@ -464,20 +476,33 @@ const IngredientPortionDialog = ({ isOpen, onClose, onConfirm, ingredient, trans
   useEffect(() => {
     if (isOpen && ingredient) {
       // Set default values
-      setGramAmount(ingredient.portionSI || '100');
+      setGramAmount(ingredient['portionSI(gram)'] || '');
       setHouseholdMeasure(ingredient.household_measure || '');
       
-      // Calculate adjusted nutrition based on default 100g serving
-      const baseAmount = 100;
-      const newAmount = parseFloat(ingredient.portionSI || 100);
-      const ratio = newAmount / baseAmount;
+      // Calculate adjusted nutrition based on current portion
+      const currentPortion = parseFloat(ingredient['portionSI(gram)'] || 0);
+      const newAmount = currentPortion;
       
-      setAdjustedNutrition({
-        calories: Math.round((ingredient.calories || 0) * ratio),
-        protein: Math.round((ingredient.protein || 0) * ratio),
-        fat: Math.round((ingredient.fat || 0) * ratio),
-        carbs: Math.round((ingredient.carbs || 0) * ratio),
-      });
+      if (currentPortion > 0) {
+        // Calculate nutrition per 100g from current values
+        const nutritionPer100g = {
+          calories: Math.round((ingredient.calories || 0) * 100 / currentPortion),
+          protein: Math.round((ingredient.protein || 0) * 100 / currentPortion),
+          fat: Math.round((ingredient.fat || 0) * 100 / currentPortion),
+          carbs: Math.round((ingredient.carbs || 0) * 100 / currentPortion),
+        };
+        
+        // Apply the ratio for the new amount
+        const ratio = newAmount / 100;
+        setAdjustedNutrition({
+          calories: Math.round(nutritionPer100g.calories * ratio),
+          protein: Math.round(nutritionPer100g.protein * ratio),
+          fat: Math.round(nutritionPer100g.fat * ratio),
+          carbs: Math.round(nutritionPer100g.carbs * ratio),
+        });
+      } else {
+        setAdjustedNutrition(null);
+      }
     }
   }, [isOpen, ingredient]);
 
@@ -486,17 +511,36 @@ const IngredientPortionDialog = ({ isOpen, onClose, onConfirm, ingredient, trans
     setGramAmount(newAmount);
     
     if (newAmount && ingredient) {
-      // Calculate adjusted nutrition based on 100g serving
-      const baseAmount = 100;
+      const currentPortion = parseFloat(ingredient['portionSI(gram)'] || 0);
       const newAmountNum = parseFloat(newAmount);
-      const ratio = newAmountNum / baseAmount;
       
-      setAdjustedNutrition({
-        calories: Math.round((ingredient.calories || 0) * ratio),
-        protein: Math.round((ingredient.protein || 0) * ratio),
-        fat: Math.round((ingredient.fat || 0) * ratio),
-        carbs: Math.round((ingredient.carbs || 0) * ratio),
-      });
+      if (currentPortion > 0) {
+        // Calculate nutrition per 100g from current values
+        const nutritionPer100g = {
+          calories: Math.round((ingredient.calories || 0) * 100 / currentPortion),
+          protein: Math.round((ingredient.protein || 0) * 100 / currentPortion),
+          fat: Math.round((ingredient.fat || 0) * 100 / currentPortion),
+          carbs: Math.round((ingredient.carbs || 0) * 100 / currentPortion),
+        };
+        
+        // Apply the ratio for the new amount
+        const ratio = newAmountNum / 100;
+        setAdjustedNutrition({
+          calories: Math.round(nutritionPer100g.calories * ratio),
+          protein: Math.round(nutritionPer100g.protein * ratio),
+          fat: Math.round(nutritionPer100g.fat * ratio),
+          carbs: Math.round(nutritionPer100g.carbs * ratio),
+        });
+      } else {
+        // If no current portion, treat existing values as per 100g
+        const ratio = newAmountNum / 100;
+        setAdjustedNutrition({
+          calories: Math.round((ingredient.calories || 0) * ratio),
+          protein: Math.round((ingredient.protein || 0) * ratio),
+          fat: Math.round((ingredient.fat || 0) * ratio),
+          carbs: Math.round((ingredient.carbs || 0) * ratio),
+        });
+      }
     } else {
       setAdjustedNutrition(null);
     }
@@ -516,7 +560,7 @@ const IngredientPortionDialog = ({ isOpen, onClose, onConfirm, ingredient, trans
     
     const updatedIngredient = {
       ...ingredient,
-      portionSI: gramAmountNum,
+      'portionSI(gram)': gramAmountNum,
       household_measure: householdMeasure.trim(),
       calories: adjustedNutrition?.calories || ingredient.calories,
       protein: adjustedNutrition?.protein || ingredient.protein,
@@ -1610,35 +1654,55 @@ const MenuCreate = () => {
   const fetchUserTargets = async (userCode) => {
     try {
       setLoadingUserTargets(true);
+      setError(null); // Clear any existing errors
       console.log('🎯 Fetching nutritional targets for user:', userCode);
 
       if (!userCode) {
         console.error('❌ No user code provided');
         setError('No user code provided');
-        return;
+        return null;
       }
 
+      // Test database connectivity first
+      console.log('🔍 Testing database connectivity...');
+      const { data: testData, error: testError } = await supabase
+        .from('chat_users')
+        .select('user_code')
+        .limit(1);
+      
+      console.log('🔍 Database connectivity test:', { testData, testError });
+      
+      if (testError) {
+        console.error('❌ Database connectivity issue:', testError);
+        setError('Database connection issue: ' + testError.message);
+        return null;
+      }
+
+      console.log('🔍 Querying database for user_code:', userCode);
       const { data, error } = await supabase
         .from('chat_users')
         .select('dailyTotalCalories, macros, region, food_allergies, food_limitations, age, gender, weight_kg, height_cm, client_preference')
         .eq('user_code', userCode)
         .single();
 
+      console.log('📊 Database response:', { data, error });
+
       if (error) {
         console.error('❌ Error fetching user targets:', error);
         if (error.code === 'PGRST116') {
           // No rows returned
+          console.error('❌ No user found with code:', userCode);
           setError(`No user found with code: ${userCode}. Please check if the user exists in the database.`);
         } else {
           setError('Failed to load user targets: ' + error.message);
         }
-        return;
+        return null;
       }
 
       if (!data) {
         console.error('❌ No data returned from database');
         setError('No data returned from database for user: ' + userCode);
-        return;
+        return null;
       }
 
       console.log('✅ Fetched user targets:', data);
@@ -1696,10 +1760,13 @@ const MenuCreate = () => {
 
       console.log('✅ Processed user targets:', userTargetsData);
       setUserTargets(userTargetsData);
+      setError(null); // Clear any errors on success
+      return userTargetsData;
 
     } catch (err) {
       console.error('❌ Error in fetchUserTargets:', err);
       setError('Failed to load user targets: ' + err.message);
+      return null;
     } finally {
       setLoadingUserTargets(false);
     }
@@ -1915,16 +1982,50 @@ const MenuCreate = () => {
       return;
     }
 
-    // Check if user targets are loaded
-    if (!userTargets) {
-      console.warn('⚠️ User targets not loaded, attempting to fetch them first...');
-      await fetchUserTargets(selectedClient.user_code);
+    // Clear any existing errors at the start
+    setError(null);
+
+    // Refresh nutrition targets like when selecting a user
+    console.log('🔄 Refreshing nutrition targets like user selection...');
+    setProgress(0);
+    setProgressStep('🔄 Refreshing nutrition targets...');
+    
+    // Create a promise that resolves when userTargets is updated
+    const waitForUserTargets = () => {
+      return new Promise((resolve) => {
+        const checkTargets = () => {
+          if (userTargets) {
+            resolve(userTargets);
+          } else {
+            setTimeout(checkTargets, 100);
+          }
+        };
+        checkTargets();
+      });
+    };
+    
+    // Call fetchUserTargets and wait for the state to update
+    fetchUserTargets(selectedClient.user_code);
+    
+    // Wait for userTargets to be updated
+    const updatedTargets = await waitForUserTargets();
+    
+    // If we got targets, proceed with menu generation
+    if (updatedTargets) {
+      console.log('✅ User targets loaded successfully:', updatedTargets);
+    } else {
+      console.warn('⚠️ First attempt failed, trying one more time...');
+      setProgressStep('🔄 Retrying nutrition targets...');
       
-      // Wait a moment for the state to update
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Try one more time
+      fetchUserTargets(selectedClient.user_code);
+      const retryTargets = await waitForUserTargets();
       
-      if (!userTargets) {
+      // If still no targets, then show error
+      if (!retryTargets) {
         setError('Unable to load client nutritional targets. Please check the client data and try again.');
+        setProgress(0);
+        setProgressStep('');
         return;
       }
     }
@@ -2105,6 +2206,96 @@ const MenuCreate = () => {
     }
   };
 
+  // Function to translate Hebrew ingredients to English
+  const translateIngredientsToEnglish = async (menu) => {
+    console.log('🌐 Starting ingredient translation to English...');
+    
+    const translatedMenu = JSON.parse(JSON.stringify(menu));
+    
+    // Helper function to check if text contains Hebrew
+    const containsHebrew = (text) => {
+      if (!text) return false;
+      return /[\u0590-\u05FF]/.test(text);
+    };
+    
+    // Helper function to translate text
+    const translateText = async (text) => {
+      if (!text || !containsHebrew(text)) return text;
+      
+      try {
+        console.log(`🌐 Translating: "${text}"`);
+        const response = await fetch('http://127.0.0.1:8000/api/translate-text', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            text: text,
+            targetLang: 'en'
+          })
+        });
+        
+        if (!response.ok) {
+          console.error('❌ Translation API error:', response.status);
+          return text; // Return original if translation fails
+        }
+        
+        const result = await response.json();
+        console.log(`✅ Translated: "${text}" -> "${result.translatedText}"`);
+        return result.translatedText;
+      } catch (error) {
+        console.error('❌ Translation error:', error);
+        return text; // Return original if translation fails
+      }
+    };
+    
+    // Process all meals and their ingredients
+    for (const meal of translatedMenu.meals || []) {
+      // Process main meal ingredients
+      if (meal.main?.ingredients) {
+        for (const ingredient of meal.main.ingredients) {
+          if (ingredient.item) {
+            ingredient.item = await translateText(ingredient.item);
+          }
+          if (ingredient.household_measure) {
+            ingredient.household_measure = await translateText(ingredient.household_measure);
+          }
+        }
+      }
+      
+      // Process alternative meal ingredients
+      if (meal.alternative?.ingredients) {
+        for (const ingredient of meal.alternative.ingredients) {
+          if (ingredient.item) {
+            ingredient.item = await translateText(ingredient.item);
+          }
+          if (ingredient.household_measure) {
+            ingredient.household_measure = await translateText(ingredient.household_measure);
+          }
+        }
+      }
+      
+      // Process additional alternatives
+      if (meal.alternatives) {
+        for (const alternative of meal.alternatives) {
+          if (alternative.ingredients) {
+            for (const ingredient of alternative.ingredients) {
+              if (ingredient.item) {
+                ingredient.item = await translateText(ingredient.item);
+              }
+              if (ingredient.household_measure) {
+                ingredient.household_measure = await translateText(ingredient.household_measure);
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    console.log('✅ Ingredient translation completed');
+    return translatedMenu;
+  };
+
   const handleSave = async () => {
     console.log('🔥 SAVE BUTTON CLICKED!');
     console.log('📋 Original Menu:', originalMenu);
@@ -2131,15 +2322,38 @@ const MenuCreate = () => {
 
       console.log('👤 Authenticated user:', user.id);
 
+      // Debug: Check what ingredient data is actually in the originalMenu
+      console.log('🔍 DEBUG: Checking ingredient data in originalMenu before saving:');
+      originalMenu.meals?.forEach((meal, mealIndex) => {
+        console.log(`🍽️ Meal ${mealIndex}: ${meal.meal}`);
+        
+        if (meal.main?.ingredients) {
+          meal.main.ingredients.forEach((ingredient, ingIndex) => {
+            console.log(`  Main Ingredient ${ingIndex}: ${ingredient.item} - UPC: "${ingredient.UPC}" (type: ${typeof ingredient.UPC})`);
+          });
+        }
+        
+        if (meal.alternative?.ingredients) {
+          meal.alternative.ingredients.forEach((ingredient, ingIndex) => {
+            console.log(`  Alt Ingredient ${ingIndex}: ${ingredient.item} - UPC: "${ingredient.UPC}" (type: ${typeof ingredient.UPC})`);
+          });
+        }
+      });
+
       console.log('📊 Original Menu structure:', {
         meals: originalMenu.meals?.length,
         totals: originalMenu.totals,
         hasNote: !!originalMenu.note
       });
 
+      // Translate Hebrew ingredients to English before saving
+      console.log('🌐 Translating Hebrew ingredients to English...');
+      const translatedMenu = await translateIngredientsToEnglish(originalMenu);
+      console.log('✅ Translation completed, using translated menu for saving');
+
       // Create schema template (like your example format)
       const schemaTemplate = {
-        template: originalMenu.meals?.map(meal => {
+        template: translatedMenu.meals?.map(meal => {
           console.log('🍽️ Processing meal:', meal.meal);
           console.log('Main nutrition:', meal.main?.nutrition);
           console.log('Alt nutrition:', meal.alternative?.nutrition);
@@ -2174,15 +2388,15 @@ const MenuCreate = () => {
         record_type: 'meal_plan',
         meal_plan_name: `Meal Plan - ${selectedClient?.full_name || 'Unknown Client'}`,
         schema: schemaTemplate,        // Schema template in same row
-        meal_plan: originalMenu,       // Full meal plan in same row
+        meal_plan: translatedMenu,     // Full meal plan in same row (translated)
         status: 'draft',
-        daily_total_calories: originalMenu.totals?.calories || 2000,
+        daily_total_calories: translatedMenu.totals?.calories || 2000,
         macros_target: {
-          protein: originalMenu.totals?.protein || 150,
-          carbs: originalMenu.totals?.carbs || 250,
-          fat: originalMenu.totals?.fat || 80,
+          protein: translatedMenu.totals?.protein || 150,
+          carbs: translatedMenu.totals?.carbs || 250,
+          fat: translatedMenu.totals?.fat || 80,
         },
-        recommendations: originalMenu.recommendations || {},
+        recommendations: translatedMenu.recommendations || {},
         dietary_restrictions: {},
         user_code: selectedClient?.user_code || null, // Use selected user's code
         dietitian_id: user.id
@@ -2195,8 +2409,8 @@ const MenuCreate = () => {
 
       // Show success message
       setError(null);
-      console.log('🎉 Schema and menu plan saved in single record!');
-      alert('Schema and menu plan saved successfully!');
+      console.log('🎉 Schema and meal plan saved in single record!');
+      alert('Schema and meal plan saved successfully!');
 
       // Don't clear the menu from UI - keep it visible for the user
       // The menu is now saved in the database but remains visible for further editing
@@ -2715,7 +2929,7 @@ const MenuCreate = () => {
           </Button>
           <div>
             <h1 className="text-2xl font-bold">
-              {translations.menuCreate || 'Generate Menu Plan'}
+              {translations.menuCreate || 'Generate Meal Plan'}
             </h1>
           </div>
         </div>
@@ -3253,26 +3467,6 @@ const MenuCreate = () => {
                     <p className="text-red-600 text-sm">{error}</p>
                   </div>
                 )}
-                <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                  <p className="text-yellow-700 text-sm font-medium">Troubleshooting:</p>
-                  <ul className="text-yellow-600 text-sm mt-1 space-y-1">
-                    <li>• Check if the client exists in the database</li>
-                    <li>• Verify that the client has nutritional data (calories, macros)</li>
-                    <li>• Ensure the user_code is correct: {selectedClient?.user_code}</li>
-                    <li>• Try refreshing the page or selecting a different client</li>
-                  </ul>
-                  <div className="mt-3">
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => fetchUserTargets(selectedClient?.user_code)}
-                      className="text-yellow-700 border-yellow-300 hover:bg-yellow-100"
-                    >
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Retry Loading Targets
-                    </Button>
-                  </div>
-                </div>
               </div>
             )}
           </CardContent>
@@ -3497,7 +3691,7 @@ const MenuCreate = () => {
             ) : (
               <Save className="h-4 w-4 mr-2" />
             )}
-            {saving ? (translations.saving || 'Saving...') : (translations.saveSchemaAndMenu || 'Save Schema & Menu Plan')}
+            {saving ? (translations.saving || 'Saving...') : (translations.saveSchemaAndMenu || 'Save Schema & Meal Plan')}
           </Button>
         </div>
       )}
@@ -3586,10 +3780,33 @@ const MenuCreate = () => {
 
 
 async function translateMenu(menu, targetLang = 'he') {
+  // Create a deep copy of the menu to avoid modifying the original
+  const menuToTranslate = JSON.parse(JSON.stringify(menu));
+  
+  // Combine ingredient names with brand names for translation
+  if (menuToTranslate.meals) {
+    menuToTranslate.meals.forEach(meal => {
+      if (meal.main && meal.main.ingredients) {
+        meal.main.ingredients.forEach(ingredient => {
+          if (ingredient["brand of pruduct"]) {
+            ingredient.item = `${ingredient.item} (${ingredient["brand of pruduct"]})`;
+          }
+        });
+      }
+      if (meal.alternative && meal.alternative.ingredients) {
+        meal.alternative.ingredients.forEach(ingredient => {
+          if (ingredient["brand of pruduct"]) {
+            ingredient.item = `${ingredient.item} (${ingredient["brand of pruduct"]})`;
+          }
+        });
+      }
+    });
+  }
+
   const response = await fetch('https://dietitian-be.azurewebsites.net/api/translate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ menu, targetLang }),
+    body: JSON.stringify({ menu: menuToTranslate, targetLang }),
   });
 
   if (!response.ok) {

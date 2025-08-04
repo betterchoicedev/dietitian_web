@@ -16,9 +16,9 @@ export default function MenuBasicDetails({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Menu Details</CardTitle>
+        <CardTitle>Meal Plan Details</CardTitle>
         <CardDescription>
-          Basic information about the menu plan
+          Basic information about the meal plan
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">

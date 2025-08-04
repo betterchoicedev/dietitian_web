@@ -76,7 +76,7 @@ export default function Menus() {
           await Menu.update(menu.id, menuUpdate);
           menu.menu_code = newCode;
         } catch (error) {
-          console.error(`Error updating menu code for menu ${menu.id}:`, error);
+          console.error(`Error updating meal plan code for menu ${menu.id}:`, error);
         }
       }
     }
@@ -120,7 +120,7 @@ export default function Menus() {
           const uniqueUserCodes = [...new Set(updatedMenus.map(menu => menu.user_code).filter(Boolean))];
           setUserCodes(uniqueUserCodes);
         } catch (updateError) {
-          console.error("Error updating menu codes:", updateError);
+          console.error("Error updating meal plan codes:", updateError);
           setMenus(loadedMenus);
           const uniqueUserCodes = [...new Set(loadedMenus.map(menu => menu.user_code).filter(Boolean))];
           setUserCodes(uniqueUserCodes);
@@ -237,7 +237,7 @@ export default function Menus() {
 
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Menu Plans</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Meal Plans</h1>
           <p className="mt-1 text-sm text-gray-500">
             Manage and create personalized diet plans
           </p>
@@ -276,7 +276,7 @@ export default function Menus() {
         <div className="flex items-center space-x-2 w-full sm:w-auto">
           <Search className="w-5 h-5 text-gray-400" />
           <Input
-            placeholder="Search by name, menu code, or client code..."
+            placeholder="Search by name, meal plan code, or client code..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="flex-1"
@@ -328,7 +328,7 @@ export default function Menus() {
             <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
               <div className="space-y-1">
                 <CardTitle className="text-lg font-medium">
-                  {menu.meal_plan_name || 'Untitled Menu'}
+                  {menu.meal_plan_name || 'Untitled Meal Plan'}
                 </CardTitle>
                 <CardDescription>
                   <span>User Code: {menu.user_code || 'N/A'}</span>
@@ -364,7 +364,7 @@ export default function Menus() {
 
               <div className="pt-2 border-t">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500">Menu Code:</span>
+                  <span className="text-xs text-gray-500">Meal Plan Code:</span>
                   <MenuCodeDisplay menuCode={menu.menu_code || 'N/A'} />
                 </div>
               </div>
@@ -378,10 +378,10 @@ export default function Menus() {
               <CardContent className="flex flex-col items-center justify-center py-10">
                 <FileText className="h-12 w-12 text-green-400" />
                 <h3 className="mt-2 text-sm font-medium text-gray-900">
-                  No menus found
+                  No meal plans found
                 </h3>
                 <p className="mt-1 text-sm text-gray-500">
-                  Get started by creating a new menu plan
+                  Get started by creating a new meal plan
                 </p>
                 <div className="mt-6">
                   <Link to={createPageUrl('MenuCreate')}>
@@ -402,10 +402,10 @@ export default function Menus() {
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-red-500" />
-              Delete Menu Plan
+              Delete Meal Plan
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete the menu "{menuToDelete?.meal_plan_name || 'Untitled Menu'}"?
+              Are you sure you want to delete the meal plan "{menuToDelete?.meal_plan_name || 'Untitled Meal Plan'}"?
               This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>

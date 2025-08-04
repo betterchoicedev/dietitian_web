@@ -47,7 +47,7 @@ export default function ApiClientMenu() {
       const menus = await Menu.filter({ user_code: client.code }, '-created_at');
       
       if (menus.length === 0) {
-        setError(`No menu plans found for client ${client.full_name} (${client.code})`);
+        setError(`No meal plans found for client ${client.full_name} (${client.code})`);
         return;
       }
       
@@ -111,7 +111,7 @@ export default function ApiClientMenu() {
       if (menus.length === 0) {
         return {
           error: 'Menu not found',
-          message: `No menu plans found for client ${client.full_name} (${client.code})`
+          message: `No meal plans found for client ${client.full_name} (${client.code})`
         };
       }
       
@@ -157,7 +157,7 @@ export default function ApiClientMenu() {
     <div className="max-w-4xl mx-auto space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl">Menu Plan API</CardTitle>
+          <CardTitle className="text-2xl">Meal Plan API</CardTitle>
           <CardDescription>
             Retrieve a client's most recent meal plan by entering their client code
           </CardDescription>
@@ -203,7 +203,7 @@ export default function ApiClientMenu() {
             <div className="mt-6">
               <div className="flex justify-between items-center mb-2">
                 <h3 className="text-lg font-semibold">
-                  Menu Plan for {menuData.client?.name || 'Client'}
+                  Meal Plan for {menuData.client?.name || 'Client'}
                 </h3>
                 <Button 
                   size="sm" 
@@ -279,7 +279,7 @@ export default function ApiClientMenu() {
             
             <div>
               <h4 className="font-medium">Response</h4>
-              <p className="text-sm text-slate-500 mb-2">Returns the most recent menu plan with this priority:</p>
+              <p className="text-sm text-slate-500 mb-2">Returns the most recent meal plan with this priority:</p>
               <ol className="list-decimal ml-5 text-sm text-slate-600">
                 <li>Active menu (if available)</li>
                 <li>Published menu (if no active menu)</li>
