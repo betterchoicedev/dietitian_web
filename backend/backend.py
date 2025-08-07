@@ -434,7 +434,7 @@ def load_user_preferences(user_code=None):
         # logger.info(f"Supabase Key exists: {bool(supabase_key)}")
         
         # Define the specific fields we need to reduce data transfer
-        selected_fields = 'user_code,food_allergies,dailyTotalCalories,recommendations,food_limitations,goal,number_of_meals,client_preference,macros,region'
+        selected_fields = 'user_code,food_allergies,dailyTotalCalories,recommendations,food_limitations,goal,number_of_meals,client_preference,macros,region,meal_plan_structure'
         
         if user_code:
             # Fetch specific user by user_code
@@ -465,7 +465,8 @@ def load_user_preferences(user_code=None):
                     "diet_type": "personalized",
                     "meal_count": 5,
                     "client_preference": {},
-                    "region": "israel"  # Default region
+                    "region": "israel",  # Default region
+                    "meal_plan_structure": {}
                 }
 
         # Debug: Log the raw user data
@@ -504,6 +505,14 @@ def load_user_preferences(user_code=None):
             except:
                 client_preference = {}
 
+        # Parse meal_plan_structure
+        meal_plan_structure = user_data.get("meal_plan_structure", {})
+        if isinstance(meal_plan_structure, str):
+            try:
+                meal_plan_structure = json.loads(meal_plan_structure)
+            except:
+                meal_plan_structure = {}
+
         # Ensure we have valid values with proper defaults
         calories_per_day = user_data.get("dailyTotalCalories")
         if calories_per_day is None:
@@ -531,7 +540,8 @@ def load_user_preferences(user_code=None):
             "diet_type": "personalized",
             "meal_count": meal_count,
             "client_preference": client_preference,
-            "region": user_data.get("region", "israel")  # Default to israel if not specified
+            "region": user_data.get("region", "israel"),  # Default to israel if not specified
+            "meal_plan_structure": meal_plan_structure
         }
 
         # logger.info(f"✅ Loaded user preferences for user_code: {user_data.get('user_code')}")
@@ -612,37 +622,9 @@ def api_template():
 """
 
             system_prompt = f"""
-You are a registered‑dietitian AI who designs practical, tasty, and nutritionally
-precise meal‑plan templates.
+You are an expert nutritionist creating meal templates for users with specific dietary needs.
 
-────────────────────────────  CORE RULES  ────────────────────────────
-• ALL OUTPUT MUST BE ENGLISH ONLY – no transliteration or other languages.• Prioritise whole, minimally‑processed foods.• High‑sugar / fried snacks (chips, candy, BISLI, etc.) appear only if the
-client explicitly requests them and never exceed 2 servings per week.• ≤ 7 everyday ingredients per dish; standard cooking methods (grill, bake,
-steam, sauté).
-
-──────────────────────────────  INPUTS  ──────────────────────────────
-
-daily_calories  (kcal)
-
-daily_protein   (g)
-
-daily_fat       (g)
-
-daily_carbs     (g)
-
-number_of_meals (int 1–10)
-
-dietary_restrictions (e.g. kosher, vegetarian, gluten‑free)
-
-food_allergies       (list)
-
-client_preferences   (free‑text likes / dislikes)
-
-region               (string)
-
-
-{region_instruction}
-{previous_issues_text}
+{region_instructions}
 
 ──────────────────────  MEAL STRUCTURE & NAMING  ─────────────────────
 • Always include the three main meals – Breakfast, Lunch, Dinner – unless
@@ -651,53 +633,28 @@ the user specifies a different pattern (e.g., two meals a day, six meals, etc.).
 • Main meals = Breakfast, Lunch, Dinner.
 Anything else is treated as a snack.
 
-──────────────────  CALORIE / MACRO DISTRIBUTION  ───────────────────
-• Classify meals
-  – Any meal named "Breakfast", "Lunch", or "Dinner" = **main meal**.  
-  – Everything else = **snack**.
+───────────────────────────  NEW INPUTS  ────────────────────────────
+• meal_structure  – array of objects, each with:
+    – meal            (string, unique)
+    – calories_pct    (number, 0-100, sums to 100)
 
-• Stage 1 – allocate calories & macros
-  1.  If number_of_meals = 1 → that single meal receives 100 % of calories.
-  2.  If number_of_meals = 2 and both are mains → first main 60 %, second 40 %.
-  3.  Otherwise (≥ 3 meals, at least one snack expected):
-      • Main-meal pool = **75 %** of daily calories.  
-        – Give **35 %** to the meal named in *most_important_meal*  
-          (if it is a main meal; otherwise give it 30 %).  
-        – Split the rest of the main-meal pool equally among the other mains.  
-      • Snack pool = **25 %** of daily calories, divided equally across snacks.  
-        (If there are no snacks, re-distribute the snack pool proportionally
-        across the main meals.)
-
-• Stage 2 – apply the exact same percentages to protein, fat, and carbs.
-
-• Stage 3 – rounding & calorie derivation
-  – Round each meal's protein, fat, and carbs to whole grams.  
-  – Compute that meal's calories via the 4-9-4 formula:  
-        kcal_i = (protein_i × 4) + (fat_i × 9) + (carbs_i × 4)  
-    Round to the nearest whole kcal.  
-  – Adjust the final meal by ≤ ±1 kcal and ≤ ±1 g so that daily totals
-    exactly equal the user-supplied targets.
-
-• Validation rules  
-  – **Main ≥ 1.5 × Snack:**  
-      min_cal_main ≥ 1.5 × max_cal_snack  
-      (skip if there are no snacks)  
-  – ∑ calories = daily_calories  
-    ∑ protein  = daily_protein  
-    ∑ fat      = daily_fat  
-    ∑ carbs    = daily_carbs  
-  – abs(stated_calories_i – kcal_i) ≤ 1 kcal for every meal.  
-  – If any check fails, regenerate the entire template before replying.
+──────────────────  CALORIE & MACRO DISTRIBUTION  ───────────────────
+• Use the supplied *meal_structure* to distribute calories, protein, and fat.
+  For each meal *i*:
+    1. kcal_i = daily_calories × (calories_pct_i ÷ 100)
+    2. protein_i = daily_protein × (calories_pct_i ÷ 100)
+    3. fat_i = daily_fat × (calories_pct_i ÷ 100)
+    4. Round to the nearest whole number
 
 ──────────────────  MAIN vs ALTERNATIVE MEALS  ───────────────────────
-Alternative meal rule:Each alternative must differ from its main meal in all of the following:(1) protein source (2) carb base (3) cooking method (4) flavour profile.Never repeat the same core ingredient in both options.
+Alternative meal rule:Each alternative must differ from its main meal in all of the following:(1) protein source (2) carb base (3) cooking method (4) flavour profile.Never repeat the same core ingredient in both options.
 
 ──────────────────────────  PREFERENCE LOGIC  ─────────────────────────
 • Omit anything in food_allergies or "dislikes …" items.• Feature every "likes / loves …" item exactly once across the day.• Do not repeat the same primary ingredient across meals.
 
 ────────────────────  ADDITIONAL GENERATION RULES  ───────────────────
 • For every meal output two options (main & alternative) using everyday ingredients that respect restrictions, allergies, and preferences.
-• Validate: iterate until the output is valid JSON and daily sums match the inputs exactly.
+• Focus on practical, realistic meal options with clear main protein sources.
 
 ──────────────────────────  RESPONSE FORMAT  ──────────────────────────
 Return valid JSON only – no Markdown fences, no commentary.Schema:
@@ -711,7 +668,6 @@ Return valid JSON only – no Markdown fences, no commentary.Schema:
 "calories": ,
 "protein": ,
 "fat": ,
-"carbs": ,
 "main_protein_source": ""
 }},
 "alternative": {{
@@ -719,7 +675,6 @@ Return valid JSON only – no Markdown fences, no commentary.Schema:
 "calories": ,
 "protein": ,
 "fat": ,
-"carbs": ,
 "main_protein_source": ""
 }}
 }},
@@ -739,7 +694,6 @@ Return valid JSON only – no Markdown fences, no commentary.Schema:
 "calories": 500,
 "protein": 38,
 "fat": 21,
-"carbs": 45,
 "main_protein_source": "eggs"
 }},
 "alternative": {{
@@ -747,7 +701,6 @@ Return valid JSON only – no Markdown fences, no commentary.Schema:
 "calories": 500,
 "protein": 38,
 "fat": 21,
-"carbs": 45,
 "main_protein_source": "yogurt"
 }}
 }},
@@ -758,7 +711,6 @@ Return valid JSON only – no Markdown fences, no commentary.Schema:
 "calories": 600,
 "protein": 45,
 "fat": 20,
-"carbs": 65,
 "main_protein_source": "chicken"
 }},
 "alternative": {{
@@ -766,14 +718,13 @@ Return valid JSON only – no Markdown fences, no commentary.Schema:
 "calories": 600,
 "protein": 45,
 "fat": 20,
-"carbs": 65,
 "main_protein_source": "salmon"
 }}
 }}
 ]
 }}
 
-If any meal violates these rules, regenerate the entire template before replying.
+Generate meal options that are practical, delicious, and respect all dietary restrictions and preferences.
 """
 
 
@@ -825,10 +776,9 @@ If any meal violates these rules, regenerate the entire template before replying
                         # Collect issues for next attempt
                         main_issues = val_data.get("issues_main", [])
                         alt_issues = val_data.get("issues_alt", [])
-                        main_vs_snack_issues = val_data.get("issues_main_vs_snack", [])
                         main_alt_issues = val_data.get("issues_main_alt", [])
                         similarity_issues = val_data.get("issues_similarity", [])
-                        new_issues = main_issues + alt_issues + main_vs_snack_issues + main_alt_issues + similarity_issues
+                        new_issues = main_issues + alt_issues + main_alt_issues + similarity_issues
                         
                         if new_issues:
                             previous_issues = new_issues
@@ -1254,7 +1204,7 @@ def api_validate_menu():
             logger.warning(f"Could not load user preferences for validation: {e}")
             preferences = {"limitations": []}
 
-        macros = ["calories", "protein", "fat", "carbs"]
+        macros = ["calories", "protein", "fat"]
 
         def get_allowed_margin(val):
             val = float(val)
@@ -1392,15 +1342,18 @@ def api_validate_template():
 
         logger.info("🔍 Validating template totals (main & alternative)...")
 
-        # Calculate total macros for main and alternative
-        total_main = {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
-        total_alt = {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
+        # Calculate total calories, protein, and fat for main and alternative
+        total_main = {"calories": 0, "protein": 0, "fat": 0}
+        total_alt = {"calories": 0, "protein": 0, "fat": 0}
         for meal in template:
             main = meal.get("main", {})
             alt = meal.get("alternative", {})
-            for macro in total_main:
-                total_main[macro] += float(main.get(macro, 0))
-                total_alt[macro] += float(alt.get(macro, 0))
+            total_main["calories"] += float(main.get("calories", 0))
+            total_main["protein"] += float(main.get("protein", 0))
+            total_main["fat"] += float(main.get("fat", 0))
+            total_alt["calories"] += float(alt.get("calories", 0))
+            total_alt["protein"] += float(alt.get("protein", 0))
+            total_alt["fat"] += float(alt.get("fat", 0))
 
         # Get target macros from preferences
         def parse_macro(value):
@@ -1411,31 +1364,29 @@ def api_validate_template():
             except (ValueError, TypeError):
                 return 0.0
 
-        # Safely get calories_per_day
         calories_per_day = preferences.get("calories_per_day", 2000)
         if calories_per_day is None:
             calories_per_day = 2000
 
-        # Safely get macros with proper defaults
+        # Get protein and fat targets from preferences
         macros = preferences.get("macros", {})
         if not macros:
-            macros = {"protein": "150g", "fat": "80g", "carbs": "250g"}
-        
-        # Parse macros with fallbacks only if the macro is missing from user preferences
+            macros = {"protein": "150g", "fat": "80g"}
+
         target_macros = {
             "calories": float(calories_per_day),
             "protein": parse_macro(macros.get("protein", "150g")),
-            "fat": parse_macro(macros.get("fat", "80g")), 
-            "carbs": parse_macro(macros.get("carbs", "250g")),
+            "fat": parse_macro(macros.get("fat", "80g"))
         }
         
         # Add debug logging
         logger.info(f"🔍 Template validation using user_code: {user_code}")
         logger.info(f"🔍 Loaded preferences calories_per_day: {preferences.get('calories_per_day')}")
-        logger.info(f"🔍 Raw macros from preferences: {macros}")
+        logger.info(f"🔍 Raw protein from preferences: {macros.get('protein')}")
+        logger.info(f"🔍 Raw fat from preferences: {macros.get('fat')}")
         logger.info(f"🔍 Parsed target_macros: {target_macros}")
 
-        def is_out_of_range(actual, target, margin=0.1):
+        def is_out_of_range(actual, target, margin=0.05):  # 5% margin
             if target == 0:
                 return False
             return abs(actual - target) / target > margin
@@ -1451,30 +1402,29 @@ def api_validate_template():
             if is_out_of_range(actual_main, expected):
                 percent_off = round((actual_main - expected) / expected * 100, 3)
                 issues_main.append(
-                    f"Main: Total {macro}: {actual_main} vs target {expected} ({percent_off:+}% - PERFECT MATCH REQUIRED)"
+                    f"Main: Total {macro}: {actual_main} vs target {expected} ({percent_off:+}%)"
                 )
             # ALT
             actual_alt = round(total_alt[macro], 1)
             if is_out_of_range(actual_alt, expected):
                 percent_off = round((actual_alt - expected) / expected * 100, 3)
                 issues_alt.append(
-                    f"Alternative: Total {macro}: {actual_alt} vs target {expected} ({percent_off:+}% - PERFECT MATCH REQUIRED)"
+                    f"Alternative: Total {macro}: {actual_alt} vs target {expected} ({percent_off:+}%)"
                 )
 
-        # Check for perfect equality between main and alternative
+        # Check for equality between main and alternative macros
         main_alt_issues = []
-        for macro in total_main:     
+        for macro in total_main:
             main_val = round(total_main[macro], 1)
             alt_val = round(total_alt[macro], 1)
             if main_val != alt_val:
                 main_alt_issues.append(
                     f"Main vs Alternative {macro} mismatch: Main={main_val}, Alt={alt_val} (PERFECT EQUALITY REQUIRED)"
                 )
-        
+
         is_valid_main = len(issues_main) == 0
         is_valid_alt = len(issues_alt) == 0
-        is_valid_main_alt = len(main_alt_issues) == 0
-        is_valid = is_valid_main and is_valid_alt and is_valid_main_alt
+        is_valid = is_valid_main and is_valid_alt and len(main_alt_issues) == 0
 
         # Logging for debugging
         logger.info(f"Validation summary (main): totals={total_main}, targets={target_macros}, issues={issues_main}")
@@ -1482,7 +1432,7 @@ def api_validate_template():
         logger.info(f"Validation summary (main vs alt): main_alt_issues={main_alt_issues}")
 
         if not is_valid:
-            logger.warning("❌ Template validation failed. Main valid: %s, Alt valid: %s, Main=Alt valid: %s", is_valid_main, is_valid_alt, is_valid_main_alt)
+            logger.warning("❌ Template validation failed. Main valid: %s, Alt valid: %s", is_valid_main, is_valid_alt)
             if issues_main:
                 logger.warning("Main issues: %s", issues_main)
             if issues_alt:
@@ -1490,34 +1440,7 @@ def api_validate_template():
             if main_alt_issues:
                 logger.warning("Main vs Alternative issues: %s", main_alt_issues)
         else:
-            logger.info("✅ Template validation PASSED for both main and alternative with perfect equality.")
-
-        # --- Main meals vs Snacks calorie/macros distribution validation ---
-        # Define meal types
-        main_meal_names = {"Breakfast", "Lunch", "Dinner"}
-        snack_names = {"Morning Snack", "Mid-Morning Snack", "Afternoon Snack", "Mid-Afternoon Snack", "Evening Snack", "Late Night Snack"}
-
-        # Helper to extract macro values for main and snacks
-        def extract_macro_lists(template, macro):
-            main_vals = []
-            snack_vals = []
-            for meal in template:
-                meal_name = meal.get("meal", "")
-                for variant in ["main", "alternative"]:
-                    val = float(meal.get(variant, {}).get(macro, 0))
-                    if meal_name in main_meal_names:
-                        main_vals.append(val)
-                    elif meal_name in snack_names:
-                        snack_vals.append(val)
-            return main_vals, snack_vals
-
-        # For each macro, check that all main meals > all snacks
-        main_vs_snack_issues = []
-        # Removed overly strict validation that required snacks to always be lighter than main meals
-        # This rule was unrealistic as snacks can legitimately have more fat/protein than some main meals
-
-        is_valid_main_vs_snack = len(main_vs_snack_issues) == 0
-        is_valid = is_valid and is_valid_main_vs_snack
+            logger.info("✅ Template validation PASSED for both main and alternative.")
 
         # --- Alternative Similarity Validation ---
         # Check that main and alternative meals are sufficiently different
@@ -1526,31 +1449,6 @@ def api_validate_template():
             meal_name = meal.get("meal", "")
             main_meal = meal.get("main", {})
             alt_meal = meal.get("alternative", {})
-            
-            # Extract ingredients from both meals
-            main_ingredients = set()
-            alt_ingredients = set()
-            
-            # Extract from main meal ingredients
-            if "ingredients" in main_meal:
-                for ingredient in main_meal["ingredients"]:
-                    item = ingredient.get("item", "").lower().strip()
-                    if item:
-                        main_ingredients.add(item)
-            
-            # Extract from alternative meal ingredients
-            if "ingredients" in alt_meal:
-                for ingredient in alt_meal["ingredients"]:
-                    item = ingredient.get("item", "").lower().strip()
-                    if item:
-                        alt_ingredients.add(item)
-            
-            # Check for overlapping ingredients
-            common_ingredients = main_ingredients.intersection(alt_ingredients)
-            if len(common_ingredients) > 2:  # Allow max 2 common ingredients
-                similarity_issues.append(
-                    f"{meal_name}: Too many common ingredients ({len(common_ingredients)}): {', '.join(list(common_ingredients)[:5])} - Main and alternative must be fundamentally different"
-                )
             
             # Check for similar protein sources
             main_protein = main_meal.get("main_protein_source", "").lower()
@@ -1567,13 +1465,10 @@ def api_validate_template():
             "is_valid": is_valid,
             "is_valid_main": is_valid_main,
             "is_valid_alt": is_valid_alt,
-            "is_valid_main_alt": is_valid_main_alt,
-            "is_valid_main_vs_snack": is_valid_main_vs_snack,
             "is_valid_similarity": is_valid_similarity,
             "issues_main": issues_main,
             "issues_alt": issues_alt,
             "issues_main_alt": main_alt_issues,
-            "issues_main_vs_snack": main_vs_snack_issues,
             "issues_similarity": similarity_issues,
             "totals_main": {k: round(v, 1) for k, v in total_main.items()},
             "totals_alt": {k: round(v, 1) for k, v in total_alt.items()},

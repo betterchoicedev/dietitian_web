@@ -121,7 +121,13 @@ export default function Clients() {
     goal: '',
     number_of_meals: '',
     client_preference: '',
-    region: 'israel'
+    region: 'israel',
+    meal_plan_structure: [
+      { meal: "Breakfast", calories_pct: 30, description: "", calories: 0, locked: false },
+      { meal: "Lunch", calories_pct: 30, description: "", calories: 0, locked: false },
+      { meal: "Dinner", calories_pct: 30, description: "", calories: 0, locked: false },
+      { meal: "Snack", calories_pct: 10, description: "", calories: 0, locked: false }
+    ]
   });
 
   // Add macro slider state
@@ -145,6 +151,10 @@ export default function Clients() {
   const [analyzingFoodLogs, setAnalyzingFoodLogs] = useState(false);
   const [userCodeTimeout, setUserCodeTimeout] = useState(null);
   const [translatingPreferences, setTranslatingPreferences] = useState(false);
+
+  // State for temporary calorie inputs (before Enter confirmation)
+  const [tempCalorieInputs, setTempCalorieInputs] = useState({});
+  const [calorieInputErrors, setCalorieInputErrors] = useState({});
 
   // Check if all required fields for Harris-Benedict calculation are filled
   const hasRequiredFieldsForCalculation = () => {
@@ -708,7 +718,13 @@ export default function Clients() {
       goal: '',
       number_of_meals: '5',
       client_preference: '',
-      region: 'israel'
+      region: 'israel',
+      meal_plan_structure: [
+        { meal: "Breakfast", calories_pct: 30, description: "", calories: 0, locked: false },
+        { meal: "Lunch", calories_pct: 30, description: "", calories: 0, locked: false },
+        { meal: "Dinner", calories_pct: 30, description: "", calories: 0, locked: false },
+        { meal: "Snack", calories_pct: 10, description: "", calories: 0, locked: false }
+      ]
     });
     // Reset macro inputs and sliders to 0 when adding new user
     setMacroInputs({
@@ -772,60 +788,16 @@ export default function Clients() {
       goal: client.goal || '',
       number_of_meals: client.number_of_meals?.toString() || '5',
       client_preference: typeof client.client_preference === 'object' ? JSON.stringify(client.client_preference, null, 2) : client.client_preference || '',
-      region: client.region || 'israel'
+      region: client.region || 'israel',
+      meal_plan_structure: client.meal_plan_structure || [
+        { meal: "Breakfast", calories_pct: 30, description: "", calories: 0, locked: false },
+        { meal: "Lunch", calories_pct: 30, description: "", calories: 0, locked: false },
+        { meal: "Dinner", calories_pct: 30, description: "", calories: 0, locked: false },
+        { meal: "Snack", calories_pct: 10, description: "", calories: 0, locked: false }
+      ]
     };
     
     setFormData(formDataToSet);
-    
-    // Check for existing food logs and update preferences if found
-    if (client.user_code) {
-      try {
-        // Call the new eating habits analysis API
-        const response = await fetch('https://dietitian-be.azurewebsites.net/api/analyze-eating-habits', {
-        // const response = await fetch('http://127.0.0.1:8000/api/analyze-eating-habits', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            user_code: client.user_code
-          }),
-        });
-
-        if (response.ok) {
-          const analysisResult = await response.json();
-          
-          if (analysisResult.analysis) {
-            setFoodLogsAnalysis({
-              ...analysisResult.analysis_data,
-              analysis: analysisResult.analysis
-            });
-            
-            // If the user doesn't have existing preferences, auto-populate them
-            if (!client.client_preference || client.client_preference.trim() === '') {
-              let analysisText = analysisResult.analysis;
-              
-              // Translate to Hebrew if the site is in Hebrew mode
-              if (language === 'he') {
-                try {
-                  analysisText = await translateText(analysisText, 'he');
-                } catch (translationError) {
-                  console.error('Failed to translate analysis:', translationError);
-                  // Keep original text if translation fails
-                }
-              }
-              
-              setFormData(prev => ({
-                ...prev,
-                client_preference: analysisText
-              }));
-            }
-          }
-        }
-      } catch (error) {
-        console.log('No existing food logs found or error occurred:', error.message);
-      }
-    }
     
     // Set macro inputs to match the client's macros
     const calories = client.dailyTotalCalories ? parseInt(client.dailyTotalCalories) : 0;
@@ -1072,7 +1044,13 @@ export default function Clients() {
         food_limitations: parseJsonField(formData.food_limitations, 'array'),
         macros: parseMacrosField(macroInputs.protein.grams, macroInputs.carbs.grams, macroInputs.fat.grams),
         recommendations: parseJsonField(formData.recommendations, 'recommendations'),
-        client_preference: parseJsonField(formData.client_preference, 'array')
+        client_preference: parseJsonField(formData.client_preference, 'array'),
+        meal_plan_structure: formData.meal_plan_structure.map(meal => ({
+          meal: meal.meal,
+          description: meal.description,
+          calories: meal.calories,
+          calories_pct: meal.calories_pct
+        }))
       };
 
       console.log('Submitting macros:', {
@@ -1143,6 +1121,355 @@ export default function Clients() {
     if (bmiNum < 25) return translations.normal;
     if (bmiNum < 30) return translations.overweight;
     return translations.obese;
+  };
+
+  // Calculate meal calories when total calories change
+  const calculateMealCalories = (mealPlanStructure, totalCalories) => {
+    const total = parseInt(totalCalories) || 0;
+    return mealPlanStructure.map(meal => ({
+      ...meal,
+      calories: Math.round((meal.calories_pct / 100) * total)
+    }));
+  };
+
+  // Recalculate percentages when a meal's absolute calories change
+  const recalculatePercentages = (mealPlanStructure, totalCalories, changedMealIndex = -1) => {
+    const total = parseInt(totalCalories) || 0;
+    if (total === 0) return mealPlanStructure;
+
+    // If a specific meal was changed, treat it as temporarily locked for this calculation
+    if (changedMealIndex >= 0) {
+      // Step 1: Calculate L = locked meals + the edited meal
+      const lockedMealsCalories = mealPlanStructure
+        .filter((meal, index) => meal.locked)
+        .reduce((sum, meal) => sum + (meal.calories || 0), 0);
+      
+      const editedMealCalories = mealPlanStructure[changedMealIndex].calories || 0;
+      const totalFixedCalories = lockedMealsCalories + editedMealCalories; // L
+      
+      // Step 2: Calculate remaining budget for other unlocked meals
+      const remainingBudget = total - totalFixedCalories;
+      
+      // Step 3: Calculate U = sum of other unlocked meals (excluding edited meal and locked meals)
+      const otherUnlockedTotal = mealPlanStructure
+        .filter((meal, index) => !meal.locked && index !== changedMealIndex)
+        .reduce((sum, meal) => sum + (meal.calories || 0), 0);
+      
+      // Step 4: Calculate scaling factor for other unlocked meals
+      const scalingFactor = otherUnlockedTotal > 0 ? remainingBudget / otherUnlockedTotal : 0;
+      
+      // Step 5: Apply scaling only to other unlocked meals
+      return mealPlanStructure.map((meal, index) => {
+        if (meal.locked) {
+          // Locked meals: keep calories, recalculate percentage
+          return {
+            ...meal,
+            calories_pct: total > 0 ? Math.round(((meal.calories || 0) / total) * 100 * 10) / 10 : 0
+          };
+        } else if (index === changedMealIndex) {
+          // Edited meal: keep exact calories entered, recalculate percentage
+          return {
+            ...meal,
+            calories_pct: total > 0 ? Math.round(((meal.calories || 0) / total) * 100 * 10) / 10 : 0
+          };
+        } else {
+          // Other unlocked meals: scale calories, recalculate percentage
+          const scaledCalories = Math.round((meal.calories || 0) * scalingFactor);
+          return {
+            ...meal,
+            calories: Math.max(0, scaledCalories),
+            calories_pct: total > 0 ? Math.round((scaledCalories / total) * 100 * 10) / 10 : 0
+          };
+        }
+      });
+    }
+    
+    // If no specific meal changed, just recalculate percentages based on current calories
+    return mealPlanStructure.map(meal => ({
+      ...meal,
+      calories_pct: total > 0 ? Math.round(((meal.calories || 0) / total) * 100 * 10) / 10 : 0
+    }));
+  };
+
+  // Add new meal to meal plan structure
+  const addMealToPlan = () => {
+    const newMeal = {
+      meal: `Meal ${formData.meal_plan_structure.length + 1}`,
+      calories_pct: 0,
+      description: "",
+      calories: 0,
+      locked: false
+    };
+    
+    const updatedStructure = [...formData.meal_plan_structure, newMeal];
+    setFormData({
+      ...formData,
+      meal_plan_structure: updatedStructure
+    });
+  };
+
+  // Remove meal from meal plan structure
+  const removeMealFromPlan = (index) => {
+    // Step 1: Remove the selected meal
+    const updatedStructure = formData.meal_plan_structure.filter((_, i) => i !== index);
+    const totalCalories = parseInt(formData.dailyTotalCalories) || 0;
+    
+    if (totalCalories === 0) {
+      setFormData({
+        ...formData,
+        meal_plan_structure: updatedStructure
+      });
+      return;
+    }
+    
+    // Step 2: Calculate totals after deletion
+    const lockedMealsCalories = updatedStructure
+      .filter(meal => meal.locked)
+      .reduce((sum, meal) => sum + (meal.calories || 0), 0);
+    
+    const unlockedMealsCalories = updatedStructure
+      .filter(meal => !meal.locked)
+      .reduce((sum, meal) => sum + (meal.calories || 0), 0);
+    
+    // Step 3: Compute space to fill
+    const remainingBudget = totalCalories - lockedMealsCalories;
+    
+    // Check if locked calories exceed target
+    if (remainingBudget <= 0) {
+      // Warning: locked calories exceed target - set all unlocked to 0
+      const rebalancedStructure = updatedStructure.map(meal => {
+        if (meal.locked) {
+          return {
+            ...meal,
+            calories_pct: totalCalories > 0 ? Math.round(((meal.calories || 0) / totalCalories) * 100 * 10) / 10 : 0
+          };
+        } else {
+          return {
+            ...meal,
+            calories: 0,
+            calories_pct: 0
+          };
+        }
+      });
+      
+      setFormData({
+        ...formData,
+        meal_plan_structure: rebalancedStructure
+      });
+      
+      // Show warning
+      alert(translations.lockedCaloriesExceedTarget || 'Warning: Locked meals exceed daily target. Unlocked meals set to 0 calories.');
+      return;
+    }
+    
+    // Step 4: Rescale only the unlocked meals
+    const scalingFactor = unlockedMealsCalories > 0 ? remainingBudget / unlockedMealsCalories : 0;
+    
+    let rebalancedStructure = updatedStructure.map(meal => {
+      if (meal.locked) {
+        // Locked meals: keep calories, recalculate percentage
+        return {
+          ...meal,
+          calories_pct: totalCalories > 0 ? Math.round(((meal.calories || 0) / totalCalories) * 100 * 10) / 10 : 0
+        };
+      } else {
+        // Unlocked meals: scale calories
+        const scaledCalories = Math.round((meal.calories || 0) * scalingFactor);
+        return {
+          ...meal,
+          calories: scaledCalories,
+          calories_pct: totalCalories > 0 ? Math.round((scaledCalories / totalCalories) * 100 * 10) / 10 : 0
+        };
+      }
+    });
+    
+    // Step 5: Rounding adjustment to ensure exact total
+    const currentTotal = rebalancedStructure.reduce((sum, meal) => sum + (meal.calories || 0), 0);
+    const difference = totalCalories - currentTotal;
+    
+    if (difference !== 0) {
+      // Find the largest unlocked meal to adjust
+      const unlockedMeals = rebalancedStructure
+        .map((meal, idx) => ({ meal, idx }))
+        .filter(({ meal }) => !meal.locked)
+        .sort(({ meal: a }, { meal: b }) => (b.calories || 0) - (a.calories || 0));
+      
+      if (unlockedMeals.length > 0) {
+        const largestUnlockedIndex = unlockedMeals[0].idx;
+        rebalancedStructure[largestUnlockedIndex] = {
+          ...rebalancedStructure[largestUnlockedIndex],
+          calories: Math.max(0, (rebalancedStructure[largestUnlockedIndex].calories || 0) + difference),
+          calories_pct: totalCalories > 0 ? Math.round((((rebalancedStructure[largestUnlockedIndex].calories || 0) + difference) / totalCalories) * 100 * 10) / 10 : 0
+        };
+      }
+    }
+    
+    setFormData({
+      ...formData,
+      meal_plan_structure: rebalancedStructure
+    });
+  };
+
+  // Move meal up or down in the list
+  const moveMealInPlan = (index, direction) => {
+    const updatedStructure = [...formData.meal_plan_structure];
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    
+    if (newIndex < 0 || newIndex >= updatedStructure.length) return;
+    
+    [updatedStructure[index], updatedStructure[newIndex]] = [updatedStructure[newIndex], updatedStructure[index]];
+    
+    setFormData({
+      ...formData,
+      meal_plan_structure: updatedStructure
+    });
+  };
+
+  // Auto-calculate meal calories when total calories change
+  useEffect(() => {
+    if (formData.dailyTotalCalories) {
+      const updatedMealStructure = calculateMealCalories(formData.meal_plan_structure, formData.dailyTotalCalories);
+      setFormData(prev => ({
+        ...prev,
+        meal_plan_structure: updatedMealStructure
+      }));
+    }
+  }, [formData.dailyTotalCalories]);
+
+  // Update meal in meal plan structure
+  const updateMealInPlan = (index, field, value) => {
+    const updatedStructure = [...formData.meal_plan_structure];
+    updatedStructure[index] = {
+      ...updatedStructure[index],
+      [field]: value
+    };
+
+    // If calories were changed, recalculate percentages for all meals
+    if (field === 'calories') {
+      const totalCalories = parseInt(formData.dailyTotalCalories) || 0;
+      updatedStructure[index].calories = parseInt(value) || 0;
+      const recalculatedStructure = recalculatePercentages(updatedStructure, totalCalories, index);
+      setFormData({
+        ...formData,
+        meal_plan_structure: recalculatedStructure
+      });
+    } else {
+      setFormData({
+        ...formData,
+        meal_plan_structure: updatedStructure
+      });
+    }
+  };
+
+  // Handle temporary calorie input (without immediate update)
+  const handleTempCalorieInput = (mealIndex, value) => {
+    const numericValue = parseInt(value) || 0;
+    const dailyTotal = parseInt(formData.dailyTotalCalories) || 0;
+    
+    // Calculate current locked calories and other unlocked calories
+    const lockedCalories = formData.meal_plan_structure
+      .filter((meal, index) => meal.locked && index !== mealIndex)
+      .reduce((sum, meal) => sum + (meal.calories || 0), 0);
+    
+    const otherUnlockedCalories = formData.meal_plan_structure
+      .filter((meal, index) => !meal.locked && index !== mealIndex)
+      .reduce((sum, meal) => sum + (meal.calories || 0), 0);
+    
+    const maxAllowedCalories = dailyTotal - lockedCalories;
+    
+    // Store temporary input
+    setTempCalorieInputs(prev => ({
+      ...prev,
+      [mealIndex]: value
+    }));
+    
+    // Validate input
+    if (numericValue > maxAllowedCalories) {
+      setCalorieInputErrors(prev => ({
+        ...prev,
+        [mealIndex]: `Cannot exceed ${maxAllowedCalories} calories (${dailyTotal} total - ${lockedCalories} locked)`
+      }));
+    } else {
+      setCalorieInputErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[mealIndex];
+        return newErrors;
+      });
+    }
+  };
+
+  // Confirm calorie input (on Enter or blur)
+  const confirmCalorieInput = (mealIndex) => {
+    const tempValue = tempCalorieInputs[mealIndex];
+    if (tempValue === undefined) return; // No temporary value
+    
+    const numericValue = parseInt(tempValue) || 0;
+    const dailyTotal = parseInt(formData.dailyTotalCalories) || 0;
+    
+    // Calculate current locked calories
+    const lockedCalories = formData.meal_plan_structure
+      .filter((meal, index) => meal.locked && index !== mealIndex)
+      .reduce((sum, meal) => sum + (meal.calories || 0), 0);
+    
+    const maxAllowedCalories = dailyTotal - lockedCalories;
+    
+    // If exceeds limit, reset all unlocked meals
+    if (numericValue > maxAllowedCalories) {
+      const resetStructure = formData.meal_plan_structure.map((meal, index) => {
+        if (meal.locked) {
+          return meal; // Keep locked meals unchanged
+        } else {
+          return {
+            ...meal,
+            calories: 0,
+            calories_pct: 0
+          };
+        }
+      });
+      
+      setFormData({
+        ...formData,
+        meal_plan_structure: resetStructure
+      });
+      
+      // Clear temporary inputs and errors
+      setTempCalorieInputs({});
+      setCalorieInputErrors({});
+      
+      alert(`Input exceeds daily limit! All unlocked meals have been reset to 0 calories.\nLimit: ${maxAllowedCalories} calories (${dailyTotal} total - ${lockedCalories} locked)`);
+      return;
+    }
+    
+    // Valid input - apply the change
+    updateMealInPlan(mealIndex, 'calories', tempValue);
+    
+    // Clear temporary input and error for this meal
+    setTempCalorieInputs(prev => {
+      const newInputs = { ...prev };
+      delete newInputs[mealIndex];
+      return newInputs;
+    });
+    
+    setCalorieInputErrors(prev => {
+      const newErrors = { ...prev };
+      delete newErrors[mealIndex];
+      return newErrors;
+    });
+  };
+
+  // Cancel temporary input (on Escape)
+  const cancelCalorieInput = (mealIndex) => {
+    setTempCalorieInputs(prev => {
+      const newInputs = { ...prev };
+      delete newInputs[mealIndex];
+      return newInputs;
+    });
+    
+    setCalorieInputErrors(prev => {
+      const newErrors = { ...prev };
+      delete newErrors[mealIndex];
+      return newErrors;
+    });
   };
 
   return (
@@ -1644,6 +1971,8 @@ export default function Clients() {
                         }}
                         placeholder="Auto-generated"
                         required
+                        readOnly
+                        className="bg-gray-100 cursor-not-allowed"
                       />
                       <Button
                         type="button"
@@ -1994,7 +2323,7 @@ export default function Clients() {
                   </div>
                   <div>
                     <Label htmlFor="client_preference" className="flex items-center gap-2">
-                      {translations.foodDiary} / {translations.eatingHabitsAnalysis}
+                      {translations.foodDiary} /{translations.userPreferences} {translations.eatingHabitsAnalysis}
                       {foodLogsAnalysis && (
                         <Badge variant="secondary" className="text-xs bg-green-100 text-green-800">
                           {translations.autoPopulated || 'Auto-populated'} ({foodLogsAnalysis.total_logs} {translations.entriesFound || 'entries'})
@@ -2067,6 +2396,220 @@ export default function Clients() {
                     />
                     <p className="text-xs text-gray-500 mt-1">
                       {translations.recommendationsHelp}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Meal Plan Structure */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-medium">{translations.mealPlanStructure || 'Meal Plan Structure'}</h3>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-gray-600">
+                      {translations.mealPlanDescription || 'Configure how daily calories are distributed across meals'}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={addMealToPlan}
+                      className="text-green-600 border-green-600 hover:bg-green-50"
+                    >
+                      <Plus className="h-4 w-4 mr-1" />
+                      {translations.addMeal || 'Add Meal'}
+                    </Button>
+                  </div>
+
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="bg-gray-50 px-4 py-2 border-b">
+                      <div className="grid grid-cols-12 gap-2 text-xs font-medium text-gray-600">
+                        <div className="col-span-3">{translations.mealName || 'Meal Name'}</div>
+                        <div className="col-span-2">{translations.description || 'Description'}</div>
+                        <div className="col-span-2">{translations.calories || 'Calories'}</div>
+                        <div className="col-span-2">{translations.percentage || 'Percentage'}</div>
+                        <div className="col-span-1">{translations.lock || 'Lock'}</div>
+                        <div className="col-span-2">{translations.actions || 'Actions'}</div>
+                      </div>
+                    </div>
+                    
+                    {formData.meal_plan_structure.map((meal, index) => (
+                      <div key={index} className="px-4 py-3 border-b last:border-b-0 bg-white">
+                        <div className="grid grid-cols-12 gap-2 items-center">
+                          {/* Meal Name */}
+                          <div className="col-span-3">
+                            <Input
+                              value={meal.meal}
+                              onChange={(e) => updateMealInPlan(index, 'meal', e.target.value)}
+                              className="text-sm"
+                              placeholder="Meal name"
+                            />
+                          </div>
+                          
+                          {/* Description */}
+                          <div className="col-span-2">
+                            <Input
+                              value={meal.description}
+                              onChange={(e) => updateMealInPlan(index, 'description', e.target.value)}
+                              className="text-sm"
+                              placeholder="Optional description"
+                            />
+                          </div>
+                          
+                          {/* Calories */}
+                          <div className="col-span-2">
+                            <div className="relative">
+                              <Input
+                                type="number"
+                                value={tempCalorieInputs[index] !== undefined ? tempCalorieInputs[index] : meal.calories}
+                                onChange={(e) => handleTempCalorieInput(index, e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault(); // Prevent form submission
+                                    confirmCalorieInput(index);
+                                  } else if (e.key === 'Escape') {
+                                    e.preventDefault(); // Prevent any default behavior
+                                    cancelCalorieInput(index);
+                                  }
+                                }}
+                                onBlur={() => confirmCalorieInput(index)}
+                                className={`text-sm ${meal.locked ? 'bg-gray-100 cursor-not-allowed' : ''} ${
+                                  calorieInputErrors[index] ? 'border-red-500 bg-red-50' : 
+                                  tempCalorieInputs[index] !== undefined ? 'border-yellow-500 bg-yellow-50' : ''
+                                }`}
+                                placeholder="0"
+                                min="0"
+                                disabled={meal.locked}
+                                title={meal.locked ? 'Locked meal - cannot edit calories' : 'Press Enter to confirm, Escape to cancel'}
+                              />
+                              {calorieInputErrors[index] && (
+                                <div className="absolute z-10 mt-1 p-2 bg-red-100 border border-red-300 rounded text-xs text-red-700 shadow-lg max-w-xs">
+                                  {calorieInputErrors[index]}
+                                </div>
+                              )}
+                              {tempCalorieInputs[index] !== undefined && !calorieInputErrors[index] && (
+                                <div className="absolute z-10 mt-1 p-1 bg-yellow-100 border border-yellow-300 rounded text-xs text-yellow-700 shadow">
+                                  Press Enter to confirm
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Percentage */}
+                          <div className="col-span-2">
+                            <div className={`text-sm text-center ${meal.locked ? 'text-blue-600 font-medium' : 'text-gray-600'}`}>
+                              {meal.calories_pct.toFixed(1)}%
+                              {meal.locked && <div className="text-xs text-blue-500">🔒</div>}
+                            </div>
+                          </div>
+                          
+                          {/* Lock Toggle */}
+                          <div className="col-span-1 flex justify-center">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => updateMealInPlan(index, 'locked', !meal.locked)}
+                              className={`h-8 w-8 ${meal.locked ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}
+                              title={meal.locked ? 'Unlock meal' : 'Lock meal'}
+                            >
+                              {meal.locked ? '🔒' : '🔓'}
+                            </Button>
+                          </div>
+                          
+                          {/* Actions */}
+                          <div className="col-span-2 flex items-center justify-center gap-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => moveMealInPlan(index, 'up')}
+                              disabled={index === 0}
+                              className="h-8 w-8"
+                            >
+                              <ArrowUp className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => moveMealInPlan(index, 'down')}
+                              disabled={index === formData.meal_plan_structure.length - 1}
+                              className="h-8 w-8"
+                            >
+                              <ArrowDown className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => removeMealFromPlan(index)}
+                              disabled={formData.meal_plan_structure.length <= 1}
+                              className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Summary */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-600">{translations.totalMeals || 'Total Meals'}: </span>
+                        <span className="font-medium">{formData.meal_plan_structure.length}</span>
+                        <span className="text-xs text-gray-500 ml-2">
+                          ({formData.meal_plan_structure.filter(meal => meal.locked).length} {translations.locked || 'locked'})
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">{translations.totalCalories || 'Total Calories'}: </span>
+                        <span className="font-medium">
+                          {formData.meal_plan_structure.reduce((sum, meal) => sum + (meal.calories || 0), 0)} / {formData.dailyTotalCalories || 0}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">{translations.lockedCalories || 'Locked Calories'}: </span>
+                        <span className="font-medium text-blue-600">
+                          {formData.meal_plan_structure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">{translations.unlockedCalories || 'Unlocked Calories'}: </span>
+                        <span className="font-medium text-green-600">
+                          {formData.meal_plan_structure.filter(meal => !meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">{translations.availableBudget || 'Available Budget'}: </span>
+                        <span className="font-medium text-purple-600">
+                          {(parseInt(formData.dailyTotalCalories) || 0) - formData.meal_plan_structure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0)} kcal
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">{translations.maxPerMeal || 'Max per Meal'}: </span>
+                        <span className="font-medium text-orange-600">
+                          {Math.max(0, (parseInt(formData.dailyTotalCalories) || 0) - formData.meal_plan_structure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0))} kcal
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">{translations.totalPercentage || 'Total Percentage'}: </span>
+                        <span className={`font-medium ${Math.abs(formData.meal_plan_structure.reduce((sum, meal) => sum + meal.calories_pct, 0) - 100) < 0.1 ? 'text-green-600' : 'text-red-600'}`}>
+                          {formData.meal_plan_structure.reduce((sum, meal) => sum + meal.calories_pct, 0).toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      {translations.mealPlanLockNote || 'Note: 🔒 Locked meals maintain their calories. When you edit a meal, that meal keeps its exact value and other unlocked meals scale to fit the remaining budget.'}
+                    </p>
+                    <p className="text-xs text-blue-600 mt-1">
+                      {translations.scalingFormula || 'Formula: Scaling Factor = (Daily Target - Locked Calories - Edited Meal) ÷ Other Unlocked Total'}
+                    </p>
+                    <p className="text-xs text-green-600 mt-1">
+                      {translations.calorieInputHelp || '💡 Calorie Input: Type a value and press Enter to confirm. Values exceeding daily limits will reset all unlocked meals to 0.'}
                     </p>
                   </div>
                 </div>
