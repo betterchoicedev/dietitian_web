@@ -809,12 +809,43 @@ const MenuCreate = () => {
   const [generatingAlt, setGeneratingAlt] = useState({});
   
   // Meal Plan Structure state
-  const [mealPlanStructure, setMealPlanStructure] = useState([
-    { meal: "Breakfast", calories_pct: 30, description: "", calories: 0, locked: false },
-    { meal: "Lunch", calories_pct: 30, description: "", calories: 0, locked: false },
-    { meal: "Dinner", calories_pct: 30, description: "", calories: 0, locked: false },
-    { meal: "Snack", calories_pct: 10, description: "", calories: 0, locked: false }
+  const getDefaultMealPlanStructure = (t) => ([
+    { key: 'breakfast', meal: t.breakfast || 'Breakfast', calories_pct: 30, description: '', calories: 0, locked: false },
+    { key: 'lunch',      meal: t.lunch || 'Lunch',         calories_pct: 30, description: '', calories: 0, locked: false },
+    { key: 'dinner',     meal: t.dinner || 'Dinner',       calories_pct: 30, description: '', calories: 0, locked: false },
+    { key: 'snacks',     meal: t.snacks || 'Snack',        calories_pct: 10, description: '', calories: 0, locked: false },
   ]);
+
+  const normalize = (s) => (s || '').toString().trim().toLowerCase();
+  const inferMealKey = (name) => {
+    const n = normalize(name);
+    const candidates = {
+      breakfast: [normalize(translations.breakfast), 'breakfast', 'ארוחת בוקר'],
+      lunch: [normalize(translations.lunch), 'lunch', 'ארוחת צהריים', 'צהריים'],
+      dinner: [normalize(translations.dinner), 'dinner', 'ארוחת ערב', 'ערב'],
+      snacks: [normalize(translations.snacks), 'snack', 'snacks', 'חטיף', 'חטיפים'],
+    };
+    for (const [key, list] of Object.entries(candidates)) {
+      if (list.some(x => x && n.includes(x))) return key;
+    }
+    return undefined;
+  };
+
+  const [mealPlanStructure, setMealPlanStructure] = useState(() => getDefaultMealPlanStructure(translations));
+
+  // When language changes, update default meal labels while preserving user edits
+  useEffect(() => {
+    setMealPlanStructure((prev) => prev.map(item => {
+      if (!item.key) return item;
+      const map = {
+        breakfast: translations.breakfast || 'Breakfast',
+        lunch: translations.lunch || 'Lunch',
+        dinner: translations.dinner || 'Dinner',
+        snacks: translations.snacks || translations.snack || 'Snack',
+      };
+      return { ...item, meal: map[item.key] || item.meal };
+    }));
+  }, [language]);
   
   // State for minimizing Meal Plan Structure section
   const [isMealPlanMinimized, setIsMealPlanMinimized] = useState(false);
@@ -1794,17 +1825,13 @@ const MenuCreate = () => {
         // Add locked property to each meal (default to false)
         const mealPlanWithLocks = loadedMealPlan.map(meal => ({
           ...meal,
+          key: meal.key || inferMealKey(meal.meal),
           locked: false
         }));
         setMealPlanStructure(mealPlanWithLocks);
       } else {
         // Use default structure
-        const defaultStructure = [
-          { meal: "Breakfast", calories_pct: 30, description: "", calories: 0, locked: false },
-          { meal: "Lunch", calories_pct: 30, description: "", calories: 0, locked: false },
-          { meal: "Dinner", calories_pct: 30, description: "", calories: 0, locked: false },
-          { meal: "Snack", calories_pct: 10, description: "", calories: 0, locked: false }
-        ];
+        const defaultStructure = getDefaultMealPlanStructure(translations);
         setMealPlanStructure(defaultStructure);
       }
       
@@ -2450,8 +2477,8 @@ const MenuCreate = () => {
       setProgress(5);
       setProgressStep('🎯 Analyzing client preferences...');
 
-      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
-      // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+      // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_code: selectedClient.user_code })
@@ -2500,11 +2527,29 @@ const MenuCreate = () => {
       setProgress(30);
       setProgressStep('🍽️ Creating personalized meals...');
 
-      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
-      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+      // Normalize template: ensure each option has carbs derived from (cal - 4P - 9F)/4 if missing
+      const ensureCarbs = (opt) => {
+        if (!opt) return opt;
+        const hasAll = opt.calories != null && opt.protein != null && opt.fat != null;
+        if (hasAll && (opt.carbs == null || Number.isNaN(opt.carbs))) {
+          const remaining = Number(opt.calories) - (4 * Number(opt.protein)) - (9 * Number(opt.fat));
+          const carbs = Math.max(0, Math.round(remaining / 4));
+          return { ...opt, carbs };
+        }
+        return opt;
+      };
+
+      const normalizedTemplate = (template || []).map(m => ({
+        ...m,
+        main: ensureCarbs(m.main),
+        alternative: ensureCarbs(m.alternative)
+      }));
+
+      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ template, user_code: selectedClient.user_code }),
+        body: JSON.stringify({ template: normalizedTemplate, user_code: selectedClient.user_code }),
       });
       
       if (!buildRes.ok) {
@@ -2513,7 +2558,8 @@ const MenuCreate = () => {
         } else if (buildRes.status === 503) {
           throw new Error("Meal creation service is temporarily unavailable. Please try again later.");
         } else {
-          throw new Error(`Unable to create meals (Error ${buildRes.status}). Please try again.`);
+          const errText = await buildRes.text().catch(() => '');
+          throw new Error(`Unable to create meals (Error ${buildRes.status}). ${errText || ''}`);
         }
       }
       
@@ -3009,7 +3055,8 @@ const MenuCreate = () => {
 
 
   async function generateAlternativeMeal(main, alternative) {
-    const response = await fetch('https://dietitian-be.azurewebsites.net/api/generate-alternative-meal', {
+    // const response = await fetch('https://dietitian-be.azurewebsites.net/api/generate-alternative-meal', {
+    const response = await fetch('http://127.0.0.1:8000/api/generate-alternative-meal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -3542,8 +3589,8 @@ const MenuCreate = () => {
                   <div className="bg-gray-50 px-4 py-2 border-b">
                     <div className="grid grid-cols-12 gap-2 text-xs font-medium text-gray-600">
                       <div className="col-span-3">{translations.mealName || 'Meal Name'}</div>
-                      <div className="col-span-2">{translations.description || 'Description'}</div>
-                      <div className="col-span-2">{translations.calories || 'Calories'}</div>
+                      <div className="col-span-2">{translations.mealDescriptionShort || translations.description || 'Description'}</div>
+                      <div className="col-span-2">{translations.caloriesLabel || translations.calories || 'Calories'}</div>
                       <div className="col-span-2">{translations.percentage || 'Percentage'}</div>
                       <div className="col-span-1">{translations.lock || 'Lock'}</div>
                       <div className="col-span-2">{translations.actions || 'Actions'}</div>
@@ -3559,7 +3606,7 @@ const MenuCreate = () => {
                             value={meal.meal}
                             onChange={(e) => updateMealInPlan(index, 'meal', e.target.value)}
                             className="text-sm"
-                            placeholder="Meal name"
+                            placeholder={translations.mealName || 'Meal name'}
                           />
                         </div>
                         
@@ -3569,7 +3616,7 @@ const MenuCreate = () => {
                             value={meal.description}
                             onChange={(e) => updateMealInPlan(index, 'description', e.target.value)}
                             className="text-sm"
-                            placeholder="Optional description"
+                            placeholder={translations.mealDescriptionShort || translations.descriptionPlaceholder || 'Optional description'}
                           />
                         </div>
                         

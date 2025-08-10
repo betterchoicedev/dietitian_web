@@ -618,67 +618,70 @@ Your task is to respond to the user's message below, taking into account their s
   }
 
   return (
-    <div className="h-[calc(100vh-8rem)]">
-      <div className="flex flex-col h-full">
-        {/* Client Selection */}
-        <Card className="mb-4">
-          <CardHeader>
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-              <div className="flex-1">
-                <CardTitle className="flex items-center gap-2">
-                  <Users className="h-5 w-5" />
-                  {selectedClient ? translations.selectedClient : translations.selectClientToChat}
-                </CardTitle>
-                <CardDescription>
-                  {selectedClient 
-                    ? `${translations.clientFromSidebar || 'Client selected from sidebar'}: ${selectedClient.full_name}`
-                    : translations.selectClientInSidebar || 'Please select a client in the sidebar to start chatting'
-                  }
-                </CardDescription>
-              </div>
-              {selectedClient && (
-                <div className="w-full md:w-auto">
-                  <div className="p-3 bg-green-50 border border-green-200 rounded-md">
-                    <div className="flex items-center gap-2 text-sm text-green-700">
-                      <span>✓</span>
-                      <span className="font-medium">{translations.selected || 'Selected'}: {selectedClient.full_name}</span>
-                      <span className="text-green-600">({selectedClient.user_code})</span>
+    <div className="h-[calc(100vh-8rem)] bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/50">
+      <div className="flex flex-col h-full space-y-3 p-4">
+        {/* Premium Merged Header Card */}
+        {selectedClient && (
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-white/90 to-white/80 backdrop-blur-2xl border border-white/20 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.1)]">
+            {/* Animated background elements */}
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-purple-500/5 to-pink-500/5"></div>
+            <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-blue-400/10 to-purple-400/10 rounded-full blur-3xl"></div>
+            <div className="absolute bottom-0 left-0 w-96 h-96 bg-gradient-to-tr from-indigo-400/10 to-pink-400/10 rounded-full blur-3xl"></div>
+            
+            <div className="relative z-10 p-4">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center shadow-lg">
+                      <Users className="h-5 w-5 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold bg-gradient-to-r from-slate-800 to-indigo-600 bg-clip-text text-transparent">
+                        {translations.chatWith} {selectedClient.full_name}
+                      </h2>
+                      <p className="text-slate-600 text-sm">
+                        {translations.clientCode}: <span className="font-mono bg-slate-100 px-2 py-1 rounded-lg text-xs">{selectedClient.user_code}</span>
+                      </p>
                     </div>
                   </div>
                 </div>
-              )}
-            </div>
-          </CardHeader>
-        </Card>
-
-        {/* Chat Header - only show when client is selected */}
-        {selectedClient && (
-          <Card className="mb-4">
-            <CardHeader>
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
-                <div>
-                  <CardTitle>{translations.chatWith} {selectedClient.full_name}</CardTitle>
-                  <CardDescription>{translations.clientCode}: {selectedClient.user_code}</CardDescription>
-                </div>
-                {mealPlanData && (
-                  <div className="text-sm text-right">
-                    <span className="text-gray-500">{translations.dailyCalories}: </span>
-                    <span className="font-medium">{mealPlanData.daily_total_calories || translations.notSet}</span>
+                <div className="flex items-center gap-3">
+                  {mealPlanData && (
+                    <div className="px-3 py-2 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl">
+                      <div className="text-sm">
+                        <span className="text-slate-600">{translations.dailyCalories}: </span>
+                        <span className="font-bold text-blue-800">{mealPlanData.daily_total_calories || translations.notSet}</span>
+                      </div>
+                    </div>
+                  )}
+                  <div className="p-3 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl shadow-lg">
+                    <div className="flex items-center gap-2 text-sm">
+                      <div className="w-6 h-6 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg flex items-center justify-center">
+                        <span className="text-white font-bold text-xs">✓</span>
+                      </div>
+                      <div>
+                        <span className="font-bold text-emerald-800">{translations.selected || 'Selected'}</span>
+                      </div>
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
-            </CardHeader>
-          </Card>
+            </div>
+          </div>
         )}
 
-        {/* Chat Area - only show when client is selected */}
+        {/* Premium Chat Area - only show when client is selected */}
         {selectedClient ? (
           <>
-            <Card className="flex-1 flex flex-col mb-4">
-              <CardContent className="flex-1 p-4 overflow-hidden">
-                <ScrollArea className="h-full pr-4" ref={scrollAreaRef}>
+            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-white/90 to-white/80 backdrop-blur-2xl border border-white/20 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.1)] flex-1 flex flex-col min-h-0">
+              {/* Animated background */}
+              <div className="absolute inset-0 bg-gradient-to-r from-green-500/5 via-blue-500/5 to-purple-500/5"></div>
+              <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-green-400/10 to-blue-400/10 rounded-full blur-3xl"></div>
+              
+              <div className="relative z-10 flex-1 p-4 overflow-hidden">
+                <ScrollArea className="h-full pr-3" ref={scrollAreaRef}>
                   {hasMoreMessages && (
-                    <div className="flex justify-center py-2">
+                    <div className="flex justify-center py-3">
                       <Button
                         onClick={handleLoadMore}
                         disabled={isLoadingMore}
@@ -686,15 +689,22 @@ Your task is to respond to the user's message below, taking into account their s
                           bg-gradient-to-r from-blue-500 to-indigo-600
                           text-white font-semibold
                           py-2 px-6
-                          rounded-lg
+                          rounded-xl
                           shadow-lg
-                          transition duration-300 ease-in-out
-                          hover:from-blue-600 hover:to-indigo-700 hover:shadow-xl
+                          transition-all duration-300 ease-in-out
+                          hover:from-blue-600 hover:to-indigo-700 hover:shadow-xl hover:scale-105
                           focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-opacity-50
                           disabled:opacity-50 disabled:cursor-not-allowed
                         `}
                       >
-                        {isLoadingMore ? translations.loadingMore : translations.loadMore}
+                        {isLoadingMore ? (
+                          <div className="flex items-center gap-2">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                            {translations.loadingMore}
+                          </div>
+                        ) : (
+                          translations.loadMore
+                        )}
                       </Button>
                     </div>
                   )}
@@ -705,109 +715,136 @@ Your task is to respond to the user's message below, taking into account their s
                         className={`mb-4 flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                       >
                         <div
-                          className={`rounded-lg px-4 py-2 max-w-[80%] ${msg.role === 'user'
-                              ? 'bg-green-600 text-white'
-                              : 'bg-gray-100 text-gray-900'
-                            }`}
+                          className={`rounded-xl px-4 py-3 max-w-[80%] shadow-lg transition-all duration-300 hover:shadow-xl ${
+                            msg.role === 'user'
+                              ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white'
+                              : 'bg-gradient-to-r from-slate-50 to-white border border-slate-200 text-slate-800'
+                          }`}
                         >
                           {renderMessageContent(msg)}
                         </div>
                       </div>
                     ))
                   ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-center p-8 text-gray-500">
-                      <MessageSquare className="h-12 w-12 text-gray-300 mb-4" />
-                      <h3 className="text-xl font-medium mb-2">{translations.startConversation}</h3>
-                      <p className="max-w-md">
+                    <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                      <div className="w-16 h-16 bg-gradient-to-br from-slate-200 to-slate-300 rounded-2xl flex items-center justify-center mb-4 shadow-lg">
+                        <MessageSquare className="h-8 w-8 text-slate-400" />
+                      </div>
+                      <h3 className="text-xl font-bold text-slate-700 mb-2">{translations.startConversation}</h3>
+                      <p className="text-slate-600 max-w-md">
                         {translations.chatWith} {selectedClient.full_name} {translations.chatAboutNutrition}
                       </p>
                     </div>
                   )}
                   <div ref={chatEndRef} />
                 </ScrollArea>
-              </CardContent>
-            </Card>
-
-            <div className="flex gap-2">
-              <input
-                type="file"
-                ref={fileInputRef}
-                accept="image/*"
-                className="hidden"
-                onChange={handleFileChange}
-              />
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading}
-                className={`border-green-200 ${imageFile ? 'bg-green-50 text-green-600' : 'hover:bg-green-50'}`}
-              >
-                <ImageIcon className="h-5 w-5" />
-              </Button>
-              <Input
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder={`${translations.messageClient} ${selectedClient.full_name}...`}
-                disabled={isLoading}
-                className="border-green-200 focus:ring-green-500"
-              />
-              <Button
-                onClick={handleSend}
-                disabled={(!message.trim() && !imageFile) || isLoading}
-                className="bg-green-600 hover:bg-green-700"
-              >
-                {isLoading ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <Send className="h-5 w-5" />
-                )}
-              </Button>
-            </div>
-            {imageFile && (
-              <div className="mt-2 text-sm text-green-600">
-                {translations.imageSelected}: {imageFile.name}
               </div>
-            )}
+            </div>
+
+            {/* Premium Message Input Section */}
+            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-white/90 to-white/80 backdrop-blur-2xl border border-white/20 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.1)]">
+              {/* Animated background */}
+              <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/5 via-teal-500/5 to-blue-500/5"></div>
+              <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-br from-emerald-400/10 to-teal-400/10 rounded-full blur-3xl"></div>
+              
+              <div className="relative z-10 p-4">
+                <div className="flex gap-3">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleFileChange}
+                  />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isLoading}
+                    className={`w-12 h-12 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 hover:from-blue-100 hover:to-indigo-100 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 ${
+                      imageFile ? 'bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-200 text-emerald-600' : 'text-blue-600'
+                    }`}
+                  >
+                    <ImageIcon className="h-5 w-5" />
+                  </Button>
+                  <Input
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder={`${translations.messageClient} ${selectedClient.full_name}...`}
+                    disabled={isLoading}
+                    className="flex-1 h-12 bg-white/60 backdrop-blur-sm border border-white/20 rounded-xl shadow-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500/40 transition-all duration-300"
+                  />
+                  <Button
+                    onClick={handleSend}
+                    disabled={(!message.trim() && !imageFile) || isLoading}
+                    className="w-12 h-12 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
+                  >
+                    {isLoading ? (
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+                    ) : (
+                      <Send className="h-5 w-5" />
+                    )}
+                  </Button>
+                </div>
+                {imageFile && (
+                  <div className="mt-3 p-2 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl">
+                    <div className="flex items-center gap-2 text-emerald-700 text-sm">
+                      <div className="w-6 h-6 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg flex items-center justify-center">
+                        <ImageIcon className="h-3 w-3 text-white" />
+                      </div>
+                      <span className="font-medium">{translations.imageSelected}: {imageFile.name}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </>
         ) : (
-          <Card className="flex-1 flex flex-col mb-4">
-            <CardContent className="flex-1 p-4 overflow-hidden">
-              <div className="h-full flex flex-col items-center justify-center text-center p-8 text-gray-500">
-                <Users className="h-16 w-16 text-gray-300 mb-4" />
-                <h3 className="text-xl font-medium mb-2">{translations.noClientSelected}</h3>
-                <p className="max-w-md">
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-white/90 to-white/80 backdrop-blur-2xl border border-white/20 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.1)] flex-1 flex flex-col min-h-0">
+            {/* Animated background */}
+            <div className="absolute inset-0 bg-gradient-to-r from-slate-500/5 via-gray-500/5 to-blue-500/5"></div>
+            <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-slate-400/10 to-gray-400/10 rounded-full blur-3xl"></div>
+            
+            <div className="relative z-10 flex-1 p-8 overflow-hidden">
+              <div className="h-full flex flex-col items-center justify-center text-center">
+                <div className="w-20 h-20 bg-gradient-to-br from-slate-200 to-slate-300 rounded-2xl flex items-center justify-center mb-6 shadow-lg">
+                  <Users className="h-10 w-10 text-slate-400" />
+                </div>
+                <h3 className="text-2xl font-bold text-slate-700 mb-3">{translations.noClientSelected}</h3>
+                <p className="text-slate-600 max-w-md">
                   {translations.selectClientToStart}
                 </p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         )}
 
-        {/* Image Modal */}
+        {/* Premium Image Modal */}
         <Dialog open={isImageModalOpen} onOpenChange={setIsImageModalOpen}>
-          <DialogContent className="max-w-4xl max-h-[90vh] p-0">
-            <DialogHeader className="p-4 pb-0">
+          <DialogContent className="max-w-5xl max-h-[90vh] p-0 bg-white/95 backdrop-blur-2xl border border-white/20 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)] rounded-3xl">
+            <DialogHeader className="p-6 pb-0">
               <div className="flex items-center justify-between">
-                <DialogTitle>{translations.imageViewer || 'Image Viewer'}</DialogTitle>
+                <DialogTitle className="text-xl font-bold bg-gradient-to-r from-slate-800 to-blue-600 bg-clip-text text-transparent">
+                  {translations.imageViewer || 'Image Viewer'}
+                </DialogTitle>
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={closeImageModal}
-                  className="h-8 w-8"
+                  className="w-10 h-10 bg-gradient-to-r from-red-50 to-pink-50 hover:from-red-100 hover:to-pink-100 text-red-600 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300"
                 >
-                  <X className="h-4 w-4" />
+                  <X className="h-5 w-5" />
                 </Button>
               </div>
             </DialogHeader>
-            <div className="p-4 pt-0">
+            <div className="p-6 pt-0">
               {currentImageUrl && (
                 <div className="flex justify-center">
                   <img
                     src={currentImageUrl}
                     alt="Full size image"
-                    className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-lg"
+                    className="max-w-full max-h-[70vh] object-contain rounded-2xl shadow-2xl border border-white/20"
                     onError={(e) => {
                       e.target.style.display = 'none';
                       console.error('Failed to load modal image:', currentImageUrl);

@@ -97,6 +97,13 @@ export default function Clients() {
   });
   const [showFilters, setShowFilters] = useState(false);
   
+  const getDefaultMealPlanStructure = (t) => ([
+    { key: 'breakfast', meal: t.breakfast || 'Breakfast', calories_pct: 30, description: '', calories: 0, locked: false },
+    { key: 'lunch',      meal: t.lunch || 'Lunch',         calories_pct: 30, description: '', calories: 0, locked: false },
+    { key: 'dinner',     meal: t.dinner || 'Dinner',       calories_pct: 30, description: '', calories: 0, locked: false },
+    { key: 'snacks',     meal: t.snacks || 'Snack',        calories_pct: 10, description: '', calories: 0, locked: false },
+  ]);
+
   const [formData, setFormData] = useState({
     user_code: '',
     full_name: '',
@@ -122,12 +129,7 @@ export default function Clients() {
     number_of_meals: '',
     client_preference: '',
     region: 'israel',
-    meal_plan_structure: [
-      { meal: "Breakfast", calories_pct: 30, description: "", calories: 0, locked: false },
-      { meal: "Lunch", calories_pct: 30, description: "", calories: 0, locked: false },
-      { meal: "Dinner", calories_pct: 30, description: "", calories: 0, locked: false },
-      { meal: "Snack", calories_pct: 10, description: "", calories: 0, locked: false }
-    ]
+    meal_plan_structure: getDefaultMealPlanStructure(translations)
   });
 
   // Add macro slider state
@@ -719,12 +721,7 @@ export default function Clients() {
       number_of_meals: '5',
       client_preference: '',
       region: 'israel',
-      meal_plan_structure: [
-        { meal: "Breakfast", calories_pct: 30, description: "", calories: 0, locked: false },
-        { meal: "Lunch", calories_pct: 30, description: "", calories: 0, locked: false },
-        { meal: "Dinner", calories_pct: 30, description: "", calories: 0, locked: false },
-        { meal: "Snack", calories_pct: 10, description: "", calories: 0, locked: false }
-      ]
+      meal_plan_structure: getDefaultMealPlanStructure(translations)
     });
     // Reset macro inputs and sliders to 0 when adding new user
     setMacroInputs({
@@ -789,12 +786,7 @@ export default function Clients() {
       number_of_meals: client.number_of_meals?.toString() || '5',
       client_preference: typeof client.client_preference === 'object' ? JSON.stringify(client.client_preference, null, 2) : client.client_preference || '',
       region: client.region || 'israel',
-      meal_plan_structure: client.meal_plan_structure || [
-        { meal: "Breakfast", calories_pct: 30, description: "", calories: 0, locked: false },
-        { meal: "Lunch", calories_pct: 30, description: "", calories: 0, locked: false },
-        { meal: "Dinner", calories_pct: 30, description: "", calories: 0, locked: false },
-        { meal: "Snack", calories_pct: 10, description: "", calories: 0, locked: false }
-      ]
+      meal_plan_structure: client.meal_plan_structure || getDefaultMealPlanStructure(translations)
     };
     
     setFormData(formDataToSet);
@@ -1063,6 +1055,16 @@ export default function Clients() {
         await ChatUser.update(currentClient.user_code, submitData);
       } else {
         await ChatUser.create(submitData);
+      }
+
+      // Notify other parts of the app (e.g., header client selector) to refresh the clients list
+      if (typeof window !== 'undefined') {
+        try {
+          const { EventBus } = await import('@/utils/EventBus');
+          EventBus.emit('refreshClients');
+        } catch (e) {
+          console.warn('EventBus refreshClients emit failed:', e);
+        }
       }
 
       setDialogOpen(false);
@@ -1471,6 +1473,23 @@ export default function Clients() {
       return newErrors;
     });
   };
+
+  // Update default meal names when language changes, preserving edited custom names
+  useEffect(() => {
+    setFormData(prev => ({
+      ...prev,
+      meal_plan_structure: prev.meal_plan_structure.map(item => {
+        if (!item.key) return item;
+        const map = {
+          breakfast: translations.breakfast || 'Breakfast',
+          lunch: translations.lunch || 'Lunch',
+          dinner: translations.dinner || 'Dinner',
+          snacks: translations.snacks || translations.snack || 'Snack',
+        };
+        return { ...item, meal: map[item.key] || item.meal };
+      })
+    }));
+  }, [translations, language]);
 
   return (
     <div className="space-y-6">
@@ -2426,7 +2445,7 @@ export default function Clients() {
                       <div className="grid grid-cols-12 gap-2 text-xs font-medium text-gray-600">
                         <div className="col-span-3">{translations.mealName || 'Meal Name'}</div>
                         <div className="col-span-2">{translations.description || 'Description'}</div>
-                        <div className="col-span-2">{translations.calories || 'Calories'}</div>
+                        <div className="col-span-2">{translations.caloriesLabel || 'Calories'}</div>
                         <div className="col-span-2">{translations.percentage || 'Percentage'}</div>
                         <div className="col-span-1">{translations.lock || 'Lock'}</div>
                         <div className="col-span-2">{translations.actions || 'Actions'}</div>
@@ -2442,7 +2461,7 @@ export default function Clients() {
                               value={meal.meal}
                               onChange={(e) => updateMealInPlan(index, 'meal', e.target.value)}
                               className="text-sm"
-                              placeholder="Meal name"
+                              placeholder={translations.mealName || 'Meal name'}
                             />
                           </div>
                           
@@ -2452,7 +2471,7 @@ export default function Clients() {
                               value={meal.description}
                               onChange={(e) => updateMealInPlan(index, 'description', e.target.value)}
                               className="text-sm"
-                              placeholder="Optional description"
+                              placeholder={translations.mealDescriptionShort || translations.descriptionPlaceholder || 'Optional description'}
                             />
                           </div>
                           
@@ -2480,7 +2499,7 @@ export default function Clients() {
                                 placeholder="0"
                                 min="0"
                                 disabled={meal.locked}
-                                title={meal.locked ? 'Locked meal - cannot edit calories' : 'Press Enter to confirm, Escape to cancel'}
+                                title={meal.locked ? `${translations.locked || 'Locked'} - ${translations.caloriesLabel || 'Calories'}` : 'Press Enter to confirm, Escape to cancel'}
                               />
                               {calorieInputErrors[index] && (
                                 <div className="absolute z-10 mt-1 p-2 bg-red-100 border border-red-300 rounded text-xs text-red-700 shadow-lg max-w-xs">

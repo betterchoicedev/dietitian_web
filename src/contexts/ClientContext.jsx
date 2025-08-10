@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ChatUser } from '@/api/entities';
+import { EventBus } from '@/utils/EventBus';
 
 const ClientContext = createContext();
 
@@ -21,6 +22,15 @@ export function ClientProvider({ children }) {
   // Load all clients on mount
   useEffect(() => {
     loadClients();
+  }, []);
+
+  // Listen to cross-app client refresh events (e.g., after creating a new user)
+  useEffect(() => {
+    const handler = () => loadClients();
+    EventBus.on('refreshClients', handler);
+    return () => {
+      if (EventBus.off) EventBus.off('refreshClients', handler);
+    };
   }, []);
 
   // Load selected client data when userCode changes

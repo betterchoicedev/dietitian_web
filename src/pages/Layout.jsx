@@ -238,22 +238,24 @@ export default function Layout() {
             </div>
           </div>
           
-          {/* Client Selection - Responsive width */}
+          {/* Client Selection */}
           <div className="flex-1 flex justify-center min-w-0">
             {clients.length > 0 && (
               <Select value={selectedUserCode || ''} onValueChange={handleClientChange}>
-                <SelectTrigger className="w-full max-w-[150px] sm:max-w-[200px] md:max-w-[280px] bg-white/80 backdrop-blur-sm border-border/60 shadow-sm hover:border-primary/40 transition-all duration-300 text-xs sm:text-sm md:text-base h-8 sm:h-9 md:h-10 px-2 md:px-3">
+                <SelectTrigger className="w-full max-w-[150px] sm:max-w-[200px] md:max-w-[280px] bg-white/90 backdrop-blur-sm border border-border/60 shadow-sm hover:border-primary/40 transition-all duration-300 text-xs sm:text-sm md:text-base h-9 sm:h-10 md:h-11 px-3 md:px-4 rounded-lg">
                   <SelectValue placeholder={translations.selectClient || 'Select Client'} />
                 </SelectTrigger>
-                <SelectContent className="bg-white/95 backdrop-blur-xl border-border/60">
+                <SelectContent className="bg-white/95 backdrop-blur-xl border-border/60 shadow-lg rounded-lg">
                   {clients.map((client) => (
-                    <SelectItem key={client.user_code} value={client.user_code} className="hover:bg-primary/5">
-                      <div className="flex items-center gap-2">
-                        <User className="h-3 w-3 md:h-4 md:w-4" />
-                        <span className="text-sm md:text-base">{client.full_name}</span>
-                        <BadgeComponent variant="outline" className="text-xs">
-                          {client.user_code}
-                        </BadgeComponent>
+                    <SelectItem key={client.user_code} value={client.user_code} className="hover:bg-primary/5 rounded-md">
+                      <div className="flex items-center gap-3">
+                        <div className="w-6 h-6 bg-primary/10 rounded-full flex items-center justify-center">
+                          <User className="h-3 w-3 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-gray-800 truncate">{client.full_name}</div>
+                          <div className="text-xs text-gray-500 truncate">{client.user_code}</div>
+                        </div>
                       </div>
                     </SelectItem>
                   ))}
