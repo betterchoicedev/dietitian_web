@@ -48,14 +48,16 @@ export const auth = {
 export const entities = {
   Menu: {
     create: async (data) => {
-      console.log('🏪 Menu.create called with data:', JSON.stringify(data, null, 2));
+      // Normalize status to draft by default
+      const normalized = { ...data, status: data?.status || 'draft' };
+      console.log('🏪 Menu.create called with data:', JSON.stringify(normalized, null, 2));
       
-      // Check if user already has an active menu before creating any new menu
-      if (data.user_code) {
+      // Only block creation if trying to create an ACTIVE menu while one already exists
+      if (normalized.user_code && normalized.status === 'active') {
         const { data: existingActiveMenus, error: activeError } = await supabase
           .from('meal_plans_and_schemas')
           .select('id')
-          .eq('user_code', data.user_code)
+          .eq('user_code', normalized.user_code)
           .eq('record_type', 'meal_plan')
           .eq('status', 'active');
         
@@ -73,19 +75,19 @@ export const entities = {
         // Log the creation
         const logEntry = {
           timestamp: new Date().toISOString(),
-          actor_id: data.dietitian_id || 'system',
+          actor_id: normalized.dietitian_id || 'system',
           action: 'CREATED',
-          details: { record_type: data.record_type, meal_plan_name: data.meal_plan_name }
+          details: { record_type: normalized.record_type, meal_plan_name: normalized.meal_plan_name }
         };
         
         console.log('📝 Creating log entry:', logEntry);
         
-        const changeLog = data.change_log || [];
+        const changeLog = normalized.change_log || [];
         changeLog.push(logEntry);
         
         // Prepare data for Supabase
         const supabaseData = {
-          ...data,
+          ...normalized,
           change_log: changeLog
         };
         
