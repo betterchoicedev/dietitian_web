@@ -2477,8 +2477,8 @@ const MenuCreate = () => {
       setProgress(5);
       setProgressStep('🎯 Analyzing client preferences...');
 
-      // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
-      const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_code: selectedClient.user_code })
@@ -2545,8 +2545,8 @@ const MenuCreate = () => {
         alternative: ensureCarbs(m.alternative)
       }));
 
-      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
-      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template: normalizedTemplate, user_code: selectedClient.user_code }),
@@ -3055,8 +3055,8 @@ const MenuCreate = () => {
 
 
   async function generateAlternativeMeal(main, alternative) {
-    // const response = await fetch('https://dietitian-be.azurewebsites.net/api/generate-alternative-meal', {
-    const response = await fetch('http://127.0.0.1:8000/api/generate-alternative-meal', {
+    const response = await fetch('https://dietitian-be.azurewebsites.net/api/generate-alternative-meal', {
+    // const response = await fetch('http://127.0.0.1:8000/api/generate-alternative-meal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
