@@ -17,6 +17,117 @@ import { supabase } from '@/lib/supabase';
 
 // https://dietitian-web-backend.onrender.com
 
+// Translation caching system to save AI tokens
+const CACHE_PREFIX = 'menu_translations';
+const CACHE_EXPIRY_DAYS = 30;
+
+// Function to create cache key for menu translations
+const createMenuCacheKey = (menu, targetLang) => {
+  try {
+    // Create a hash of the menu content for consistent caching
+    const menuContent = JSON.stringify({
+      meals: menu.meals?.map(meal => ({
+        main: meal.main?.ingredients?.map(ing => ing.item).filter(Boolean),
+        alternative: meal.alternative?.ingredients?.map(ing => ing.item).filter(Boolean),
+        alternatives: meal.alternatives?.map(alt => alt.ingredients?.map(ing => ing.item).filter(Boolean))
+      }))
+    });
+    return `${CACHE_PREFIX}_${targetLang}_${btoa(menuContent).slice(0, 50)}`;
+  } catch (error) {
+    console.warn('Failed to create cache key:', error);
+    return `${CACHE_PREFIX}_${targetLang}_${Date.now()}`;
+  }
+};
+
+// Function to create cache key for text translations
+const createTextCacheKey = (text, targetLang) => {
+  try {
+    return `${CACHE_PREFIX}_text_${targetLang}_${btoa(text).slice(0, 30)}`;
+  } catch (error) {
+    console.warn('Failed to create text cache key:', error);
+    return `${CACHE_PREFIX}_text_${targetLang}_${Date.now()}`;
+  }
+};
+
+// Function to get cached translation
+const getCachedTranslation = (cacheKey) => {
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (!cached) return null;
+    
+    const parsed = JSON.parse(cached);
+    const now = Date.now();
+    const maxAge = CACHE_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
+    
+    // Check if cache is expired
+    if (parsed._cachedAt && (now - parsed._cachedAt) > maxAge) {
+      localStorage.removeItem(cacheKey);
+      return null;
+    }
+    
+    return parsed.data;
+  } catch (error) {
+    console.warn('Failed to read cache:', error);
+    localStorage.removeItem(cacheKey);
+    return null;
+  }
+};
+
+// Function to cache translation
+const cacheTranslation = (cacheKey, data) => {
+  try {
+    const cacheData = {
+      data: data,
+      _cachedAt: Date.now(),
+      _version: '1.0'
+    };
+    localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+    console.log('💾 Cached translation:', cacheKey);
+  } catch (error) {
+    console.warn('Failed to cache translation:', error);
+  }
+};
+
+// Function to clear expired cache entries
+const cleanExpiredCache = () => {
+  try {
+    const now = Date.now();
+    const maxAge = CACHE_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
+    let cleanedCount = 0;
+    
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(CACHE_PREFIX)) {
+        try {
+          const value = localStorage.getItem(key);
+          if (value) {
+            const parsed = JSON.parse(value);
+            if (parsed._cachedAt && (now - parsed._cachedAt) > maxAge) {
+              localStorage.removeItem(key);
+              cleanedCount++;
+            }
+          }
+        } catch (parseError) {
+          localStorage.removeItem(key);
+          cleanedCount++;
+        }
+      }
+    }
+    
+    if (cleanedCount > 0) {
+      console.log(`🧹 Cleaned ${cleanedCount} expired cache entries`);
+    }
+    
+    return cleanedCount;
+  } catch (error) {
+    console.error('Failed to clean expired cache:', error);
+    return 0;
+  }
+};
+
+// Clean expired cache on module load
+cleanExpiredCache();
+
 const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
@@ -80,7 +191,7 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
   );
 };
 
-const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, translations, currentIngredient, onPortionDialog }) => {
+const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, translations, currentIngredient, onPortionDialog, autoFocus }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
   const [originalValue, setOriginalValue] = useState(value);
@@ -98,6 +209,13 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
     setEditValue(value);
     setOriginalValue(value);
   }, [value]);
+
+  useEffect(() => {
+    // Auto-focus if the prop is true
+    if (autoFocus && !isEditing) {
+      startEditing();
+    }
+  }, [autoFocus]);
 
   useEffect(() => {
     return () => {
@@ -319,7 +437,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
         }}
         className="w-full px-2 py-1 border border-gray-300 rounded text-right"
         dir="rtl"
-        autoFocus
+        autoFocus={autoFocus}
       />
 
       {isLoading && (
@@ -2676,6 +2794,15 @@ const MenuCreate = () => {
       if (!text || !containsHebrew(text)) return text;
       
       try {
+        // Check cache first
+        const cacheKey = createTextCacheKey(text, 'en');
+        const cachedTranslation = getCachedTranslation(cacheKey);
+        
+        if (cachedTranslation) {
+          console.log(`📚 Using cached text translation: "${text}" -> "${cachedTranslation}"`);
+          return cachedTranslation;
+        }
+        
         console.log(`🌐 Translating: "${text}"`);
         const response = await fetch('https://dietitian-be.azurewebsites.net/api/translate-text', {
           method: 'POST',
@@ -2695,6 +2822,10 @@ const MenuCreate = () => {
         
         const result = await response.json();
         console.log(`✅ Translated: "${text}" -> "${result.translatedText}"`);
+        
+        // Cache the successful translation
+        cacheTranslation(cacheKey, result.translatedText);
+        
         return result.translatedText;
       } catch (error) {
         console.error('❌ Translation error:', error);
@@ -2924,10 +3055,12 @@ const MenuCreate = () => {
           </div>
         </div>
 
-        {option.ingredients && option.ingredients.length > 0 && (
-          <div>
-            <h5 className="text-sm font-medium text-gray-700 mb-2">{translations.ingredients || 'Ingredients'}:</h5>
-            <ul className="space-y-1">
+        {/* Ingredients Section */}
+        <div>
+          <h5 className="text-sm font-medium text-gray-700 mb-2">{translations.ingredients || 'Ingredients'}:</h5>
+          
+          {option.ingredients && Array.isArray(option.ingredients) && option.ingredients.length > 0 ? (
+            <ul className="space-y-1 mb-3">
               {option.ingredients.map((ingredient, idx) => (
                 <li key={idx} className="flex items-start gap-2 text-sm group">
                   <span className="w-1.5 h-1.5 rounded-full bg-gray-400 mt-2" />
@@ -2942,8 +3075,14 @@ const MenuCreate = () => {
                         translations={translations}
                         currentIngredient={ingredient}
                         onPortionDialog={handleOpenPortionDialog}
+                        autoFocus={idx === option.ingredients.length - 1 && ingredient.item === ''}
                       />
                       <div className="flex items-center gap-1">
+                        {ingredient['portionSI(gram)'] && (
+                          <span className="text-gray-600 text-xs">
+                            ({ingredient['portionSI(gram)']}g)
+                          </span>
+                        )}
                         <EditableHouseholdMeasure
                           value={ingredient.household_measure}
                           onChange={handleHouseholdMeasureChange}
@@ -2990,8 +3129,29 @@ const MenuCreate = () => {
                 </li>
               ))}
             </ul>
+          ) : (
+            <div className="text-gray-500 text-sm italic mb-3">
+              {translations.noIngredients || 'No ingredients added yet'}
+            </div>
+          )}
+
+          {/* Add Ingredient Button */}
+          <div className="flex justify-end mt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleAddIngredient(option.mealIndex, isAlternative ? 'alternative' : 'main')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md shadow-sm transition-all duration-200 hover:shadow-md ${
+                isAlternative 
+                  ? 'bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 hover:from-blue-100 hover:to-blue-200 hover:border-blue-400 text-blue-700 hover:text-blue-800' 
+                  : 'bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-300 hover:from-green-100 hover:to-green-200 hover:border-green-400 text-green-700 hover:text-green-800'
+              }`}
+            >
+              <Plus className="w-3 h-3 mr-1.5" />
+              {translations.addIngredient || 'Add Ingredient'}
+            </Button>
           </div>
-        )}
+        </div>
       </div>
     );
   };
@@ -3372,6 +3532,91 @@ const MenuCreate = () => {
         </div>
       </>
     );
+  };
+
+  const handleAddIngredient = (mealIndex, optionIndex) => {
+    setMenu(prevMenu => {
+      // Save current state to undo stack before making changes
+      saveToUndoStack(prevMenu);
+      
+      const updatedMenu = JSON.parse(JSON.stringify(prevMenu));
+      const meal = updatedMenu.meals[mealIndex];
+      
+      if (!meal) {
+        console.error('❌ Meal not found at index:', mealIndex);
+        return prevMenu;
+      }
+      
+      const option = optionIndex === 'main' ? meal.main : meal.alternative;
+      
+      if (!option) {
+        console.error('❌ Option not found for meal:', mealIndex, 'option:', optionIndex);
+        return prevMenu;
+      }
+
+      // Ensure ingredients array exists
+      if (!option.ingredients) {
+        option.ingredients = [];
+      }
+
+      // Add a new empty ingredient
+      const newIngredient = {
+        item: '',
+        household_measure: '',
+        calories: 0,
+        protein: 0,
+        fat: 0,
+        carbs: 0,
+        'brand of pruduct': '',
+        UPC: null,
+        'portionSI(gram)': 0
+      };
+
+      option.ingredients.push(newIngredient);
+
+      return updatedMenu;
+    });
+
+    // Also update the original menu for consistency
+    setOriginalMenu(prevOriginal => {
+      if (!prevOriginal) return prevOriginal;
+
+      const updatedOriginal = JSON.parse(JSON.stringify(prevOriginal));
+      const meal = updatedOriginal.meals[mealIndex];
+      
+      if (!meal) {
+        console.error('❌ Meal not found at index:', mealIndex);
+        return prevOriginal;
+      }
+      
+      const option = optionIndex === 'main' ? meal.main : meal.alternative;
+      
+      if (!option) {
+        console.error('❌ Option not found for meal:', mealIndex, 'option:', optionIndex);
+        return prevOriginal;
+      }
+
+      // Ensure ingredients array exists
+      if (!option.ingredients) {
+        option.ingredients = [];
+      }
+
+      const newIngredient = {
+        item: '',
+        household_measure: '',
+        calories: 0,
+        protein: 0,
+        fat: 0,
+        carbs: 0,
+        'brand of pruduct': '',
+        UPC: null,
+        'portionSI(gram)': 0
+      };
+
+      option.ingredients.push(newIngredient);
+
+      return updatedOriginal;
+    });
   };
 
   return (
@@ -4423,40 +4668,76 @@ const MenuCreate = () => {
 
 
 async function translateMenu(menu, targetLang = 'he') {
-  // Create a deep copy of the menu to avoid modifying the original
-  const menuToTranslate = JSON.parse(JSON.stringify(menu));
-  
-  // Combine ingredient names with brand names for translation
-  if (menuToTranslate.meals) {
-    menuToTranslate.meals.forEach(meal => {
-      if (meal.main && meal.main.ingredients) {
-        meal.main.ingredients.forEach(ingredient => {
-          if (ingredient["brand of pruduct"]) {
-            ingredient.item = `${ingredient.item} (${ingredient["brand of pruduct"]})`;
-          }
-        });
-      }
-      if (meal.alternative && meal.alternative.ingredients) {
-        meal.alternative.ingredients.forEach(ingredient => {
-          if (ingredient["brand of pruduct"]) {
-            ingredient.item = `${ingredient.item} (${ingredient["brand of pruduct"]})`;
-          }
-        });
-      }
+  try {
+    // Check cache first
+    const cacheKey = createMenuCacheKey(menu, targetLang);
+    const cachedTranslation = getCachedTranslation(cacheKey);
+    
+    if (cachedTranslation) {
+      console.log('📚 Using cached menu translation for', targetLang);
+      return cachedTranslation;
+    }
+    
+    console.log('🌐 Fetching fresh menu translation for', targetLang);
+    
+    // Create a deep copy of the menu to avoid modifying the original
+    const menuToTranslate = JSON.parse(JSON.stringify(menu));
+    
+    // Combine ingredient names with brand names for translation
+    if (menuToTranslate.meals) {
+      menuToTranslate.meals.forEach(meal => {
+        if (meal.main && meal.main.ingredients) {
+          meal.main.ingredients.forEach(ingredient => {
+            if (ingredient["brand of pruduct"]) {
+              ingredient.item = `${ingredient.item} (${ingredient["brand of pruduct"]})`;
+            }
+          });
+        }
+        if (meal.alternative && meal.alternative.ingredients) {
+          meal.alternative.ingredients.forEach(ingredient => {
+            if (ingredient["brand of pruduct"]) {
+              ingredient.item = `${ingredient.item} (${ingredient["brand of pruduct"]})`;
+            }
+          });
+        }
+      });
+    }
+
+    const response = await fetch('https://dietitian-be.azurewebsites.net/api/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ menu: menuToTranslate, targetLang }),
     });
-  }
 
-  const response = await fetch('https://dietitian-be.azurewebsites.net/api/translate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ menu: menuToTranslate, targetLang }),
-  });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || 'Translation failed');
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Translation failed');
+    }
+    
+    const result = await response.json();
+    
+    // Cache the successful translation
+    cacheTranslation(cacheKey, result);
+    
+    return result;
+  } catch (error) {
+    console.error('Error translating menu:', error);
+    
+    // Try to use cached translations as fallback if available
+    try {
+      const fallbackCacheKey = `${CACHE_PREFIX}_${targetLang}_fallback`;
+      const fallbackTranslation = getCachedTranslation(fallbackCacheKey);
+      if (fallbackTranslation) {
+        console.log('🔄 Using fallback cached menu translation');
+        return fallbackTranslation;
+      }
+    } catch (fallbackError) {
+      console.warn('Failed to load fallback translation:', fallbackError);
+    }
+    
+    // Return original menu if translation fails
+    return { menu: menu, error: error.message };
   }
-  return await response.json();
 }
 
 export default MenuCreate;

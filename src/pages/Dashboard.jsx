@@ -205,37 +205,7 @@ export default function Dashboard() {
       link: createPageUrl('Chat'),
       disabled: !selectedUserCode
     },
-    {
-      title: translations.editProfile || 'Edit Profile',
-      description: translations.updateClientInfo || 'Update client information',
-      icon: User,
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-50',
-      hoverColor: 'hover:bg-blue-100',
-      borderColor: 'border-blue-200',
-      link: createPageUrl('EditClient'),
-      disabled: !selectedUserCode
-    },
-    {
-      title: translations.recipeManagement || 'Recipe Management',
-      description: translations.browseRecipes || 'Browse and manage recipes',
-      icon: Heart,
-      color: 'text-red-600',
-      bgColor: 'bg-red-50',
-      hoverColor: 'hover:bg-red-100',
-      borderColor: 'border-red-200',
-      link: createPageUrl('RecipesPage')
-    },
-    {
-      title: translations.nutritionPlans || 'Nutrition Plans',
-      description: translations.managePlans || 'Manage client nutrition plans',
-      icon: Target,
-      color: 'text-indigo-600',
-      bgColor: 'bg-indigo-50',
-      hoverColor: 'hover:bg-indigo-100',
-      borderColor: 'border-indigo-200',
-      link: createPageUrl('NutritionPlan')
-    }
+    
   ];
 
   return (

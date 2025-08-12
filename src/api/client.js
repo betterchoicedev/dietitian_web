@@ -208,23 +208,55 @@ export const entities = {
     },
     update: async (id, data) => {
       // Check if user already has an active menu before setting status to active
-      if (data.status === 'active' && data.user_code) {
+      if (data.status === 'active') {
+        // Ensure we have user_code; if not provided, fetch it
+        let userCode = data.user_code;
+        if (!userCode) {
+          const { data: currentMenu, error: fetchCurrentErr } = await supabase
+            .from('meal_plans_and_schemas')
+            .select('user_code')
+            .eq('id', id)
+            .single();
+          if (fetchCurrentErr) {
+            console.error('❌ Error fetching current menu for user_code:', fetchCurrentErr);
+            throw new Error('Failed to resolve user for activation.');
+          }
+          userCode = currentMenu?.user_code;
+        }
+        if (!userCode) {
+          throw new Error('User code is required to activate a menu.');
+        }
+
+        // Find other active menus for this user
         const { data: existingActiveMenus, error: activeError } = await supabase
           .from('meal_plans_and_schemas')
           .select('id')
-          .eq('user_code', data.user_code)
+          .eq('user_code', userCode)
           .eq('record_type', 'meal_plan')
           .eq('status', 'active');
-        
+
         if (activeError) {
           console.error('❌ Error checking for existing active menus:', activeError);
           throw new Error('Failed to check for existing active menus.');
         }
-        
-        // Exclude the current menu from the check
+
         const otherActiveMenus = (existingActiveMenus || []).filter(menu => menu.id !== id);
         if (otherActiveMenus.length > 0) {
-          throw new Error('Cannot set this menu to active: another active menu already exists for this user.');
+          // Deactivate (expire) other active menus for this user
+          const otherIds = otherActiveMenus.map(m => m.id);
+          const { error: deactivateErr } = await supabase
+            .from('meal_plans_and_schemas')
+            .update({
+              status: 'expired',
+              active_from: null,
+              active_until: null,
+              updated_at: new Date().toISOString()
+            })
+            .in('id', otherIds);
+          if (deactivateErr) {
+            console.error('❌ Failed to deactivate existing active menus:', deactivateErr);
+            throw new Error('Failed to deactivate existing active menus.');
+          }
         }
       }
       

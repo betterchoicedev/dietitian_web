@@ -142,6 +142,20 @@ export default function Clients() {
     fat: { percentage: 0, grams: 0, gramsPerKg: 0 }
   });
 
+  // Track previous macro distribution for smart rebalancing
+  const [previousMacroDistribution, setPreviousMacroDistribution] = useState({
+    protein: 30,
+    carbs: 40,
+    fat: 30
+  });
+
+  // Track which macros are locked (won't be rebalanced)
+  const [lockedMacros, setLockedMacros] = useState({
+    protein: false,
+    carbs: false,
+    fat: false
+  });
+
   // Track which fields have been touched/visited
   const [touchedFields, setTouchedFields] = useState({});
 
@@ -191,6 +205,21 @@ export default function Clients() {
     return age.toString();
   };
 
+  // Check if locked macros prevent reaching 100% total
+  const checkLockedMacrosConflict = () => {
+    const lockedTotal = Object.entries(lockedMacros)
+      .filter(([_, isLocked]) => isLocked)
+      .reduce((sum, [macro, _]) => sum + macroInputs[macro].percentage, 0);
+    
+    return {
+      hasConflict: lockedTotal > 100,
+      lockedTotal: lockedTotal,
+      message: lockedTotal > 100 
+        ? `Locked macros total ${lockedTotal.toFixed(1)}%, which exceeds 100%. Unlock some macros to continue.`
+        : null
+    };
+  };
+
   // Calculate macros based on different input methods
   const calculateMacrosFromInputs = (inputType, value, macroType) => {
     const calories = parseInt(formData.dailyTotalCalories) || 0;
@@ -201,13 +230,149 @@ export default function Clients() {
     let newMacros = { ...macroInputs };
     
     if (inputType === 'percentage') {
-      // Calculate grams from percentage
-      const grams = Math.round((value * calories) / (macroType === 'fat' ? 9 : 4));
+      // Validate percentage input (0-100)
+      const validPercentage = Math.max(0, Math.min(100, value));
+      
+      // Calculate grams from percentage (divide by 100 first!)
+      const grams = Math.round((validPercentage / 100) * calories / (macroType === 'fat' ? 9 : 4));
+      
       newMacros[macroType] = {
-        percentage: value,
+        percentage: validPercentage,
         grams: grams,
         gramsPerKg: weight > 0 ? Math.round((grams / weight) * 10) / 10 : 0
       };
+      
+      // Rebalance other macros to maintain 100% total
+      const otherMacros = Object.keys(newMacros).filter(key => key !== macroType);
+      const currentTotal = otherMacros.reduce((sum, key) => sum + newMacros[key].percentage, 0) + validPercentage;
+      
+      if (currentTotal > 100) {
+        // If total exceeds 100%, reduce other macros proportionally (only unlocked ones)
+        const excess = currentTotal - 100;
+        const unlockedOtherMacros = otherMacros.filter(key => !lockedMacros[key]);
+        const lockedOtherMacros = otherMacros.filter(key => lockedMacros[key]);
+        
+        // Calculate total of locked macros
+        const lockedTotal = lockedOtherMacros.reduce((sum, key) => sum + newMacros[key].percentage, 0);
+        
+        // If we have locked macros, we need to respect their values
+        if (lockedTotal > 0) {
+          // Calculate how much we can allocate to unlocked macros
+          const availableForUnlocked = 100 - validPercentage - lockedTotal;
+          
+          if (availableForUnlocked < 0) {
+            // If locked macros + current macro exceed 100%, we can't maintain the lock
+            // This is an error state - user needs to unlock some macros
+            console.warn(`Cannot maintain 100% total with current locked macros. Locked total: ${lockedTotal}%, current macro: ${validPercentage}%`);
+            return;
+          }
+          
+          // Distribute available percentage among unlocked macros based on their current ratios
+          if (unlockedOtherMacros.length > 0) {
+            const unlockedTotal = unlockedOtherMacros.reduce((sum, key) => sum + newMacros[key].percentage, 0);
+            
+            if (unlockedTotal > 0) {
+              unlockedOtherMacros.forEach(key => {
+                const ratio = newMacros[key].percentage / unlockedTotal;
+                const newPercentage = Math.round(availableForUnlocked * ratio * 10) / 10;
+                
+                // Recalculate grams for this macro
+                const newGrams = Math.round((newPercentage / 100) * calories / (key === 'fat' ? 9 : 4));
+                newMacros[key] = {
+                  percentage: newPercentage,
+                  grams: newGrams,
+                  gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 10) / 10 : 0
+                };
+              });
+            }
+          }
+        } else {
+          // No locked macros, proceed with normal rebalancing
+          const otherTotal = otherMacros.reduce((sum, key) => sum + newMacros[key].percentage, 0);
+          
+          if (otherTotal > 0) {
+            otherMacros.forEach(key => {
+              const ratio = newMacros[key].percentage / otherTotal;
+              const reduction = ratio * excess;
+              const newPercentage = Math.max(0, newMacros[key].percentage - reduction);
+              
+              // Recalculate grams for this macro
+              const newGrams = Math.round((newPercentage / 100) * calories / (key === 'fat' ? 9 : 4));
+              newMacros[key] = {
+                percentage: Math.round(newPercentage * 10) / 10,
+                grams: newGrams,
+                gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 10) / 10 : 0
+              };
+            });
+          }
+        }
+      } else if (currentTotal < 100 && otherMacros.some(key => newMacros[key].percentage === 0)) {
+        // If total is less than 100% and some other macros are at 0%, redistribute the remaining percentage
+        const remainingPercentage = 100 - validPercentage;
+        const zeroMacros = otherMacros.filter(key => newMacros[key].percentage === 0 && !lockedMacros[key]);
+        const nonZeroMacros = otherMacros.filter(key => newMacros[key].percentage > 0 && !lockedMacros[key]);
+        const lockedMacrosList = otherMacros.filter(key => lockedMacros[key]);
+        
+        // Calculate how much is already allocated to locked macros
+        const lockedTotal = lockedMacrosList.reduce((sum, key) => sum + newMacros[key].percentage, 0);
+        const availableForUnlocked = remainingPercentage - lockedTotal;
+        
+        if (zeroMacros.length > 0 && availableForUnlocked > 0) {
+          // Use previous distribution ratios for zero macros, but scale to fit remaining percentage
+          const zeroMacrosPreviousTotal = zeroMacros.reduce((sum, key) => sum + previousMacroDistribution[key], 0);
+          
+          if (zeroMacrosPreviousTotal > 0) {
+            // Distribute available percentage based on previous ratios
+            zeroMacros.forEach(key => {
+              const ratio = previousMacroDistribution[key] / zeroMacrosPreviousTotal;
+              const newPercentage = Math.round(availableForUnlocked * ratio * 10) / 10;
+              const newGrams = Math.round((newPercentage / 100) * calories / (key === 'fat' ? 9 : 4));
+              
+              newMacros[key] = {
+                percentage: newPercentage,
+                grams: newGrams,
+                gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 10) / 10 : 0
+              };
+            });
+          } else {
+            // Fallback: equal distribution if no previous ratios
+            const percentagePerZeroMacro = availableForUnlocked / zeroMacros.length;
+            
+            zeroMacros.forEach(key => {
+              const newPercentage = Math.round(percentagePerZeroMacro * 10) / 10;
+              const newGrams = Math.round((newPercentage / 100) * calories / (key === 'fat' ? 9 : 4));
+              
+              newMacros[key] = {
+                percentage: newPercentage,
+                grams: newGrams,
+                gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 10) / 10 : 0
+              };
+            });
+          }
+          
+          // If there are non-zero macros, adjust them proportionally to maintain their relative ratios
+          if (nonZeroMacros.length > 0) {
+            const nonZeroTotal = nonZeroMacros.reduce((sum, key) => sum + newMacros[key].percentage, 0);
+            const targetNonZeroTotal = availableForUnlocked - zeroMacros.reduce((sum, key) => sum + newMacros[key].percentage, 0);
+            
+            if (targetNonZeroTotal > 0 && nonZeroTotal > 0) {
+              const scalingFactor = targetNonZeroTotal / nonZeroTotal;
+              
+              nonZeroMacros.forEach(key => {
+                const newPercentage = Math.round(newMacros[key].percentage * scalingFactor * 10) / 10;
+                const newGrams = Math.round((newPercentage / 100) * calories / (key === 'fat' ? 9 : 4));
+                
+                newMacros[key] = {
+                  percentage: newPercentage,
+                  grams: newGrams,
+                  gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 10) / 10 : 0
+                };
+              });
+            }
+          }
+        }
+      }
+      
     } else if (inputType === 'grams') {
       // Calculate percentage from grams
       const percentage = Math.round(((value * (macroType === 'fat' ? 9 : 4)) / calories) * 100);
@@ -235,6 +400,16 @@ export default function Clients() {
       carbs: newMacros.carbs.grams,
       fat: newMacros.fat.grams
     });
+    
+    // Update previous distribution for smart rebalancing (only if total is close to 100%)
+    const totalPercentage = newMacros.protein.percentage + newMacros.carbs.percentage + newMacros.fat.percentage;
+    if (Math.abs(totalPercentage - 100) < 0.1) {
+      setPreviousMacroDistribution({
+        protein: newMacros.protein.percentage,
+        carbs: newMacros.carbs.percentage,
+        fat: newMacros.fat.percentage
+      });
+    }
   };
 
   // Calculate total percentages and calories
@@ -244,15 +419,35 @@ export default function Clients() {
     return { totalPercentage, totalCalories };
   };
 
+  // Validate macro percentages
+  const validateMacroPercentages = () => {
+    const total = calculateTotals().totalPercentage;
+    const isValid = Math.abs(total - 100) < 0.1; // Allow small rounding differences
+    const warning = !isValid ? `Macro percentages should add up to 100%. Current total: ${total.toFixed(1)}%` : null;
+    return { isValid, warning, total };
+  };
+
   // Auto-calculate initial macros when calories change
   useEffect(() => {
     const calories = parseInt(formData.dailyTotalCalories) || 0;
     if (calories > 0 && (!macroInputs.protein.grams && !macroInputs.carbs.grams && !macroInputs.fat.grams)) {
-      // Default distribution: 30% protein, 40% carbs, 30% fat
+      // Default distribution: 30% protein, 40% carbs, 30% fat (total: 100%)
       const defaultMacros = {
-        protein: { percentage: 30, grams: Math.round((0.3 * calories) / 4), gramsPerKg: 0 },
-        carbs: { percentage: 40, grams: Math.round((0.4 * calories) / 4), gramsPerKg: 0 },
-        fat: { percentage: 30, grams: Math.round((0.3 * calories) / 9), gramsPerKg: 0 }
+        protein: { 
+          percentage: 30, 
+          grams: Math.round((0.30 * calories) / 4), 
+          gramsPerKg: 0 
+        },
+        carbs: { 
+          percentage: 40, 
+          grams: Math.round((0.40 * calories) / 4), 
+          gramsPerKg: 0 
+        },
+        fat: { 
+          percentage: 30, 
+          grams: Math.round((0.30 * calories) / 9), 
+          gramsPerKg: 0 
+        }
       };
       
       // Calculate grams per kg if weight is available
@@ -268,6 +463,13 @@ export default function Clients() {
         protein: defaultMacros.protein.grams,
         carbs: defaultMacros.carbs.grams,
         fat: defaultMacros.fat.grams
+      });
+      
+      // Set previous distribution for smart rebalancing
+      setPreviousMacroDistribution({
+        protein: defaultMacros.protein.percentage,
+        carbs: defaultMacros.carbs.percentage,
+        fat: defaultMacros.fat.percentage
       });
     }
   }, [formData.dailyTotalCalories, formData.weight_kg]);
@@ -1491,6 +1693,14 @@ export default function Clients() {
     }));
   }, [translations, language]);
 
+  // Toggle lock state for a specific macro
+  const toggleMacroLock = (macroType) => {
+    setLockedMacros(prev => ({
+      ...prev,
+      [macroType]: !prev[macroType]
+    }));
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -2221,7 +2431,88 @@ export default function Clients() {
                   </div>
                 </div>
                 <div className="space-y-3">
-                  <Label className="text-base font-medium">{translations.macrosGrams}</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-base font-medium">{translations.macrosGrams}</Label>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setLockedMacros({
+                            protein: true,
+                            carbs: true,
+                            fat: true
+                          });
+                        }}
+                        className="text-orange-600 border-orange-600 hover:bg-orange-50"
+                        title="Lock all macros - none will be automatically rebalanced"
+                      >
+                        🔒 Lock All
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setLockedMacros({
+                            protein: false,
+                            carbs: false,
+                            fat: false
+                          });
+                        }}
+                        className="text-green-600 border-green-600 hover:bg-green-50"
+                        title="Unlock all macros - all will be automatically rebalanced"
+                      >
+                        🔓 Unlock All
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const calories = parseInt(formData.dailyTotalCalories) || 0;
+                          if (calories > 0) {
+                            const weight = parseFloat(formData.weight_kg) || 0;
+                            const defaultMacros = {
+                              protein: { 
+                                percentage: 30, 
+                                grams: Math.round((0.30 * calories) / 4), 
+                                gramsPerKg: weight > 0 ? Math.round((Math.round((0.30 * calories) / 4) / weight) * 10) / 10 : 0
+                              },
+                              carbs: { 
+                                percentage: 40, 
+                                grams: Math.round((0.40 * calories) / 4), 
+                                gramsPerKg: weight > 0 ? Math.round((Math.round((0.40 * calories) / 4) / weight) * 10) / 10 : 0
+                              },
+                              fat: { 
+                                percentage: 30, 
+                                grams: Math.round((0.30 * calories) / 9), 
+                                gramsPerKg: weight > 0 ? Math.round((Math.round((0.30 * calories) / 9) / weight) * 10) / 10 : 0
+                              }
+                            };
+                            setMacroInputs(defaultMacros);
+                            setMacroSliders({
+                              protein: defaultMacros.protein.grams,
+                              carbs: defaultMacros.carbs.grams,
+                              fat: defaultMacros.fat.grams
+                            });
+                            
+                            // Update previous distribution for smart rebalancing
+                            setPreviousMacroDistribution({
+                              protein: defaultMacros.protein.percentage,
+                              carbs: defaultMacros.carbs.percentage,
+                              fat: defaultMacros.fat.percentage
+                            });
+                          }
+                        }}
+                        className="text-blue-600 border-blue-600 hover:bg-blue-50"
+                        disabled={!formData.dailyTotalCalories}
+                      >
+                        🔄 Reset to Default (30/40/30)
+                      </Button>
+                    </div>
+                  </div>
                   
                   {/* Macro Input Rows */}
                   <div className="space-y-2">
@@ -2233,23 +2524,56 @@ export default function Clients() {
                       <div key={macro.key} className="border rounded-md p-2 bg-gray-50">
                         <div className="flex items-center justify-between mb-2">
                           <Label className="text-xs font-medium capitalize">{macro.label}</Label>
-                          <div className="text-xs text-gray-500">
-                            {macroInputs[macro.key].grams}g
+                          <div className="flex items-center gap-2">
+                            <div className="text-xs text-gray-500">
+                              {macroInputs[macro.key].grams}g
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => toggleMacroLock(macro.key)}
+                              className={`p-1 h-6 w-6 ${
+                                lockedMacros[macro.key] 
+                                  ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50' 
+                                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                              }`}
+                              title={lockedMacros[macro.key] ? 'Unlock macro (will be rebalanced)' : 'Lock macro (won\'t be rebalanced)'}
+                            >
+                              {lockedMacros[macro.key] ? '🔒' : '🔓'}
+                            </Button>
                           </div>
                         </div>
                         
                         <div className="grid grid-cols-4 gap-2 items-center">
                           {/* Percentage Input */}
                           <div>
-                            <Label className="text-xs text-gray-600">%</Label>
+                            <Label className="text-xs text-gray-600 flex items-center gap-1">
+                              % {lockedMacros[macro.key] && <span className="text-blue-600">🔒</span>}
+                            </Label>
                             <Input
                               type="number"
                               value={macroInputs[macro.key].percentage}
                               onChange={(e) => calculateMacrosFromInputs('percentage', parseFloat(e.target.value) || 0, macro.key)}
-                              className="text-xs h-8"
+                              className={`text-xs h-8 ${
+                                macroInputs[macro.key].percentage < 0 || macroInputs[macro.key].percentage > 100
+                                  ? 'border-red-500 bg-red-50' 
+                                  : lockedMacros[macro.key]
+                                  ? 'border-blue-300 bg-blue-50 cursor-not-allowed'
+                                  : ''
+                              }`}
                               min="0"
                               max="100"
+                              step="0.1"
+                              placeholder="0"
+                              disabled={lockedMacros[macro.key]}
                             />
+                            {macroInputs[macro.key].percentage < 0 && (
+                              <div className="text-xs text-red-500 mt-1">Min: 0%</div>
+                            )}
+                            {macroInputs[macro.key].percentage > 100 && (
+                              <div className="text-xs text-red-500 mt-1">Max: 100%</div>
+                            )}
                           </div>
                           
                           {/* Grams Input */}
@@ -2295,18 +2619,83 @@ export default function Clients() {
                   </div>
                   
                   {/* Summary */}
-                  <div className="bg-blue-50 border border-blue-200 rounded-md p-2">
-                    <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className={`border rounded-md p-3 ${
+                    validateMacroPercentages().isValid 
+                      ? 'bg-green-50 border-green-200' 
+                      : 'bg-red-50 border-red-200'
+                  }`}>
+                    <div className="grid grid-cols-2 gap-2 text-xs mb-2">
                       <div>
                         <span className="text-gray-600">{translations.totalPercentages}: </span>
-                        <span className="font-medium">{calculateTotals().totalPercentage.toFixed(1)}%</span>
+                        <span className={`font-medium ${
+                          validateMacroPercentages().isValid ? 'text-green-700' : 'text-red-700'
+                        }`}>
+                          {validateMacroPercentages().total.toFixed(1)}%
+                        </span>
                       </div>
                       <div>
                         <span className="text-gray-600">{translations.totalCaloriesInTargets}: </span>
                         <span className="font-medium">{calculateTotals().totalCalories}</span>
                       </div>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">
+                    
+                    {/* Validation Warning */}
+                    {!validateMacroPercentages().isValid && (
+                      <div className="mb-2 p-2 bg-red-100 border border-red-300 rounded text-xs text-red-700">
+                        ⚠️ <strong>Warning:</strong> {validateMacroPercentages().warning}
+                        <br />
+                        <span className="text-red-600">
+                          Tip: Adjust one macro percentage and the unlocked macros will automatically rebalance to maintain 100% total.
+                          <br />
+                          💡 Use the lock buttons (🔒/🔓) to prevent specific macros from being automatically changed.
+                        </span>
+                      </div>
+                    )}
+                    
+                    {/* Success Message */}
+                    {validateMacroPercentages().isValid && (
+                      <div className="mb-2 p-2 bg-green-100 border border-green-300 rounded text-xs text-green-700">
+                        ✅ <strong>Perfect!</strong> Macro percentages add up to 100%
+                      </div>
+                    )}
+                    
+                    {/* Lock Status */}
+                    <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-700">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span>🔒</span>
+                        <span className="font-medium">Locked Macros:</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {Object.entries(lockedMacros).map(([macro, isLocked]) => (
+                          <span
+                            key={macro}
+                            className={`px-2 py-1 rounded text-xs font-medium ${
+                              isLocked 
+                                ? 'bg-blue-200 text-blue-800 border border-blue-300' 
+                                : 'bg-gray-100 text-gray-500 border border-gray-200'
+                            }`}
+                          >
+                            {macro.charAt(0).toUpperCase() + macro.slice(1)}: {isLocked ? '🔒' : '🔓'}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="text-blue-600 mt-1 text-xs">
+                        Locked macros won't be automatically rebalanced when you change other macros.
+                      </div>
+                    </div>
+                    
+                    {/* Lock Conflict Warning */}
+                    {checkLockedMacrosConflict().hasConflict && (
+                      <div className="mb-2 p-2 bg-red-100 border border-red-300 rounded text-xs text-red-700">
+                        ⚠️ <strong>Lock Conflict:</strong> {checkLockedMacrosConflict().message}
+                        <br />
+                        <span className="text-red-600">
+                          Current locked total: {checkLockedMacrosConflict().lockedTotal.toFixed(1)}%
+                        </span>
+                      </div>
+                    )}
+                    
+                    <p className="text-xs text-gray-500">
                       {translations.macrosSumMatches} <br />
                       <span className="font-mono">{translations.caloriesFormula}</span>
                     </p>

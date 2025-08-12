@@ -36,6 +36,116 @@ export default function Chat() {
   const [firstMessageId, setFirstMessageId] = useState(null); // for pagination
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [currentImageUrl, setCurrentImageUrl] = useState(null);
+  const [isUserActive, setIsUserActive] = useState(true); // Track if user is active
+  const [lastUserActivity, setLastUserActivity] = useState(Date.now());
+  const [isRefreshing, setIsRefreshing] = useState(false); // Track refresh state
+  const [lastRefreshTime, setLastRefreshTime] = useState(null); // Track last refresh time
+  
+  // Use refs to store intervals to prevent recreation issues
+  const autoRefreshIntervalRef = useRef(null);
+  const simpleRefreshIntervalRef = useRef(null);
+
+  // Simple auto-refresh that always runs every 10 seconds (most reliable)
+  useEffect(() => {
+    if (!selectedClient?.user_code || !conversationId) {
+      console.log('Auto-refresh: Missing user_code or conversationId, skipping...');
+      return;
+    }
+
+    console.log('🔄 Setting up simple auto-refresh for conversation:', conversationId);
+
+    // Clear any existing interval
+    if (simpleRefreshIntervalRef.current) {
+      clearInterval(simpleRefreshIntervalRef.current);
+    }
+
+    // Set up new interval
+    simpleRefreshIntervalRef.current = setInterval(async () => {
+      try {
+        console.log('🔄 Simple auto-refresh: Checking for new messages...');
+        const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
+        const reversedMessages = latestMessages.reverse();
+        
+        if (reversedMessages.length > messages.length) {
+          console.log(`🔄 Simple auto-refresh: New messages detected! Old: ${messages.length}, New: ${reversedMessages.length}`);
+          setMessages(reversedMessages);
+          setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
+          setHasMoreMessages(reversedMessages.length === 20);
+          setLastRefreshTime(new Date());
+        } else {
+          console.log('Simple auto-refresh: No new messages found');
+        }
+      } catch (error) {
+        console.warn('Simple auto-refresh failed:', error);
+      }
+    }, 10000); // 10 seconds
+
+    // Cleanup function
+    return () => {
+      if (simpleRefreshIntervalRef.current) {
+        console.log('🔄 Cleaning up simple auto-refresh interval');
+        clearInterval(simpleRefreshIntervalRef.current);
+        simpleRefreshIntervalRef.current = null;
+      }
+    };
+  }, [selectedClient?.user_code, conversationId]); // Removed messages.length dependency
+
+  // Aggressive auto-refresh every 5 seconds for testing
+  useEffect(() => {
+    if (!selectedClient?.user_code || !conversationId) return;
+
+    console.log('🔄 Setting up aggressive 5-second auto-refresh for conversation:', conversationId);
+
+    const aggressiveInterval = setInterval(async () => {
+      try {
+        console.log('🔄 Aggressive auto-refresh: Checking for new messages...');
+        const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
+        const reversedMessages = latestMessages.reverse();
+        
+        if (reversedMessages.length > messages.length) {
+          console.log(`🔄 Aggressive auto-refresh: New messages detected! Old: ${messages.length}, New: ${reversedMessages.length}`);
+          setMessages(reversedMessages);
+          setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
+          setHasMoreMessages(reversedMessages.length === 20);
+          setLastRefreshTime(new Date());
+        } else {
+          console.log('Aggressive auto-refresh: No new messages found');
+        }
+      } catch (error) {
+        console.warn('Aggressive auto-refresh failed:', error);
+      }
+    }, 5000); // 5 seconds
+
+    return () => {
+      console.log('🔄 Cleaning up aggressive auto-refresh interval');
+      clearInterval(aggressiveInterval);
+    };
+  }, [selectedClient?.user_code, conversationId, messages.length]);
+
+  // Track user activity (less aggressive)
+  useEffect(() => {
+    const handleUserActivity = () => {
+      setIsUserActive(true);
+      setLastUserActivity(Date.now());
+      
+      // Reset to inactive after 3 seconds of no activity (less aggressive)
+      setTimeout(() => {
+        setIsUserActive(false);
+      }, 3000);
+    };
+
+    // Listen for user interactions (less events to avoid being too sensitive)
+    const events = ['mousedown', 'keypress', 'scroll'];
+    events.forEach(event => {
+      document.addEventListener(event, handleUserActivity, { passive: true });
+    });
+
+    return () => {
+      events.forEach(event => {
+        document.removeEventListener(event, handleUserActivity);
+      });
+    };
+  }, []);
 
   const toBase64 = file =>
     new Promise(resolve => {
@@ -57,8 +167,51 @@ export default function Chat() {
   };
 
 
-  const handleRefresh = () => {
-    setRefreshKey(prev => prev + 1);
+  const handleRefresh = async () => {
+    if (!selectedClient?.user_code || !conversationId) return;
+    
+    try {
+      setIsRefreshing(true);
+      console.log('🔄 Manual refresh triggered');
+      // Fetch latest messages
+      const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
+      const reversedMessages = latestMessages.reverse();
+      
+      setMessages(reversedMessages);
+      setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
+      setHasMoreMessages(reversedMessages.length === 20);
+      setLastRefreshTime(new Date());
+      
+      console.log('✅ Chat refreshed successfully');
+    } catch (error) {
+      console.error('Manual refresh failed:', error);
+      setError(translations.failedToLoadClientData || 'Failed to refresh chat');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  // Test function to manually trigger auto-refresh
+  const testAutoRefresh = async () => {
+    if (!selectedClient?.user_code || !conversationId) return;
+    
+    try {
+      console.log('🧪 Testing auto-refresh manually...');
+      const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
+      const reversedMessages = latestMessages.reverse();
+      
+      if (reversedMessages.length > messages.length) {
+        console.log(`🧪 Test: New messages detected! Old: ${messages.length}, New: ${reversedMessages.length}`);
+        setMessages(reversedMessages);
+        setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
+        setHasMoreMessages(reversedMessages.length === 20);
+        setLastRefreshTime(new Date());
+      } else {
+        console.log('🧪 Test: No new messages found');
+      }
+    } catch (error) {
+      console.error('Test auto-refresh failed:', error);
+    }
   };
 
   // Fetch conversation and initial messages when client is selected
@@ -654,6 +807,38 @@ Your task is to respond to the user's message below, taking into account their s
                       </div>
                     </div>
                   )}
+                  <div className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl">
+                    <div className={`w-2 h-2 rounded-full ${isUserActive ? 'bg-yellow-500' : 'bg-green-500'} ${!isUserActive ? 'animate-pulse' : ''}`}></div>
+                    <span className="text-sm font-medium text-green-700">
+                      {isUserActive ? 'User Active' : 'Auto-refresh'}
+                    </span>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRefresh}
+                    disabled={isRefreshing}
+                    className="px-3 py-2 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 hover:from-blue-100 hover:to-indigo-100 text-blue-700 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300"
+                  >
+                    {isRefreshing ? (
+                      <div className="flex items-center gap-2">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                        <span>Refreshing...</span>
+                      </div>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        {translations.refresh || 'Refresh'}
+                      </>
+                    )}
+                  </Button>
+                  {lastRefreshTime && (
+                    <div className="text-xs text-slate-500 px-2">
+                      Last: {lastRefreshTime.toLocaleTimeString()}
+                    </div>
+                  )}
+                  
+                 
                   <div className="p-3 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl shadow-lg">
                     <div className="flex items-center gap-2 text-sm">
                       <div className="w-6 h-6 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg flex items-center justify-center">

@@ -14,7 +14,14 @@ export const useClient = () => {
 
 export function ClientProvider({ children }) {
   const [clients, setClients] = useState([]);
-  const [selectedUserCode, setSelectedUserCode] = useState(null);
+  // Initialize selected user code from localStorage so it survives refresh
+  const [selectedUserCode, setSelectedUserCode] = useState(() => {
+    try {
+      return localStorage.getItem('selectedUserCode') || null;
+    } catch {
+      return null;
+    }
+  });
   const [selectedClient, setSelectedClient] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -33,12 +40,18 @@ export function ClientProvider({ children }) {
     };
   }, []);
 
-  // Load selected client data when userCode changes
+  // Persist selection whenever it changes and load the client details
   useEffect(() => {
-    if (selectedUserCode) {
-      loadSelectedClient();
-    } else {
-      setSelectedClient(null);
+    try {
+      if (selectedUserCode) {
+        localStorage.setItem('selectedUserCode', selectedUserCode);
+        loadSelectedClient();
+      } else {
+        localStorage.removeItem('selectedUserCode');
+        setSelectedClient(null);
+      }
+    } catch {
+      // ignore storage errors
     }
   }, [selectedUserCode]);
 
@@ -51,9 +64,15 @@ export function ClientProvider({ children }) {
       console.log('✅ Clients loaded:', clientsData?.length || 0, 'records');
       setClients(clientsData || []);
       
-      // Auto-select first client if available and no client is currently selected
-      if (clientsData && clientsData.length > 0 && !selectedUserCode) {
-        setSelectedUserCode(clientsData[0].user_code);
+      // If there is a stored selection but it no longer exists, fall back to first client
+      if (clientsData && clientsData.length > 0) {
+        const hasStored = selectedUserCode && clientsData.some(c => c.user_code === selectedUserCode);
+        if (!hasStored && !selectedUserCode) {
+          setSelectedUserCode(clientsData[0].user_code);
+        }
+        if (!hasStored && selectedUserCode) {
+          setSelectedUserCode(clientsData[0].user_code);
+        }
       }
     } catch (error) {
       console.error("❌ Error loading clients:", error);

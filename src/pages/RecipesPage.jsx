@@ -12,6 +12,175 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Utensils, Salad, Soup, ChefHat, Sandwich, Printer, Star, Clock, Users, Target, X, BookOpen, Zap } from 'lucide-react';
 
+// Translation caching system to save AI tokens
+const CACHE_PREFIX = 'recipe_translations';
+const CACHE_EXPIRY_DAYS = 30;
+
+// Function to create cache key for recipe translations
+const createRecipeCacheKey = (recipes, targetLang) => {
+  try {
+    // Create a hash of the recipe content for consistent caching
+    const recipeContent = JSON.stringify({
+      recipes: recipes.map(group => ({
+        group: group.group,
+        recipes: group.recipes.map(recipe => ({
+          id: recipe.id,
+          title: recipe.title,
+          instructions: recipe.instructions,
+          ingredients: recipe.ingredients,
+          tips: recipe.tips
+        }))
+      }))
+    });
+    return `${CACHE_PREFIX}_${targetLang}_${btoa(recipeContent).slice(0, 50)}`;
+  } catch (error) {
+    console.warn('Failed to create cache key:', error);
+    return `${CACHE_PREFIX}_${targetLang}_${Date.now()}`;
+  }
+};
+
+// Function to get cached translation
+const getCachedTranslation = (cacheKey) => {
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (!cached) return null;
+    
+    const parsed = JSON.parse(cached);
+    const now = Date.now();
+    const maxAge = CACHE_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
+    
+    // Check if cache is expired
+    if (parsed._cachedAt && (now - parsed._cachedAt) > maxAge) {
+      localStorage.removeItem(cacheKey);
+      return null;
+    }
+    
+    return parsed.data;
+  } catch (error) {
+    console.warn('Failed to read cache:', error);
+    localStorage.removeItem(cacheKey);
+    return null;
+  }
+};
+
+// Function to validate and clean cached data
+const validateAndCleanCachedData = (cachedData, originalRecipes) => {
+  try {
+    if (!Array.isArray(cachedData)) {
+      console.warn('Cached data is not an array, returning original recipes');
+      return originalRecipes;
+    }
+    
+    // Ensure each group has the proper structure
+    return cachedData.map((group, index) => {
+      if (!group || !group.group || !Array.isArray(group.recipes)) {
+        console.warn('Invalid group structure in cached data, using original');
+        return originalRecipes[index] || group;
+      }
+      
+      // Restore missing properties from original recipes
+      const originalGroup = originalRecipes[index];
+      if (originalGroup) {
+        return {
+          ...originalGroup, // Keep original icon, color, and other properties
+          group: group.group, // Use translated group name
+          recipes: group.recipes // Use translated recipes
+        };
+      }
+      
+      return group;
+    });
+  } catch (error) {
+    console.error('Error validating cached data:', error);
+    return originalRecipes;
+  }
+};
+
+// Function to cache translation
+const cacheTranslation = (cacheKey, data) => {
+  try {
+    const cacheData = {
+      data: data,
+      _cachedAt: Date.now(),
+      _version: '1.0'
+    };
+    localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+    console.log('💾 Cached recipe translation:', cacheKey);
+  } catch (error) {
+    console.warn('Failed to cache translation:', error);
+  }
+};
+
+// Function to clear expired cache entries
+const cleanExpiredCache = () => {
+  try {
+    const now = Date.now();
+    const maxAge = CACHE_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
+    let cleanedCount = 0;
+    
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(CACHE_PREFIX)) {
+        try {
+          const value = localStorage.getItem(key);
+          if (value) {
+            const parsed = JSON.parse(value);
+            if (parsed._cachedAt && (now - parsed._cachedAt) > maxAge) {
+              localStorage.removeItem(key);
+              cleanedCount++;
+            }
+          }
+        } catch (parseError) {
+          localStorage.removeItem(key);
+          cleanedCount++;
+        }
+      }
+    }
+    
+    if (cleanedCount > 0) {
+      console.log(`🧹 Cleaned ${cleanedCount} expired cache entries`);
+    }
+    
+    return cleanedCount;
+  } catch (error) {
+    console.error('Failed to clean expired cache:', error);
+    return 0;
+  }
+};
+
+// Function to clear corrupted cache
+const clearCorruptedCache = () => {
+  try {
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(CACHE_PREFIX)) {
+        try {
+          const value = localStorage.getItem(key);
+          if (value) {
+            JSON.parse(value); // Test if it's valid JSON
+          }
+        } catch (parseError) {
+          keysToRemove.push(key);
+        }
+      }
+    }
+    
+    keysToRemove.forEach(key => localStorage.removeItem(key));
+    if (keysToRemove.length > 0) {
+      console.log(`🧹 Removed ${keysToRemove.length} corrupted cache entries`);
+    }
+    return keysToRemove.length;
+  } catch (error) {
+    console.error('Failed to clear corrupted cache:', error);
+    return 0;
+  }
+};
+
+// Clean expired cache on module load
+cleanExpiredCache();
+clearCorruptedCache();
+
 const groupedRecipes = [
   {
     group: 'Salads',
@@ -377,6 +546,18 @@ const fallbackImage = '/logo-placeholder.png';
 // Translation function for recipes using backend API
 const translateRecipes = async (recipes, targetLang = 'he') => {
   try {
+    // Check cache first
+    const cacheKey = createRecipeCacheKey(recipes, targetLang);
+    const cachedTranslation = getCachedTranslation(cacheKey);
+    
+    if (cachedTranslation) {
+      console.log('📚 Using cached recipe translation for', targetLang);
+      // Validate and clean the cached data before returning
+      return validateAndCleanCachedData(cachedTranslation, recipes);
+    }
+    
+    console.log('🌐 Fetching fresh recipe translation for', targetLang);
+    
     const response = await fetch('https://dietitian-be.azurewebsites.net/api/translate-recipes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -391,13 +572,31 @@ const translateRecipes = async (recipes, targetLang = 'he') => {
     const translatedRecipes = result.recipes || recipes;
     
     // Preserve the original group structure with icons and colors
-    return translatedRecipes.map((translatedGroup, index) => ({
+    const finalTranslatedRecipes = translatedRecipes.map((translatedGroup, index) => ({
       ...recipes[index], // Keep original icon, color properties
       group: translatedGroup.group, // Use translated group name
       recipes: translatedGroup.recipes // Use translated recipes
     }));
+    
+    // Cache the successful translation
+    cacheTranslation(cacheKey, finalTranslatedRecipes);
+    
+    return finalTranslatedRecipes;
   } catch (error) {
     console.error('Error translating recipes:', error);
+    
+    // Try to use cached translations as fallback if available
+    try {
+      const fallbackCacheKey = `${CACHE_PREFIX}_${targetLang}_fallback`;
+      const fallbackTranslation = getCachedTranslation(fallbackCacheKey);
+      if (fallbackTranslation) {
+        console.log('🔄 Using fallback cached recipe translation');
+        return validateAndCleanCachedData(fallbackTranslation, recipes);
+      }
+    } catch (fallbackError) {
+      console.warn('Failed to load fallback translation:', fallbackError);
+    }
+    
     return recipes;
   }
 };
@@ -664,10 +863,32 @@ export default function RecipesPage() {
       if (language === 'he') {
         setIsTranslating(true);
         try {
-          const translated = await translateRecipes(groupedRecipes, 'he');
-          setTranslatedRecipes(translated);
+          const cacheKey = createRecipeCacheKey(groupedRecipes, 'he');
+          const cached = getCachedTranslation(cacheKey);
+
+          if (cached) {
+            try {
+              const validatedCached = validateAndCleanCachedData(cached, groupedRecipes);
+              setTranslatedRecipes(validatedCached);
+              console.log('✅ Loaded cached recipe translations for Hebrew.');
+            } catch (validationError) {
+              console.warn('Cached data validation failed, clearing cache and fetching fresh translation');
+              localStorage.removeItem(cacheKey);
+              clearCorruptedCache();
+              const translated = await translateRecipes(groupedRecipes, 'he');
+              setTranslatedRecipes(translated);
+              cacheTranslation(cacheKey, translated);
+            }
+          } else {
+            const translated = await translateRecipes(groupedRecipes, 'he');
+            setTranslatedRecipes(translated);
+            cacheTranslation(cacheKey, translated);
+            console.log('✅ Translated and cached recipe translations for Hebrew.');
+          }
         } catch (error) {
           console.error('Translation failed:', error);
+          // Clear any corrupted cache and fall back to original recipes
+          clearCorruptedCache();
           setTranslatedRecipes(groupedRecipes);
         } finally {
           setIsTranslating(false);
@@ -713,6 +934,59 @@ export default function RecipesPage() {
               <div className="w-2 h-2 bg-primary rounded-full"></div>
               <span className="text-sm font-medium text-primary">{translations.expertApproved || 'Expert Approved'}</span>
             </div>
+            <div className="flex items-center gap-2 px-4 py-2 bg-warning/10 border border-warning/30 rounded-xl">
+              <div className="w-2 h-2 bg-warning rounded-full"></div>
+              <span className="text-sm font-medium text-warning">Cache Active</span>
+            </div>
+          </div>
+          
+          {/* Cache Management */}
+          <div className="flex items-center justify-center gap-4 mt-6 animate-slide-up" style={{ animationDelay: '0.3s' }}>
+            <button
+              onClick={() => {
+                const cleaned = cleanExpiredCache();
+                if (cleaned > 0) {
+                  alert(`Cleaned ${cleaned} expired cache entries`);
+                } else {
+                  alert('No expired cache entries to clean');
+                }
+              }}
+              className="px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg text-sm font-medium transition-colors"
+            >
+              🧹 Clean Cache
+            </button>
+            <button
+              onClick={() => {
+                const keys = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                  const key = localStorage.key(i);
+                  if (key && key.startsWith(CACHE_PREFIX)) {
+                    keys.push(key);
+                  }
+                }
+                alert(`Cache contains ${keys.length} translation entries`);
+              }}
+              className="px-4 py-2 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg text-sm font-medium transition-colors"
+            >
+              📊 Cache Info
+            </button>
+            <button
+              onClick={() => {
+                const keys = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                  const key = localStorage.key(i);
+                  if (key && key.startsWith(CACHE_PREFIX)) {
+                    keys.push(key);
+                    localStorage.removeItem(key);
+                  }
+                }
+                alert(`Cleared ${keys.length} cache entries`);
+                window.location.reload();
+              }}
+              className="px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-sm font-medium transition-colors"
+            >
+              🗑️ Clear Cache
+            </button>
           </div>
         </div>
       </section>
@@ -729,34 +1003,58 @@ export default function RecipesPage() {
         )}
 
         <div className="space-y-16">
-          {translatedRecipes.map((group) => (
-            <div key={group.group} className="animate-slide-up">
-              <div className="flex items-center gap-4 mb-8">
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br from-${group.color} to-${group.color}-lighter flex items-center justify-center text-white shadow-glow-${group.color}`}>
-                  <group.icon className="w-6 h-6" />
-                </div>
-                <div>
-                  <h2 className="text-3xl font-bold text-gradient-primary font-heading">
-                    {getTranslatedGroupName(group.group)}
-                  </h2>
-                  <p className="text-muted-foreground/70">
-                    {group.recipes.length} {translations.professionalRecipe || 'professional recipe'}{group.recipes.length !== 1 ? (translations.pluralSuffix || 's') : ''}
-                  </p>
-                </div>
-              </div>
+          {Array.isArray(translatedRecipes) && translatedRecipes.length > 0 ? (
+            translatedRecipes.map((group) => {
+              // Safety check for group structure
+              if (!group || !group.group || !Array.isArray(group.recipes)) {
+                console.warn('Invalid group structure:', group);
+                return null;
+              }
+              
+              return (
+                <div key={group.group} className="animate-slide-up">
+                  <div className="flex items-center gap-4 mb-8">
+                    <div className={`w-12 h-12 rounded-xl bg-gradient-to-br from-${group.color || 'primary'} to-${group.color || 'primary'}-lighter flex items-center justify-center text-white shadow-glow-${group.color || 'primary'}`}>
+                      {React.isValidElement(group.icon) ? group.icon : 
+                       typeof group.icon === 'function' ? React.createElement(group.icon, { className: 'w-6 h-6' }) : 
+                       <ChefHat className="w-6 h-6" />}
+                    </div>
+                    <div>
+                      <h2 className="text-3xl font-bold text-gradient-primary font-heading">
+                        {getTranslatedGroupName(group.group)}
+                      </h2>
+                      <p className="text-muted-foreground/70">
+                        {group.recipes.length} {translations.professionalRecipe || 'professional recipe'}{group.recipes.length !== 1 ? (translations.pluralSuffix || 's') : ''}
+                      </p>
+                    </div>
+                  </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                {group.recipes.map((recipe) => (
-                  <RecipeCard
-                    key={recipe.id}
-                    recipe={recipe}
-                    group={group}
-                    onClick={setSelectedRecipe}
-                  />
-                ))}
-              </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    {group.recipes.map((recipe) => {
+                      // Safety check for recipe structure
+                      if (!recipe || !recipe.id) {
+                        console.warn('Invalid recipe structure:', recipe);
+                        return null;
+                      }
+                      
+                      return (
+                        <RecipeCard
+                          key={recipe.id}
+                          recipe={recipe}
+                          group={group}
+                          onClick={setSelectedRecipe}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">No recipes available</p>
             </div>
-          ))}
+          )}
         </div>
       </section>
 

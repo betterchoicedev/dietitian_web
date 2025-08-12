@@ -960,6 +960,8 @@ const MenuLoad = () => {
         updateData.active_until = null;
       }
 
+      // Deactivation of other active menus (if needed) is handled in the API layer
+
       const result = await Menu.update(selectedMenuForStatus.id, updateData);
       console.log('✅ Menu status updated successfully:', result);
       

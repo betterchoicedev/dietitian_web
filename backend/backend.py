@@ -2301,6 +2301,131 @@ Write this as a comprehensive, structured prompt that can be directly used as in
         logger.error(f"Error analyzing eating habits: {e}")
         return jsonify({"error": "Failed to analyze eating habits"}), 500
 
+@app.route("/api/update-user-profile", methods=["POST"])
+def api_update_user_profile():
+    """
+    Update user profile information in the chat_users table.
+    Receives: user_code, full_name, email, phone_number, age, date_of_birth, gender
+    """
+    try:
+        data = request.get_json()
+        
+        # Extract required fields
+        user_code = data.get("user_code")
+        full_name = data.get("full_name")
+        email = data.get("email")
+        phone_number = data.get("phone_number")
+        age = data.get("age")
+        date_of_birth = data.get("date_of_birth")
+        gender = data.get("gender")
+        
+        # Validate required fields
+        if not user_code or not full_name or not email:
+            return jsonify({"error": "user_code, full_name and email are required fields"}), 400
+        
+        # Validate email format
+        import re
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_pattern, email):
+            return jsonify({"error": "Invalid email format"}), 400
+        
+        # Validate age if provided
+        if age is not None:
+            try:
+                age = int(age)
+                if age < 0 or age > 150:
+                    return jsonify({"error": "Age must be between 0 and 150"}), 400
+            except (ValueError, TypeError):
+                return jsonify({"error": "Age must be a valid number"}), 400
+        
+        # Validate date_of_birth if provided
+        if date_of_birth:
+            try:
+                # Validate date format (assuming ISO format YYYY-MM-DD)
+                datetime.datetime.fromisoformat(date_of_birth)
+            except ValueError:
+                return jsonify({"error": "Invalid date format. Use YYYY-MM-DD format"}), 400
+        
+        # Validate gender if provided
+        valid_genders = ["male", "female", "other", "prefer_not_to_say"]
+        if gender and gender.lower() not in valid_genders:
+            return jsonify({"error": f"Gender must be one of: {', '.join(valid_genders)}"}), 400
+        
+        # Check if user exists by user_code
+        try:
+            existing_user = supabase.table('chat_users').select('id').eq('user_code', user_code).execute()
+            
+            if existing_user.data:
+                # User exists, update their profile
+                user_id = existing_user.data[0]['id']
+                
+                # Prepare update data
+                update_data = {
+                    "full_name": full_name,
+                    "email": email,
+                    "phone_number": phone_number,
+                    "age": age,
+                    "date_of_birth": date_of_birth,
+                    "gender": gender.lower() if gender else None,
+                    "updated_at": datetime.datetime.now().isoformat()
+                }
+                
+                # Remove None values to avoid overwriting existing data with null
+                update_data = {k: v for k, v in update_data.items() if v is not None}
+                
+                # Update user profile
+                response = supabase.table('chat_users').update(update_data).eq('id', user_id).execute()
+                
+                if response.data:
+                    logger.info(f"✅ Updated user profile for user_code: {user_code}")
+                    return jsonify({
+                        "message": "User profile updated successfully",
+                        "user_code": user_code,
+                        "action": "updated"
+                    })
+                else:
+                    return jsonify({"error": "Failed to update user profile"}), 500
+                    
+            else:
+                # User doesn't exist, create new user with the provided user_code
+                # Prepare insert data
+                insert_data = {
+                    "user_code": user_code,
+                    "full_name": full_name,
+                    "email": email,
+                    "phone_number": phone_number,
+                    "age": age,
+                    "date_of_birth": date_of_birth,
+                    "gender": gender.lower() if gender else None,
+                    "created_at": datetime.datetime.now().isoformat(),
+                    "updated_at": datetime.datetime.now().isoformat()
+                }
+                
+                # Remove None values
+                insert_data = {k: v for k, v in insert_data.items() if v is not None}
+                
+                # Insert new user
+                response = supabase.table('chat_users').insert(insert_data).execute()
+                
+                if response.data:
+                    logger.info(f"✅ Created new user with user_code: {user_code}")
+                    return jsonify({
+                        "message": "User profile created successfully",
+                        "user_code": user_code,
+                        "action": "created"
+                    })
+                else:
+                    return jsonify({"error": "Failed to create user profile"}), 500
+                    
+        except Exception as e:
+            logger.error(f"❌ Database operation failed: {str(e)}")
+            return jsonify({"error": f"Database operation failed: {str(e)}"}), 500
+            
+    except Exception as e:
+        logger.error(f"❌ Exception in /api/update-user-profile: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
