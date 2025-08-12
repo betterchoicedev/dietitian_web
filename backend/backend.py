@@ -2423,6 +2423,95 @@ def api_update_user_profile():
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
+@app.route("/api/update-user-fields", methods=["POST"])
+def api_update_user_fields():
+    """
+    Update specific user fields by user_code.
+    Receives: user_code, age, phone_number (optional), full_name (optional), date_of_birth
+    """
+    try:
+        data = request.get_json()
+        
+        # Extract required fields
+        user_code = data.get("user_code")
+        age = data.get("age")
+        date_of_birth = data.get("date_of_birth")
+        
+        # Extract optional fields
+        phone_number = data.get("phone_number")
+        full_name = data.get("full_name")
+        
+        # Validate required fields
+        if not user_code:
+            return jsonify({"error": "user_code is required"}), 400
+        
+        if age is None and date_of_birth is None:
+            return jsonify({"error": "At least one of age or date_of_birth must be provided"}), 400
+        
+        # Validate age if provided
+        if age is not None:
+            try:
+                age = int(age)
+                if age < 0 or age > 150:
+                    return jsonify({"error": "Age must be between 0 and 150"}), 400
+            except (ValueError, TypeError):
+                return jsonify({"error": "Age must be a valid number"}), 400
+        
+        # Validate date_of_birth if provided
+        if date_of_birth:
+            try:
+                # Validate date format (assuming ISO format YYYY-MM-DD)
+                datetime.datetime.fromisoformat(date_of_birth)
+            except ValueError:
+                return jsonify({"error": "Invalid date format. Use YYYY-MM-DD format"}), 400
+        
+        # Check if user exists by user_code
+        try:
+            existing_user = supabase.table('chat_users').select('id').eq('user_code', user_code).execute()
+            
+            if not existing_user.data:
+                return jsonify({"error": f"User with user_code '{user_code}' not found"}), 404
+            
+            user_id = existing_user.data[0]['id']
+            
+            # Prepare update data
+            update_data = {
+                "updated_at": datetime.datetime.now().isoformat()
+            }
+            
+            # Add provided fields to update data
+            if age is not None:
+                update_data["age"] = age
+            if date_of_birth is not None:
+                update_data["date_of_birth"] = date_of_birth
+            if phone_number is not None:
+                update_data["phone_number"] = phone_number
+            if full_name is not None:
+                update_data["full_name"] = full_name
+            
+            # Update user fields
+            response = supabase.table('chat_users').update(update_data).eq('id', user_id).execute()
+            
+            if response.data:
+                logger.info(f"✅ Updated user fields for user_code: {user_code}")
+                return jsonify({
+                    "message": "User fields updated successfully",
+                    "user_code": user_code,
+                    "updated_fields": list(update_data.keys()),
+                    "updated_data": update_data
+                })
+            else:
+                return jsonify({"error": "Failed to update user fields"}), 500
+                    
+        except Exception as e:
+            logger.error(f"❌ Database operation failed: {str(e)}")
+            return jsonify({"error": f"Database operation failed: {str(e)}"}), 500
+            
+    except Exception as e:
+        logger.error(f"❌ Exception in /api/update-user-fields: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
