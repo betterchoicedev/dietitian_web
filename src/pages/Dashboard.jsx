@@ -643,7 +643,7 @@ export default function Dashboard() {
                   <h2 className="text-3xl font-bold bg-gradient-to-r from-slate-800 to-green-600 bg-clip-text text-transparent">
                     {translations.menuoverview || 'Menu Overview'}
                   </h2>
-                  <p className="text-slate-600 font-medium">Recent nutrition plans and menus</p>
+                  <p className="text-slate-600 font-medium">{translations.recentNutritionPlans || 'Recent nutrition plans and menus'}</p>
                 </div>
               </div>
               
@@ -706,7 +706,7 @@ export default function Dashboard() {
                   <h2 className="text-3xl font-bold bg-gradient-to-r from-slate-800 to-blue-600 bg-clip-text text-transparent">
                     {translations.consultations || 'Consultations'}
                   </h2>
-                  <p className="text-slate-600 font-medium">AI-powered nutrition consultations</p>
+                  <p className="text-slate-600 font-medium">{translations.aiPoweredConsultations || 'AI-powered nutrition consultations'}</p>
                 </div>
               </div>
               

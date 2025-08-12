@@ -327,6 +327,8 @@ export const translations = {
     heightCm: 'Height (cm)',
     goal: 'Goal',
     preferences: 'Preferences',
+    recentNutritionPlans: 'Recent nutrition plans and menus',
+    aiPoweredConsultations: 'AI-powered nutrition consultations',
 
     // Client Management
     clientInformation: 'Client Information',
@@ -885,6 +887,10 @@ export const translations = {
     caloriesLabel: 'Calories',
     mealDescriptionShort: "What's in the meal",
     descriptionPlaceholder: 'Optional description',
+    systemStatus: 'System Status',
+    allSystemsOperational: 'All systems operational',
+    professionalNutrition: 'Professional Nutrition',
+    professionalPlatform: 'Professional Platform',
   },
   he: {
     // Navigation & Main Pages
@@ -1204,6 +1210,8 @@ export const translations = {
     heightCm: 'גובה (ס״מ)',
     goal: 'מטרה',
     preferences: 'העדפות',
+    recentNutritionPlans: 'תכניות תזונה ותפריטים אחרונים',
+    aiPoweredConsultations: 'ייעוץ תזונה מבוסס בינה מלאכותית',
 
     // Client Management
     clientInformation: 'מידע לקוח',
@@ -1547,6 +1555,10 @@ export const translations = {
     caloriesLabel: 'קלוריות',
     mealDescriptionShort: 'מה בארוחה',
     descriptionPlaceholder: 'תיאור קצר',
+    systemStatus: 'סטטוס מערכת',
+    allSystemsOperational: 'כל המערכות מופעלות',
+    professionalNutrition: 'תזונה מקצועית',
+    professionalPlatform: 'פלטפורמה מקצועית',
   }
 };
 

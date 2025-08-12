@@ -222,7 +222,7 @@ export default function Layout() {
               </div>
               <div className="flex flex-col">
                 <h1 className="text-lg font-bold text-gradient-primary">BetterChoice</h1>
-                <p className="text-xs text-muted-foreground/60">Professional Nutrition</p>
+                <p className="text-xs text-muted-foreground/60">{translations.professionalNutrition || 'Professional Nutrition'}</p>
               </div>
             </div>
           </div>
@@ -326,7 +326,7 @@ export default function Layout() {
             </div>
             <div className="flex flex-col">
               <h1 className="text-lg font-bold text-gradient-primary">BetterChoice</h1>
-              <p className="text-xs text-muted-foreground/60">Professional Platform</p>
+              <p className="text-xs text-muted-foreground/60">{translations.professionalPlatform || 'Professional Platform'}</p>
             </div>
           </div>
           <button
@@ -393,8 +393,8 @@ export default function Layout() {
             <div className="flex items-center gap-3">
               <div className="w-2 h-2 bg-success rounded-full animate-pulse-glow"></div>
               <div className="flex-1">
-                <p className="text-sm font-medium text-foreground/80">System Status</p>
-                <p className="text-xs text-muted-foreground/60">All systems operational</p>
+                <p className="text-sm font-medium text-foreground/80">{translations.systemStatus || 'System Status'}</p>
+                <p className="text-xs text-muted-foreground/60">{translations.allSystemsOperational || 'All systems operational'}</p>
               </div>
             </div>
           </div>

@@ -2367,7 +2367,6 @@ def api_update_user_profile():
                     "age": age,
                     "date_of_birth": date_of_birth,
                     "gender": gender.lower() if gender else None,
-                    "updated_at": datetime.datetime.now().isoformat()
                 }
                 
                 # Remove None values to avoid overwriting existing data with null
@@ -2397,8 +2396,6 @@ def api_update_user_profile():
                     "age": age,
                     "date_of_birth": date_of_birth,
                     "gender": gender.lower() if gender else None,
-                    "created_at": datetime.datetime.now().isoformat(),
-                    "updated_at": datetime.datetime.now().isoformat()
                 }
                 
                 # Remove None values
