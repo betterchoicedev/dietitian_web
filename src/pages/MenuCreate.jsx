@@ -809,6 +809,9 @@ const MenuCreate = () => {
   const [showShoppingList, setShowShoppingList] = useState(false);
   const [shoppingList, setShoppingList] = useState([]);
   
+  // Track ongoing operations to prevent duplicates
+  const ongoingOperations = React.useRef(new Set());
+  
   // Undo/Redo system
   const [undoStack, setUndoStack] = useState([]);
   const [redoStack, setRedoStack] = useState([]);
@@ -2595,8 +2598,8 @@ const MenuCreate = () => {
       setProgress(5);
       setProgressStep('🎯 Analyzing client preferences...');
 
-      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
-      // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+      // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_code: selectedClient.user_code })
@@ -2663,8 +2666,8 @@ const MenuCreate = () => {
         alternative: ensureCarbs(m.alternative)
       }));
 
-      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
-      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template: normalizedTemplate, user_code: selectedClient.user_code }),
@@ -3214,14 +3217,15 @@ const MenuCreate = () => {
   }, [handleLanguageChange]);
 
 
-  async function generateAlternativeMeal(main, alternative) {
-    const response = await fetch('https://dietitian-be.azurewebsites.net/api/generate-alternative-meal', {
-    // const response = await fetch('http://127.0.0.1:8000/api/generate-alternative-meal', {
+  async function generateAlternativeMeal(main, alternative, allAlternatives) {
+    // const response = await fetch('https://dietitian-be.azurewebsites.net/api/generate-alternative-meal', {
+    const response = await fetch('http://127.0.0.1:8000/api/generate-alternative-meal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         main,
         alternative,
+        allAlternatives, // Send all alternatives for better duplication avoidance
         user_code: selectedClient.user_code
       })
     });
@@ -3233,12 +3237,34 @@ const MenuCreate = () => {
   }
 
   const handleAddAlternative = async (mealIdx) => {
+    // Prevent duplicate calls while generating
+    if (generatingAlt[mealIdx] || ongoingOperations.current.has(mealIdx)) {
+      console.log('🔄 Already generating alternative for meal', mealIdx);
+      return;
+    }
+    
+    // Mark this operation as ongoing
+    ongoingOperations.current.add(mealIdx);
+    console.log(`🚀 Starting to generate alternative for meal ${mealIdx}`);
     setGeneratingAlt((prev) => ({ ...prev, [mealIdx]: true }));
+    
     try {
       const meal = menu.meals[mealIdx];
-      if (!meal || !meal.main || !meal.alternative) return;
+      if (!meal || !meal.main || !meal.alternative) {
+        console.log('❌ Missing main or alternative for meal', mealIdx);
+        return;
+      }
       
-      const newAlt = await generateAlternativeMeal(meal.main, meal.alternative);
+      // Collect all existing alternatives to avoid duplication
+      const allAlternatives = [meal.main, meal.alternative];
+      if (meal.alternatives && Array.isArray(meal.alternatives)) {
+        allAlternatives.push(...meal.alternatives);
+      }
+      
+      console.log(`📋 Collected ${allAlternatives.length} alternatives to avoid duplication`);
+      
+      const newAlt = await generateAlternativeMeal(meal.main, meal.alternative, allAlternatives);
+      console.log('✅ Generated new alternative:', newAlt);
       
       // If we're in Hebrew mode, translate the new alternative immediately
       let translatedAlt = newAlt;
@@ -3272,29 +3298,43 @@ const MenuCreate = () => {
         console.log('🔤 Not in Hebrew mode, using English version');
       }
       
-      // Update both current menu and original menu to maintain consistency
+      // Update both menus in a single operation to prevent race conditions
       setMenu((prevMenu) => {
+        console.log('🔄 Updating menu state...');
         // Save current state to undo stack before making changes
         saveToUndoStack(prevMenu);
         
-        const updated = { ...prevMenu };
-        if (!updated.meals[mealIdx].alternatives) updated.meals[mealIdx].alternatives = [];
+        const updated = JSON.parse(JSON.stringify(prevMenu));
+        if (!updated.meals[mealIdx].alternatives) {
+          updated.meals[mealIdx].alternatives = [];
+        }
         updated.meals[mealIdx].alternatives.push(translatedAlt);
-        return { ...updated };
+        console.log(`✅ Added alternative to meal ${mealIdx}, total alternatives: ${updated.meals[mealIdx].alternatives.length}`);
+        return updated;
       });
       
-      // Also update the original menu (English source of truth)
+      // Update original menu in the same operation
       setOriginalMenu((prevOriginal) => {
         if (!prevOriginal) return prevOriginal;
-        const updated = { ...prevOriginal };
-        if (!updated.meals[mealIdx].alternatives) updated.meals[mealIdx].alternatives = [];
+        
+        const updated = JSON.parse(JSON.stringify(prevOriginal));
+        if (!updated.meals[mealIdx].alternatives) {
+          updated.meals[mealIdx].alternatives = [];
+        }
         updated.meals[mealIdx].alternatives.push(newAlt); // Always store English version in original
-        return { ...updated };
+        return updated;
       });
+      
+      console.log(`✅ Successfully added alternative to meal ${mealIdx}`);
+      
     } catch (err) {
+      console.error('❌ Error generating alternative:', err);
       alert(err.message || 'Failed to generate alternative meal');
     } finally {
+      console.log(`🏁 Finished generating alternative for meal ${mealIdx}`);
       setGeneratingAlt((prev) => ({ ...prev, [mealIdx]: false }));
+      // Remove from ongoing operations
+      ongoingOperations.current.delete(mealIdx);
     }
   };
 
@@ -3617,6 +3657,76 @@ const MenuCreate = () => {
 
       return updatedOriginal;
     });
+  };
+
+  // Delete meal option (main or alternative) from a meal
+  const deleteMealOption = (mealIndex, optionType) => {
+    if (!menu || !menu.meals || mealIndex < 0 || mealIndex >= menu.meals.length) {
+      console.error('❌ Invalid meal index for deletion:', mealIndex);
+      return;
+    }
+
+    const meal = menu.meals[mealIndex];
+    if (!meal) {
+      console.error('❌ Meal not found at index:', mealIndex);
+      return;
+    }
+
+    // Save current state to undo stack before making changes
+    saveToUndoStack(menu);
+
+    setMenu(prevMenu => {
+      const updatedMenu = JSON.parse(JSON.stringify(prevMenu));
+      const targetMeal = updatedMenu.meals[mealIndex];
+      
+      // Remove the specified option type
+      if (optionType === 'main') {
+        delete targetMeal.main;
+      } else if (optionType === 'alternative') {
+        delete targetMeal.alternative;
+      } else if (optionType === 'alternatives' && targetMeal.alternatives) {
+        // For additional alternatives, remove the entire alternatives array
+        delete targetMeal.alternatives;
+      }
+      
+      // Recalculate totals after deletion
+      if (updatedMenu.meals.length > 0) {
+        updatedMenu.totals = calculateMainTotals(updatedMenu);
+      } else {
+        // If no meals left, reset totals
+        updatedMenu.totals = { calories: 0, protein: 0, fat: 0, carbs: 0 };
+      }
+      
+      return updatedMenu;
+    });
+
+    // Also update the original menu for consistency
+    setOriginalMenu(prevOriginal => {
+      if (!prevOriginal) return prevOriginal;
+
+      const updatedOriginal = JSON.parse(JSON.stringify(prevOriginal));
+      const targetMeal = updatedOriginal.meals[mealIndex];
+      
+      // Remove the specified option type
+      if (optionType === 'main') {
+        delete targetMeal.main;
+      } else if (optionType === 'alternative') {
+        delete targetMeal.alternative;
+      } else if (optionType === 'alternatives' && targetMeal.alternatives) {
+        // For additional alternatives, remove the entire alternatives array
+        delete targetMeal.alternatives;
+      }
+      
+      if (updatedOriginal.meals.length > 0) {
+        updatedOriginal.totals = calculateMainTotals(updatedOriginal);
+      } else {
+        updatedOriginal.totals = { calories: 0, protein: 0, fat: 0, carbs: 0 };
+      }
+      
+      return updatedOriginal;
+    });
+
+    console.log(`🗑️ Deleted ${optionType} option from meal at index ${mealIndex}`);
   };
 
   return (
@@ -4481,6 +4591,19 @@ const MenuCreate = () => {
                           <Badge variant="outline" className="bg-green-100 border-green-200">
                             {translations.mainOption || 'Main Option'}
                           </Badge>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-red-600 hover:bg-red-50 border-red-300 ml-auto"
+                            onClick={() => {
+                              if (window.confirm(translations.confirmDeleteMainOption || 'Are you sure you want to delete the main option? This action cannot be undone.')) {
+                                deleteMealOption(mealIdx, 'main');
+                              }
+                            }}
+                            title={translations.deleteMainOption || 'Delete Main Option'}
+                          >
+                            🗑️
+                          </Button>
                         </div>
                         {renderMealOption({ ...meal.main, mealIndex: mealIdx }, false)}
                       </div>
@@ -4492,6 +4615,19 @@ const MenuCreate = () => {
                           <Badge variant="outline" className="bg-blue-100 border-blue-200">
                             {translations.alternative || 'Alternative'}
                           </Badge>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-red-600 hover:bg-red-50 border-red-300 ml-auto"
+                            onClick={() => {
+                              if (window.confirm(translations.confirmDeleteAlternative || 'Are you sure you want to delete the alternative option? This action cannot be undone.')) {
+                                deleteMealOption(mealIdx, 'alternative');
+                              }
+                            }}
+                            title={translations.deleteAlternative || 'Delete Alternative'}
+                          >
+                            🗑️
+                          </Button>
                         </div>
                         {renderMealOption({ ...meal.alternative, mealIndex: mealIdx }, true)}
                       </div>
@@ -4500,10 +4636,58 @@ const MenuCreate = () => {
                     {/* Render additional alternatives if present */}
                     {meal.alternatives && meal.alternatives.length > 0 && (
                       <div className="mt-4">
-                        <div className="font-semibold mb-2 text-blue-700">{translations.otherAlternatives || 'Other Alternatives'}:</div>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="font-semibold text-blue-700">{translations.otherAlternatives || 'Other Alternatives'}:</div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-red-600 hover:bg-red-50 border-red-300"
+                            onClick={() => {
+                              if (window.confirm(translations.confirmDeleteAllAlternatives || 'Are you sure you want to delete all additional alternatives? This action cannot be undone.')) {
+                                deleteMealOption(mealIdx, 'alternatives');
+                              }
+                            }}
+                            title={translations.deleteAllAlternatives || 'Delete All Additional Alternatives'}
+                          >
+                            🗑️ {translations.deleteAll || 'Delete All'}
+                          </Button>
+                        </div>
                         <div className="space-y-4">
                           {meal.alternatives.map((alt, altIdx) => (
-                            <div key={altIdx} className="bg-blue-50 rounded-lg p-3">
+                            <div key={altIdx} className="bg-blue-50 rounded-lg p-3 relative">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-red-600 hover:bg-red-50 border-red-300 absolute top-2 right-2"
+                                onClick={() => {
+                                  if (window.confirm(translations.confirmDeleteAlternative || 'Are you sure you want to delete this alternative? This action cannot be undone.')) {
+                                    // Remove this specific alternative from the alternatives array
+                                    setMenu(prevMenu => {
+                                      const updatedMenu = JSON.parse(JSON.stringify(prevMenu));
+                                      updatedMenu.meals[mealIdx].alternatives.splice(altIdx, 1);
+                                      if (updatedMenu.meals[mealIdx].alternatives.length === 0) {
+                                        delete updatedMenu.meals[mealIdx].alternatives;
+                                      }
+                                      updatedMenu.totals = calculateMainTotals(updatedMenu);
+                                      return updatedMenu;
+                                    });
+                                    
+                                    setOriginalMenu(prevOriginal => {
+                                      if (!prevOriginal) return prevOriginal;
+                                      const updatedOriginal = JSON.parse(JSON.stringify(prevOriginal));
+                                      updatedOriginal.meals[mealIdx].alternatives.splice(altIdx, 1);
+                                      if (updatedOriginal.meals[mealIdx].alternatives.length === 0) {
+                                        delete updatedOriginal.meals[mealIdx].alternatives;
+                                      }
+                                      updatedOriginal.totals = calculateMainTotals(updatedOriginal);
+                                      return updatedOriginal;
+                                    });
+                                  }
+                                }}
+                                title={translations.deleteAlternative || 'Delete Alternative'}
+                              >
+                                🗑️
+                              </Button>
                               {renderMealOption({ ...alt, mealIndex: mealIdx, alternativeIndex: altIdx }, true)}
                             </div>
                           ))}

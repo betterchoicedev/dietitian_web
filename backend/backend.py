@@ -739,7 +739,7 @@ Generate meal options that are practical, delicious, and respect all dietary res
             response = openai.ChatCompletion.create(
                 engine=deployment,
                 messages=[{"role": "system", "content": system_prompt}, user_prompt],
-                temperature=0.3
+                temperature=0.1
             )
 
             result = response["choices"][0]["message"]["content"]
@@ -856,8 +856,6 @@ OUTPUT SCHEMA (object)
       "carbs": <int>,
       "brand of pruduct": "<real brand name in English>"
     }}
-  ],
-  "nutrition": {{ "calories": <int>, "protein": <int>, "fat": <int>, "carbs": <int> }}
 }}
 
 HARD RULES
@@ -874,14 +872,26 @@ MACRO TARGETS
 • EXACTLY match these targets (0% tolerance): {macro_targets}.
 • The primary protein for this option MUST be: {required_protein_source} (include it clearly as an ingredient).
 • Ingredients and total nutrition must sum to the exact targets.
+• CRITICAL: Cross-check every ingredient's macro values against reliable nutrition databases to ensure accuracy.
 
 VARIETY / DIFFERENTIATION
 • Avoid these protein sources: {avoid_proteins}.
 • Avoid these core ingredients (substring match): {avoid_ingredients}.
+• For ALTERNATIVE, it must differ from MAIN in protein source, carb base, cooking method, and flavour profile.
+
+PREVIOUS ISSUES TO AVOID
+{previous_issues_section}
+
+CURRENT VALIDATION FEEDBACK
+{validation_feedback_section}
 
 VALIDATION
 • No narrative text. Return only the JSON object described above.
 • Do not add keys not listed in the schema.
+• cross-check every ingredient's macros against its nutrition database - ensure all Macros & Caloriesvalues are accurate.
+    
+• If you see a previous meal attempt above, analyze what went wrong and fix those specific issues.
+• Pay special attention to macro calculations, ingredient accuracy, and dietary restrictions.
 """
 
 def _strip_markdown_fences(s: str) -> str:
@@ -909,6 +919,32 @@ def _region_instruction_from_prefs(preferences: dict) -> str:
     }
     return mapping.get(region, mapping['israel'])
 
+def _calculate_nutrition_from_ingredients(meal_data):
+    """
+    Calculate nutrition totals from ingredients and add them to the meal data.
+    This ensures perfect accuracy since we calculate it ourselves.
+    """
+    if not meal_data or "ingredients" not in meal_data:
+        return meal_data
+    
+    # Calculate totals from ingredients
+    nutrition = {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
+    
+    for ingredient in meal_data.get("ingredients", []):
+        nutrition["calories"] += float(ingredient.get("calories", 0))
+        nutrition["protein"] += float(ingredient.get("protein", 0))
+        nutrition["fat"] += float(ingredient.get("fat", 0))
+        nutrition["carbs"] += float(ingredient.get("carbs", 0))
+    
+    # Round to 1 decimal place for consistency
+    for macro in nutrition:
+        nutrition[macro] = round(nutrition[macro], 1)
+    
+    # Add nutrition to meal data
+    meal_data["nutrition"] = nutrition
+    
+    return meal_data
+
 def _build_option_with_retries(
     option_type: str,
     meal_name: str,
@@ -923,9 +959,23 @@ def _build_option_with_retries(
 ):
     avoid_proteins = avoid_proteins or []
     avoid_ingredients = avoid_ingredients or []
+    previous_issues = []  # Track issues across attempts
+    validation_feedback = ""  # Current validation feedback
 
     for i in range(max_attempts):
         logger.info(f"🧠 Building {option_type} for '{meal_name}', attempt {i+1}")
+
+        # Format previous issues section
+        if previous_issues:
+            previous_issues_section = f"DO NOT repeat these errors from previous attempts:\n• " + "\n• ".join(previous_issues)
+        else:
+            previous_issues_section = "No previous issues to avoid (first attempt)."
+
+        # Format validation feedback section
+        if validation_feedback:
+            validation_feedback_section = f"CRITICAL: Fix these specific validation errors:\n{validation_feedback}"
+        else:
+            validation_feedback_section = "No current validation issues (first attempt or previous attempt passed validation)."
 
         prompt = MEAL_BUILDER_PROMPT.format(
             option_type=option_type,
@@ -933,7 +983,9 @@ def _build_option_with_retries(
             macro_targets=macro_targets,
             required_protein_source=required_protein_source,
             avoid_proteins=avoid_proteins,
-            avoid_ingredients=avoid_ingredients
+            avoid_ingredients=avoid_ingredients,
+            previous_issues_section=previous_issues_section,
+            validation_feedback_section=validation_feedback_section
         )
 
         user_payload = {
@@ -947,14 +999,16 @@ def _build_option_with_retries(
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)}
             ],
-            temperature=0.3
+            temperature=0.1
         )
         raw = _strip_markdown_fences(response["choices"][0]["message"]["content"])
 
         try:
             candidate = json.loads(raw)
         except Exception as e:
-            logger.warning(f"❌ JSON parse error for {option_type} '{meal_name}': {e}")
+            error_msg = f"JSON parse error: {e}"
+            logger.warning(f"❌ {error_msg} for {option_type} '{meal_name}'")
+            previous_issues.append(error_msg)
             continue
 
         # Wrap for validator
@@ -967,11 +1021,26 @@ def _build_option_with_retries(
             json={"template": wrapped_template, "menu": wrapped_menu, "user_code": user_code}
         )
         val = val_res.get_json() or {}
+        
         if val.get("is_valid"):
             logger.info(f"✅ {option_type} for '{meal_name}' passed validation.")
+            # Automatically calculate and add nutrition totals from ingredients
+            candidate = _calculate_nutrition_from_ingredients(candidate)
             return candidate
         else:
-            logger.warning(f"❌ {option_type} for '{meal_name}' failed validation: {val.get('issues', [])}")
+            # Collect validation issues for next attempt
+            issues = val.get("issues", [])
+            failed_meal = val.get("meal_data", {})
+            logger.warning(f"❌ {option_type} for '{meal_name}' failed validation. Meal: {json.dumps(failed_meal, ensure_ascii=False)}, Issues: {issues}")
+            
+            # Add issues to running list and format for next prompt
+            previous_issues.extend(issues)
+            validation_feedback = "\n".join([f"• {issue}" for issue in issues])
+            
+            # Add context about what was generated to help the AI understand what needs fixing
+            if failed_meal:
+                meal_context = f"Your previous attempt generated this meal: {json.dumps(failed_meal, ensure_ascii=False)}"
+                validation_feedback = f"{meal_context}\n\nIssues to fix:\n{validation_feedback}"
 
     return None
 
@@ -1171,7 +1240,7 @@ def api_build_menu():
 @app.route("/api/validate-menu", methods=["POST"])
 def api_validate_menu():
     try:
-        data = request.json
+        data = request.json or {}
         template = data.get("template")
         menu = data.get("menu")
         user_code = data.get("user_code")
@@ -1179,15 +1248,56 @@ def api_validate_menu():
         if not template or not menu or not isinstance(template, list) or not isinstance(menu, list):
             return jsonify({"is_valid": False, "issues": ["Missing or invalid template/menu"]}), 400
 
-        # Load user preferences for dietary restrictions
-        preferences = None
+        # Load user preferences for dietary restrictions (best-effort)
         try:
-            preferences = load_user_preferences(user_code)
+            preferences = load_user_preferences(user_code) or {}
         except Exception as e:
             logger.warning(f"Could not load user preferences for validation: {e}")
-            preferences = {"limitations": []}
+            preferences = {}
 
-        macros = ["calories", "protein", "fat"]
+        limitations = [str(x).lower() for x in preferences.get("limitations", [])]
+        macros = ["calories", "protein", "fat", "carbs"]
+        issues = []
+
+        # Which option are we validating? (builder sends exactly one)
+        entry_t = template[0] if template else {}
+        entry_m = menu[0] if menu else {}
+
+        def _detect_option(t, m):
+            if "main" in t and "main" in m:   return "main"
+            if "alternative" in t and "alternative" in m: return "alternative"
+            # Graceful fallback
+            return "main" if "main" in m else "alternative" if "alternative" in m else None
+
+        option = _detect_option(entry_t, entry_m)
+        if option is None:
+            return jsonify({"is_valid": False, "issues": ["Could not detect option type (main/alternative)"]}), 400
+
+        tpl = entry_t.get(option) or {}
+        mn  = entry_m.get(option) or {}
+
+        # -------- helpers ----------
+        def _is_english(s: str) -> bool:
+            if not isinstance(s, str):
+                return False
+            # Allow ASCII printable + basic punctuation; flag Hebrew/Arabic/other letters
+            try:
+                s.encode("ascii")
+                return True
+            except Exception:
+                return False
+
+        def _num(x, default=None):
+            try:
+                return float(x)
+            except Exception:
+                return default
+
+        def _close(a, b, tol=1.0):
+            a = _num(a); b = _num(b)
+            if a is None or b is None:
+                return False
+            return abs(a - b) <= tol
 
         def get_allowed_margin(val):
             val = float(val)
@@ -1200,104 +1310,115 @@ def api_validate_menu():
             else:
                 return 0.3  # 30% margin for anything above 30
 
-        def validate_kosher_ingredients(ingredients, limitations):
-            """Validate kosher compliance for ingredients"""
-            if "kosher" not in [limit.lower() for limit in limitations]:
+        def _validate_kosher_ingredients(ingredients, limitations_list):
+            if "kosher" not in limitations_list:
                 return []
-            
             kosher_issues = []
-            
-            # Define meat and dairy ingredients
             meat_items = ["chicken", "beef", "lamb", "turkey", "duck", "meat", "poultry"]
             dairy_items = ["milk", "cream", "cheese", "yogurt", "butter", "dairy", "parmesan", "mozzarella", "ricotta", "cottage cheese"]
             non_kosher_items = ["pork", "bacon", "ham", "shellfish", "shrimp", "lobster", "crab", "clam", "oyster", "scallop"]
-            
-            has_meat = False
-            has_dairy = False
-            meat_ingredients = []
-            dairy_ingredients = []
-            
-            for ingredient in ingredients:
-                item_name = ingredient.get("item", "").lower()
-                
-                # Check for non-kosher ingredients
-                for non_kosher in non_kosher_items:
-                    if non_kosher in item_name:
-                        kosher_issues.append(f"Non-kosher ingredient detected: {ingredient.get('item', '')}")
-                
-                # Check for meat
-                for meat in meat_items:
-                    if meat in item_name:
-                        has_meat = True
-                        meat_ingredients.append(ingredient.get("item", ""))
-                        break
-                
-                # Check for dairy
-                for dairy in dairy_items:
-                    if dairy in item_name:
-                        has_dairy = True
-                        dairy_ingredients.append(ingredient.get("item", ""))
-                        break
-            
-            # Check for meat + dairy violation
+
+            has_meat, has_dairy = False, False
+            meat_ings, dairy_ings = [], []
+
+            for ing in ingredients or []:
+                item_name = str(ing.get("item", "")).lower()
+
+                # Non-kosher check
+                for nk in non_kosher_items:
+                    if nk in item_name:
+                        kosher_issues.append(f"Non-kosher ingredient detected: {ing.get('item', '')}")
+
+                # Meat/dairy check
+                if any(m in item_name for m in meat_items):
+                    has_meat = True
+                    meat_ings.append(ing.get("item", ""))
+                if any(d in item_name for d in dairy_items):
+                    has_dairy = True
+                    dairy_ings.append(ing.get("item", ""))
+
             if has_meat and has_dairy:
-                kosher_issues.append(f"KOSHER VIOLATION: Cannot mix meat and dairy in the same meal. Found meat: {', '.join(meat_ingredients)} and dairy: {', '.join(dairy_ingredients)}")
-            
+                kosher_issues.append(
+                    f"KOSHER VIOLATION: meat + dairy in the same meal. Meat: {', '.join(meat_ings)}; Dairy: {', '.join(dairy_ings)}"
+                )
             return kosher_issues
 
-        issues = []
+        # -------- schema checks ----------
+        # Required top-level keys in candidate
+        for key in ["meal_name", "meal_title", "ingredients"]:
+            if key not in mn:
+                issues.append(f"Missing key '{key}' in {option} object.")
 
-        # --- Main option feedback ---
-        template_main = template[0].get("main")
-        menu_main = menu[0].get("main")
-        if template_main and menu_main:
-            # Validate nutritional macros
-            for macro in macros:
-                tmpl_val = float(template_main.get(macro, 0))
-                menu_val = float(menu_main.get("nutrition", {}).get(macro, 0))
-                if tmpl_val == 0:
-                    continue
-                margin = get_allowed_margin(tmpl_val)
-                if abs(menu_val - tmpl_val) / tmpl_val > margin:
-                    direction = "Reduce" if menu_val > tmpl_val else "Increase"
-                    issues.append(
-                        f"{macro.capitalize()} is out of range for main: got {menu_val}g, target is {tmpl_val}g (allowed ±{int(margin*100)}%). {direction} {macro.lower()} ingredients."
-                    )
-            
-            # Validate kosher compliance for main
-            main_ingredients = menu_main.get("ingredients", [])
-            kosher_issues_main = validate_kosher_ingredients(main_ingredients, preferences.get("limitations", []))
-            if kosher_issues_main:
-                issues.extend([f"Main option: {issue}" for issue in kosher_issues_main])
+        # Ingredients list shape
+        ingredients = mn.get("ingredients") or []
+        if not isinstance(ingredients, list) or len(ingredients) == 0:
+            issues.append(f"{option.capitalize()} has no ingredients list.")
+        if isinstance(ingredients, list) and len(ingredients) > 7:
+            issues.append(f"{option.capitalize()} has more than 7 ingredients (limit is 7).")
 
-        # --- Alternative option feedback ---
-        template_alt = template[0].get("alternative")
-        menu_alt = menu[0].get("alternative")
-        if template_alt and menu_alt:
-            # Validate nutritional macros
-            for macro in macros:
-                tmpl_val = float(template_alt.get(macro, 0))
-                menu_val = float(menu_alt.get("nutrition", {}).get(macro, 0))
-                if tmpl_val == 0:
-                    continue
-                margin = get_allowed_margin(tmpl_val)
-                if abs(menu_val - tmpl_val) / tmpl_val > margin:
-                    direction = "Reduce" if menu_val > tmpl_val else "Increase"
-                    issues.append(
-                        f"{macro.capitalize()} is out of range for alternative: got {menu_val}g, target is {tmpl_val}g (allowed ±{int(margin*100)}%). {direction} {macro.lower()} ingredients."
-                    )
-            
-            # Validate kosher compliance for alternative
-            alt_ingredients = menu_alt.get("ingredients", [])
-            kosher_issues_alt = validate_kosher_ingredients(alt_ingredients, preferences.get("limitations", []))
-            if kosher_issues_alt:
-                issues.extend([f"Alternative option: {issue}" for issue in kosher_issues_alt])
+        # English-only checks (meal_title, each ingredient.item/household_measure/brand)
+        meal_title = mn.get("meal_title")
+        if meal_title is None or not _is_english(meal_title):
+            issues.append(f"{option.capitalize()} meal_title must be English-only.")
+
+        for idx, ing in enumerate(ingredients or []):
+            item = ing.get("item")
+            measure = ing.get("household_measure")
+            brand = ing.get("brand of pruduct")
+            if not _is_english(item or ""):
+                issues.append(f"{option.capitalize()} ingredient #{idx+1} 'item' must be English-only.")
+            if measure is not None and not _is_english(measure):
+                issues.append(f"{option.capitalize()} ingredient #{idx+1} 'household_measure' must be English-only.")
+            if brand is None or not _is_english(brand):
+                issues.append(f"{option.capitalize()} ingredient #{idx+1} 'brand of pruduct' must be English-only.")
+            if isinstance(brand, str) and brand.strip().lower() in ("generic", "no brand", "brand"):
+                issues.append(f"{option.capitalize()} ingredient #{idx+1} brand must be a real brand (not 'generic').")
+
+            # numeric fields non-negative
+            for mk in ["portionSI(gram)", "calories", "protein", "fat", "carbs"]:
+                if mk in ing:
+                    v = _num(ing.get(mk), default=None)
+                    if v is None:
+                        issues.append(f"{option.capitalize()} ingredient #{idx+1} '{mk}' must be numeric.")
+                    elif v < 0:
+                        issues.append(f"{option.capitalize()} ingredient #{idx+1} '{mk}' cannot be negative.")
+
+        # Template targets presence
+        for macro in macros:
+            if macro not in tpl:
+                issues.append(f"Template for {option} missing target '{macro}'.")
+
+        # -------- ingredient sum validation against template targets (with margins) ----------
+        sums = {m: 0.0 for m in macros}
+        for ing in ingredients or []:
+            for m in macros:
+                sums[m] += _num(ing.get(m), 0.0)
+
+        for m in macros:
+            target = _num(tpl.get(m), default=None)
+            if target is None or target == 0:
+                continue
+                
+            # Check if ingredient sum matches template target within margin
+            margin = get_allowed_margin(target)
+            if abs(sums[m] - target) / target > margin:
+                direction = "Reduce" if sums[m] > target else "Increase"
+                issues.append(
+                    f"{option.capitalize()} {m}: Sum of ingredients ({round(sums[m],1)}) doesn't match template target ({target}) "
+                    f"(allowed ±{int(margin*100)}%). {direction} ingredient {m} values."
+                )
+
+        # -------- kosher checks ----------
+        kosher_issues = _validate_kosher_ingredients(ingredients, limitations)
+        for ki in kosher_issues:
+            issues.append(f"{option.capitalize()} option: {ki}")
 
         is_valid = len(issues) == 0
-
         return jsonify({
-            "is_valid": is_valid,
+            "is_valid": is_valid, 
             "issues": issues,
+            "meal_data": mn,  # Include the actual meal JSON that was validated
+            "option_type": option  # Include which option type was validated
         })
 
     except Exception as e:
@@ -1704,111 +1825,248 @@ def batch_upc_lookup():
         return jsonify({"error": str(e)}), 500
 
 
+ALTERNATIVE_GENERATOR_PROMPT = """You are a professional HEALTHY dietitian AI.
+
+TASK
+Generate a COMPLETELY DIFFERENT **ALTERNATIVE** meal for one given meal, using the exact macro targets provided.
+Return **JSON ONLY** (no markdown, no comments).
+
+OUTPUT SCHEMA (object)
+{{
+  "meal_title": "<dish name in English>",
+  "ingredients": [
+    {{
+      "item": "<ingredient name in English>",
+      "portionSI(gram)": <number>,
+      "household_measure": "<realistic local measure in English>",
+      "calories": <int>,
+      "protein": <int>,
+      "fat": <int>,
+      "carbs": <int>,
+      "brand of pruduct": "<real brand name in English>"
+    }}
+  ]
+}}
+
+HARD RULES
+• **ENGLISH ONLY** for all names/measures/brands.
+• Prioritize whole foods; avoid ultra-processed snacks unless explicitly liked in preferences.
+• Respect ALL dietary restrictions and allergies.
+• If kosher: never mix meat + dairy; avoid pork/shellfish; prefer kosher-suitable brands.
+• ≤ 7 ingredients; simple methods (grill, bake, steam, sauté).
+• Use realistic regional pack sizes & brands:
+  {region_instruction}
+
+MACRO TARGETS
+• The sum of all ingredients must match these targets within margin: {macro_targets}.
+• CRITICAL: Cross-check every ingredient's macro values against reliable nutrition databases to ensure accuracy.
+
+DIFFERENTIATION (from both the given MAIN and CURRENT ALTERNATIVE)
+• **Different main protein source** (avoid: {avoid_proteins}).
+• **Different carb base** and **different cooking method**.
+• **Different flavour profile** (e.g., if Mediterranean, switch to Asian/Mexican/Italian).
+• Avoid these core ingredients (substring match): {avoid_ingredients}.
+
+VALIDATION
+• Return only the JSON object in the schema above.
+• Do not add keys not listed in the schema.
+• The validator will sum all ingredient macros and check against targets with appropriate margins.
+• If you see a previous meal attempt above, analyze what went wrong and fix those specific issues.
+• Pay special attention to macro calculations, ingredient accuracy, and dietary restrictions.
+"""
+
+def _extract_macros(meal_obj: dict) -> dict:
+    """Tolerant extractor: prefers meal['nutrition'], falls back to top-level keys."""
+    if not isinstance(meal_obj, dict):
+        return {}
+    nutr = meal_obj.get("nutrition") or {}
+    if all(k in nutr for k in ("calories", "protein", "fat", "carbs")):
+        return {k: nutr.get(k) for k in ("calories", "protein", "fat", "carbs")}
+    return {
+        "calories": meal_obj.get("calories"),
+        "protein":  meal_obj.get("protein"),
+        "fat":      meal_obj.get("fat"),
+        "carbs":    meal_obj.get("carbs"),
+    }
+
+def _collect_avoid_lists(main: dict, current_alt: dict):
+    """Collect proteins & ingredients to avoid based on both existing options."""
+    avoid_proteins = set()
+    for m in (main, current_alt):
+        src = m.get("main_protein_source")
+        if isinstance(src, str) and src.strip():
+            avoid_proteins.add(src.strip())
+
+    def _ing_names(m):
+        out = []
+        for ing in (m.get("ingredients") or []):
+            name = (ing.get("item") or "").strip()
+            if name:
+                out.append(name)
+        # Also avoid words from meal_title to reduce overlap
+        mt = (m.get("meal_title") or "").strip()
+        if mt:
+            out.append(mt)
+        return out
+
+    avoid_ingredients = set(_ing_names(main) + _ing_names(current_alt))
+    return list(avoid_proteins), list(avoid_ingredients)
+
+def _collect_avoid_lists_from_all_alternatives(main: dict, all_alternatives: list):
+    """Collect proteins & ingredients to avoid based on main and ALL alternatives for better duplication avoidance."""
+    avoid_proteins = set()
+    
+    # Add main meal
+    if main:
+        src = main.get("main_protein_source")
+        if isinstance(src, str) and src.strip():
+            avoid_proteins.add(src.strip())
+    
+    # Add all alternatives
+    for alt in all_alternatives:
+        if alt:
+            src = alt.get("main_protein_source")
+            if isinstance(src, str) and src.strip():
+                avoid_proteins.add(src.strip())
+
+    def _ing_names(m):
+        out = []
+        for ing in (m.get("ingredients") or []):
+            name = (ing.get("item") or "").strip()
+            if name:
+                out.append(name)
+        # Also avoid words from meal_title to reduce overlap
+        mt = (m.get("meal_title") or "").strip()
+        if mt:
+            out.append(mt)
+        return out
+
+    avoid_ingredients = set()
+    
+    # Add main meal ingredients
+    if main:
+        avoid_ingredients.update(_ing_names(main))
+    
+    # Add all alternatives ingredients
+    for alt in all_alternatives:
+        if alt:
+            avoid_ingredients.update(_ing_names(alt))
+    
+    return list(avoid_proteins), list(avoid_ingredients)
+
 @app.route('/api/generate-alternative-meal', methods=['POST'])
 def generate_alternative_meal():
+    max_attempts = 4
 
-#     {
-#     "user_code": "BZSJUY",
-#     "id": "593fceba-6051-40ff-a37e-2147ed8cdc7c",
-#     "meal_name": "Breakfast"
-#   }
-    data = request.get_json()
+    data = request.get_json() or {}
     main = data.get('main')
-    alternative = data.get('alternative')
-    if not main or not alternative:
-        return jsonify({'error': 'Missing main or alternative meal'}), 400
+    current_alt = data.get('alternative')  # existing alternative
+    all_alternatives = data.get('allAlternatives', [])  # all existing alternatives
+    user_code = data.get("user_code")
 
-    # Load user preferences as in /api/build-menu
+    if not main or not current_alt:
+        return jsonify({'error': 'Missing main or alternative meal'}), 400
+    if not user_code:
+        return jsonify({'error': 'Missing user_code'}), 500
+
+    # Load preferences & region
     try:
-        user_code = data.get("user_code")
-        preferences = load_user_preferences(user_code)
+        preferences = load_user_preferences(user_code) or {}
     except Exception as e:
         return jsonify({'error': f'Failed to load user preferences: {str(e)}'}), 500
 
-    # Get region-specific instructions
-    region = preferences.get('region', 'israel').lower()
-    region_instructions = {
-        'israel': "Use Israeli products and brands (e.g., Tnuva, Osem, Strauss, Elite, Telma). Include local Israeli foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 150g-200g containers, hummus in 400g containers, pita bread is typically 60-80g per piece, Israeli cheese slices are 20-25g each, Bamba comes in 80g bags, Bissli in 100g bags. Use realistic Israeli portion sizes.",
-        'us': "Use American products and brands (e.g., Kraft, General Mills, Kellogg's, Pepsi). Include typical American foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 16oz (454g) containers, yogurt in 6-8oz (170-227g) containers, cream cheese in 8oz (227g) packages, American cheese slices are 21g each, bagels are 95-105g each.",
-        'uk': "Use British products and brands (e.g., Tesco, Sainsbury's, Heinz UK, Cadbury). Include typical British foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 300g containers, yogurt in 150-170g pots, British cheese slices are 25g each, bread slices are 35-40g each.",
-        'canada': "Use Canadian products and brands (e.g., Loblaws, President's Choice, Tim Hortons). Include typical Canadian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 500g containers, yogurt in 175g containers, Canadian cheese slices are 22g each.",
-        'australia': "Use Australian products and brands (e.g., Woolworths, Coles, Arnott's, Vegemite). Include typical Australian foods when appropriate. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 170g tubs, Australian cheese slices are 25g each."
-    }
-    region_instruction = region_instructions.get(region, region_instructions['israel'])
-    
-    # Compose prompt for OpenAI
-    system_prompt = (
-        "You are a professional HEALTHY dietitian AI. Generate a COMPLETELY DIFFERENT alternative meal that is entirely distinct from both the main meal and the existing alternative. "
-        "CRITICAL REQUIREMENTS: "
-        "- Create a meal with DIFFERENT main protein source, DIFFERENT cooking method, and DIFFERENT flavor profile "
-        "- Use COMPLETELY DIFFERENT ingredients than both the main and existing alternative "
-        "- The new meal MUST match the main meal's macros within ±5% tolerance (calories, protein, fat, carbs) "
-        f"REGION-SPECIFIC REQUIREMENTS: {region_instruction} "
-        "**CRITICAL HEALTHY DIETITIAN RULES:** "
-        "• You are a HEALTHY dietitian - prioritize nutritious, whole foods over processed snacks "
-        "• NEVER suggest unhealthy processed snacks (like BISLI, Bamba, chips, candy, cookies, etc.) unless the user EXPLICITLY requests them in their preferences "
-        "• For snacks, always suggest healthy options like: fruits, vegetables, nuts, yogurt, cottage cheese, hummus, whole grain crackers, etc. "
-        "• Only include unhealthy snacks if the user specifically mentions 'likes BISLI', 'loves chips', 'wants candy' etc. in their client_preferences "
-        "• Even then, limit unhealthy snacks to maximum 1-2 times per week, not daily "
-        "• Focus on balanced nutrition with whole foods, lean proteins, complex carbohydrates, and healthy fats "
-        "**CRITICAL: ALWAYS GENERATE ALL CONTENT IN ENGLISH ONLY.** "
-        "- All meal names, ingredient names, and descriptions must be in English "
-        "- Do not use Hebrew, Arabic, or any other language "
-        "- Use English names for all foods, brands, and cooking terms "
-        "DIETARY RESTRICTIONS: "
-        f"- STRICTLY AVOID all foods in user allergies: {', '.join(preferences.get('allergies', []))} "
-        f"- STRICTLY FOLLOW all dietary limitations: {', '.join(preferences.get('limitations', []))} "
-        "- If user has 'kosher' limitation, NEVER mix meat with dairy in the same meal "
-        "- Use only kosher-certified ingredients and brands if kosher is required "
-        "HUMAN-LIKE MEAL REQUIREMENTS: "
-        "- Generate SIMPLE, REALISTIC meals that people actually eat daily "
-        "- Use common, familiar ingredients and combinations "
-        "- Avoid overly complex recipes or unusual ingredient combinations "
-        "- Focus on comfort foods, simple sandwiches, basic salads, easy-to-make dishes "
-        "- Examples of good meals: grilled chicken with rice, tuna sandwich, yogurt with fruit, simple pasta dishes "
-        "- Examples to AVOID: complex multi-ingredient recipes, unusual spice combinations, overly fancy preparations "
-        "- Keep ingredients list short (3-6 ingredients max) "
-        "- Use realistic portion sizes that match the region's packaging standards "
-        "VARIETY REQUIREMENTS: "
-        "- Use a DIFFERENT main protein source than both existing meals "
-        "- Use a DIFFERENT cooking method (if main is grilled, use baked/steamed/fried) "
-        "- Use a DIFFERENT flavor profile (if main is Mediterranean, use Asian/Mexican/Italian) "
-        "- Include DIFFERENT vegetables and grains than existing meals "
-        "IMPORTANT: For any brand names in ingredients, you MUST use real, specific brand names based on the user's region. "
-        "NEVER use 'Generic' or 'generic' as a brand name. Always specify actual commercial brands available in the user's region. "
-        "Return ONLY the new alternative meal as valid JSON with: meal_title, ingredients (list of {item, brand of pruduct, household_measure, calories, protein, fat, carbs}), and nutrition (sum of ingredients)."
+    region_instruction = _region_instruction_from_prefs(preferences)
+
+    # Macro targets: mirror the MAIN meal's totals (strict)
+    macro_targets = _extract_macros(main)
+    if any(macro_targets.get(k) is None for k in ("calories", "protein", "fat", "carbs")):
+        return jsonify({'error': 'Main meal lacks complete macro totals (calories, protein, fat, carbs).'}), 400
+
+    # Build differentiation constraints using ALL alternatives for better duplication avoidance
+    avoid_proteins, avoid_ingredients = _collect_avoid_lists_from_all_alternatives(main, all_alternatives)
+
+    # Compose prompt
+    system_prompt = ALTERNATIVE_GENERATOR_PROMPT.format(
+        region_instruction=region_instruction,
+        macro_targets=macro_targets,
+        avoid_proteins=avoid_proteins,
+        avoid_ingredients=avoid_ingredients
     )
-    user_prompt = {
-        "role": "user",
-        "content": json.dumps({
-            "main": main,
-            "current_alternative": alternative,
-            "user_preferences": preferences
-        })
-    }
-    try:
-        response = openai.ChatCompletion.create(
-            engine=deployment,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                user_prompt
-            ],
-            temperature=0.4
-        )
-        raw = response["choices"][0]["message"]["content"]
+
+    # Try multiple times until it validates
+    for attempt in range(1, max_attempts + 1):
         try:
-            parsed = json.loads(raw)
-            # Clean ingredient names in the generated alternative meal
-            cleaned_alternative = clean_ingredient_names({"alternative": parsed}).get("alternative", parsed)
-            # Enrich with UPC codes
-            enriched = enrich_alternative_with_upc(cleaned_alternative, user_code, region)
+            app.logger.info(f"🧠 Generating NEW ALTERNATIVE (attempt {attempt}/{max_attempts})")
+
+            user_payload = {
+                "main": main,
+                "current_alternative": current_alt,
+                "all_alternatives": all_alternatives,
+                "user_preferences": preferences
+            }
+
+            response = openai.ChatCompletion.create(
+                engine=deployment,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)}
+                ],
+                temperature=0
+            )
+            raw = _strip_markdown_fences(response["choices"][0]["message"]["content"])
+
+            try:
+                candidate = json.loads(raw)
+            except Exception as e:
+                app.logger.warning(f"❌ JSON parse error for NEW ALTERNATIVE: {e}")
+                if attempt == max_attempts:
+                    return jsonify({"error": "Invalid JSON from OpenAI", "raw": raw}), 500
+                continue
+
+            # Validate macros against targets using your validator
+            tpl = [{"alternative": macro_targets}]
+            menu = [{"alternative": candidate}]
+            val_res = app.test_client().post(
+                "/api/validate-menu",
+                json={"template": tpl, "menu": menu, "user_code": user_code}
+            )
+            val = val_res.get_json() or {}
+            if not val.get("is_valid"):
+                app.logger.warning(f"❌ NEW ALTERNATIVE failed validation: {val.get('issues', [])}")
+                if attempt == max_attempts:
+                    return jsonify({
+                        "error": "Generated alternative failed validation",
+                        "issues": val.get("issues", []),
+                        "attempts": max_attempts
+                    }), 400
+                continue
+
+            # Automatically calculate and add nutrition totals from ingredients
+            candidate = _calculate_nutrition_from_ingredients(candidate)
+
+            # Clean & enrich
+            cleaned = clean_ingredient_names({"alternative": candidate}).get("alternative", candidate)
+            region = (preferences.get('region') or 'israel').lower()
+            enriched = enrich_alternative_with_upc(cleaned, user_code, region)
+
+            app.logger.info("✅ NEW ALTERNATIVE generated, validated, and enriched.")
             return jsonify(enriched)
-        except Exception:
-            logger.error(f"❌ JSON parse error for new alternative meal:\n{raw}")
-            return jsonify({"error": "Invalid JSON from OpenAI", "raw": raw}), 500
-    except Exception as e:
-        logger.error(f"Error generating alternative meal: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+
+        except Exception as e:
+            app.logger.error(f"❌ Exception in generate_alternative_meal attempt {attempt}: {e}")
+            if attempt == max_attempts:
+                return jsonify({
+                    "error": "Exception while generating alternative meal",
+                    "exception": str(e),
+                    "attempts": max_attempts
+                }), 500
+            # otherwise loop and retry
+
+    # Fallback (should not reach due to returns above)
+    return jsonify({
+        "error": "All attempts to generate the alternative meal failed",
+        "attempts": max_attempts
+    }), 500
 
 # Helper function to enrich a single alternative meal with UPC codes
 def enrich_alternative_with_upc(alternative, user_code, region):
@@ -2078,6 +2336,7 @@ def generate_alternative_meal_by_id():
         "content": json.dumps({
             "main": main,
             "current_alternative": alternative,
+            "all_alternatives": all_alternatives,
             "user_preferences": preferences
         })
     }
@@ -2088,7 +2347,7 @@ def generate_alternative_meal_by_id():
                 {"role": "system", "content": system_prompt},
                 user_prompt
             ],
-            temperature=0.4
+            temperature=0
         )
         raw = response["choices"][0]["message"]["content"]
         try:
