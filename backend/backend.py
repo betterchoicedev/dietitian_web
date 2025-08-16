@@ -841,6 +841,11 @@ TASK
 Build the {option_type} option for ONE meal using the exact macro targets provided.
 Return JSON ONLY (no markdown, no comments).
 
+#  🔑  PRIMARY SUCCESS CRITERIA  🔑
+• Calories and protein from the *template* are **top priority**.  
+  – They must be hit with 0 % tolerance.  
+  – If you must make tiny trade-offs, adjust carbs and fat *before* calories or protein.  
+
 OUTPUT SCHEMA (object)
 {{
   "meal_name": "<exactly the provided meal_name>",
@@ -1833,6 +1838,7 @@ Return **JSON ONLY** (no markdown, no comments).
 
 OUTPUT SCHEMA (object)
 {{
+  "meal_name": "<exactly the provided meal_name>",
   "meal_title": "<dish name in English>",
   "ingredients": [
     {{
@@ -1957,6 +1963,8 @@ def _collect_avoid_lists_from_all_alternatives(main: dict, all_alternatives: lis
 @app.route('/api/generate-alternative-meal', methods=['POST'])
 def generate_alternative_meal():
     max_attempts = 4
+    previous_issues = []  # Track issues across attempts
+    validation_feedback = ""  # Current validation feedback
 
     data = request.get_json() or {}
     main = data.get('main')
@@ -1985,18 +1993,45 @@ def generate_alternative_meal():
     # Build differentiation constraints using ALL alternatives for better duplication avoidance
     avoid_proteins, avoid_ingredients = _collect_avoid_lists_from_all_alternatives(main, all_alternatives)
 
-    # Compose prompt
-    system_prompt = ALTERNATIVE_GENERATOR_PROMPT.format(
-        region_instruction=region_instruction,
-        macro_targets=macro_targets,
-        avoid_proteins=avoid_proteins,
-        avoid_ingredients=avoid_ingredients
-    )
-
     # Try multiple times until it validates
     for attempt in range(1, max_attempts + 1):
         try:
             app.logger.info(f"🧠 Generating NEW ALTERNATIVE (attempt {attempt}/{max_attempts})")
+
+            # Format previous issues section
+            if previous_issues:
+                previous_issues_section = f"DO NOT repeat these errors from previous attempts:\n• " + "\n• ".join(previous_issues)
+            else:
+                previous_issues_section = "No previous issues to avoid (first attempt)."
+
+            # Format validation feedback section
+            if validation_feedback:
+                validation_feedback_section = f"CRITICAL: Fix these specific validation errors:\n{validation_feedback}"
+            else:
+                validation_feedback_section = "No current validation issues (first attempt or previous attempt passed validation)."
+
+            # Compose prompt with previous issues and validation feedback
+            system_prompt = ALTERNATIVE_GENERATOR_PROMPT.format(
+                region_instruction=region_instruction,
+                macro_targets=macro_targets,
+                avoid_proteins=avoid_proteins,
+                avoid_ingredients=avoid_ingredients
+            )
+
+            # Add previous issues and validation feedback to the prompt
+            enhanced_system_prompt = f"""{system_prompt}
+
+PREVIOUS ISSUES TO AVOID
+{previous_issues_section}
+
+CURRENT VALIDATION FEEDBACK
+{validation_feedback_section}
+
+IMPORTANT: The above issues caused previous attempts to fail.
+You MUST address these specific problems in your new alternative meal.
+If the previous attempt had macro distribution issues, adjust your calculations accordingly.
+If there were dietary restriction violations, ensure strict compliance.
+"""
 
             user_payload = {
                 "main": main,
@@ -2008,7 +2043,7 @@ def generate_alternative_meal():
             response = openai.ChatCompletion.create(
                 engine=deployment,
                 messages=[
-                    {"role": "system", "content": system_prompt},
+                    {"role": "system", "content": enhanced_system_prompt},
                     {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)}
                 ],
                 temperature=0
@@ -2018,7 +2053,9 @@ def generate_alternative_meal():
             try:
                 candidate = json.loads(raw)
             except Exception as e:
-                app.logger.warning(f"❌ JSON parse error for NEW ALTERNATIVE: {e}")
+                error_msg = f"JSON parse error: {e}"
+                app.logger.warning(f"❌ {error_msg} for NEW ALTERNATIVE")
+                previous_issues.append(error_msg)
                 if attempt == max_attempts:
                     return jsonify({"error": "Invalid JSON from OpenAI", "raw": raw}), 500
                 continue
@@ -2032,12 +2069,26 @@ def generate_alternative_meal():
             )
             val = val_res.get_json() or {}
             if not val.get("is_valid"):
-                app.logger.warning(f"❌ NEW ALTERNATIVE failed validation: {val.get('issues', [])}")
+                # Collect validation issues for next attempt
+                issues = val.get("issues", [])
+                failed_meal = val.get("meal_data", {})
+                app.logger.warning(f"❌ NEW ALTERNATIVE failed validation. Meal: {json.dumps(failed_meal, ensure_ascii=False)}, Issues: {issues}")
+                
+                # Add issues to running list and format for next prompt
+                previous_issues.extend(issues)
+                validation_feedback = "\n".join([f"• {issue}" for issue in issues])
+                
+                # Add context about what was generated to help the AI understand what needs fixing
+                if failed_meal:
+                    meal_context = f"Your previous attempt generated this meal: {json.dumps(failed_meal, ensure_ascii=False)}"
+                    validation_feedback = f"{meal_context}\n\nIssues to fix:\n{validation_feedback}"
+                
                 if attempt == max_attempts:
                     return jsonify({
-                        "error": "Generated alternative failed validation",
-                        "issues": val.get("issues", []),
-                        "attempts": max_attempts
+                        "error": "Generated alternative failed validation after all attempts",
+                        "issues": issues,
+                        "attempts": max_attempts,
+                        "previous_issues": previous_issues
                     }), 400
                 continue
 
@@ -2053,19 +2104,23 @@ def generate_alternative_meal():
             return jsonify(enriched)
 
         except Exception as e:
+            error_msg = f"Exception occurred: {str(e)}"
             app.logger.error(f"❌ Exception in generate_alternative_meal attempt {attempt}: {e}")
+            previous_issues.append(error_msg)
             if attempt == max_attempts:
                 return jsonify({
                     "error": "Exception while generating alternative meal",
                     "exception": str(e),
-                    "attempts": max_attempts
+                    "attempts": max_attempts,
+                    "previous_issues": previous_issues
                 }), 500
             # otherwise loop and retry
 
     # Fallback (should not reach due to returns above)
     return jsonify({
         "error": "All attempts to generate the alternative meal failed",
-        "attempts": max_attempts
+        "attempts": max_attempts,
+        "previous_issues": previous_issues
     }), 500
 
 # Helper function to enrich a single alternative meal with UPC codes
