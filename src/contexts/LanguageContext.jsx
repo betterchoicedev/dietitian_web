@@ -891,6 +891,7 @@ export const translations = {
     allSystemsOperational: 'All systems operational',
     professionalNutrition: 'Professional Nutrition',
     professionalPlatform: 'Professional Platform',
+    weightKg: 'Weight (kg)',
   },
   he: {
     // Navigation & Main Pages

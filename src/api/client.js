@@ -1019,6 +1019,31 @@ export const entities = {
     }
   },
   ChatMessage: {
+    // Create a new message in the chat_messages table
+    create: async (messageData) => {
+      try {
+        console.log('💬 ChatMessage.create called with data:', JSON.stringify(messageData, null, 2));
+        
+        const { data: result, error } = await supabase
+          .from('chat_messages')
+          .insert([messageData])
+          .select()
+          .single();
+        
+        if (error) {
+          console.error('❌ Supabase chat message create error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        console.log('✅ Chat message created in Supabase:', result);
+        return result;
+        
+      } catch (err) {
+        console.error('❌ Error in ChatMessage.create:', err);
+        throw err;
+      }
+    },
+    
     // Fetch messages for a conversation, paginated (oldest first)
     listByConversation: async (conversation_id, { limit = 20, beforeMessageId = null } = {}) => {
       let query = supabase
@@ -1033,6 +1058,196 @@ export const entities = {
       const { data, error } = await query;
       if (error) throw new Error(error.message);
       return data || [];
+    },
+  },
+  
+  MessageQueue: {
+    // Add a message to the queue for processing
+    addToQueue: async (queueData) => {
+      try {
+        console.log('📬 MessageQueue.addToQueue called with data:', JSON.stringify(queueData, null, 2));
+        
+        // Validate required fields
+        if (!queueData.conversation_id || !queueData.client_id || !queueData.dietitian_id) {
+          throw new Error('Missing required fields: conversation_id, client_id, and dietitian_id are required');
+        }
+        
+        const { data: result, error } = await supabase
+          .from('message_queue')
+          .insert([queueData])
+          .select()
+          .single();
+        
+        if (error) {
+          console.error('❌ Supabase message queue add error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        console.log('✅ Message added to queue in Supabase:', result);
+        return result;
+        
+      } catch (err) {
+        console.error('❌ Error in MessageQueue.addToQueue:', err);
+        throw err;
+      }
+    },
+    
+    // Get pending messages for a specific user
+    getPendingForUser: async (userCode) => {
+      try {
+        console.log('📬 Getting pending messages for user:', userCode);
+        
+        const { data, error } = await supabase
+          .from('message_queue')
+          .select('*')
+          .eq('user_code', userCode)
+          .eq('status', 'pending')
+          .order('priority', { ascending: false })
+          .order('created_at', { ascending: true });
+        
+        if (error) {
+          console.error('❌ Supabase message queue get error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        console.log('✅ Retrieved pending messages from queue:', data?.length || 0, 'records');
+        return data || [];
+        
+      } catch (err) {
+        console.error('❌ Error in MessageQueue.getPendingForUser:', err);
+        throw err;
+      }
+    },
+    
+    // Get pending messages for a specific client (by client_id)
+    getPendingForClient: async (clientId) => {
+      try {
+        console.log('📬 Getting pending messages for client ID:', clientId);
+        
+        const { data, error } = await supabase
+          .from('message_queue')
+          .select('*')
+          .eq('client_id', clientId)
+          .eq('status', 'pending')
+          .order('priority', { ascending: false })
+          .order('created_at', { ascending: true });
+        
+        if (error) {
+          console.error('❌ Supabase message queue get error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        console.log('✅ Retrieved pending messages for client:', data?.length || 0, 'records');
+        return data || [];
+        
+      } catch (err) {
+        console.error('❌ Error in MessageQueue.getPendingForClient:', err);
+        throw err;
+      }
+    },
+    
+    // Get messages sent by a specific dietitian
+    getByDietitian: async (dietitianId, { status = null, limit = 100, offset = 0 } = {}) => {
+      try {
+        console.log('📬 Getting messages by dietitian:', dietitianId);
+        
+        let query = supabase
+          .from('message_queue')
+          .select('*')
+          .eq('dietitian_id', dietitianId)
+          .order('created_at', { ascending: false })
+          .range(offset, offset + limit - 1);
+        
+        if (status) {
+          query = query.eq('status', status);
+        }
+        
+        const { data, error } = await query;
+        
+        if (error) {
+          console.error('❌ Supabase message queue get by dietitian error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        console.log('✅ Retrieved messages by dietitian:', data?.length || 0, 'records');
+        return data || [];
+        
+      } catch (err) {
+        console.error('❌ Error in MessageQueue.getByDietitian:', err);
+        throw err;
+      }
+    },
+    
+    // Update message status
+    updateStatus: async (messageId, status, additionalData = {}) => {
+      try {
+        console.log('📬 Updating message status:', messageId, 'to:', status);
+        
+        const updateData = {
+          status,
+          updated_at: new Date().toISOString(),
+          ...additionalData
+        };
+        
+        if (status === 'sent') {
+          updateData.processed_at = new Date().toISOString();
+        }
+        
+        const { data: result, error } = await supabase
+          .from('message_queue')
+          .update(updateData)
+          .eq('id', messageId)
+          .select()
+          .single();
+        
+        if (error) {
+          console.error('❌ Supabase message queue update error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        console.log('✅ Message status updated in queue:', result);
+        return result;
+        
+      } catch (err) {
+        console.error('❌ Error in MessageQueue.updateStatus:', err);
+        throw err;
+      }
+    },
+    
+    // Get all messages in queue (for admin purposes)
+    listAll: async ({ status = null, limit = 100, offset = 0 } = {}) => {
+      try {
+        console.log('📬 Getting all messages from queue');
+        
+        let query = supabase
+          .from('message_queue')
+          .select(`
+            *,
+            chat_conversations!inner(id, started_at),
+            chat_users!inner(id, full_name, user_code)
+          `)
+          .order('priority', { ascending: false })
+          .order('created_at', { ascending: false })
+          .range(offset, offset + limit - 1);
+        
+        if (status) {
+          query = query.eq('status', status);
+        }
+        
+        const { data, error } = await query;
+        
+        if (error) {
+          console.error('❌ Supabase message queue list error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        console.log('✅ Retrieved messages from queue:', data?.length || 0, 'records');
+        return data || [];
+        
+      } catch (err) {
+        console.error('❌ Error in MessageQueue.listAll:', err);
+        throw err;
+      }
     },
   },
   ChatConversation: {

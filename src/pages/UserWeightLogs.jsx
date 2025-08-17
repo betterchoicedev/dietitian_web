@@ -98,8 +98,9 @@ export default function UserWeightLogs() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedMetrics, setSelectedMetrics] = useState(['weight_kg', 'body_fat_percentage']);
+  const [selectedMetrics, setSelectedMetrics] = useState(['weight_kg']); // Show only weight by default
   const [chartType, setChartType] = useState('line');
+  const [displayedLogsCount, setDisplayedLogsCount] = useState(5); // Show top 5 newest entries
 
   // Check if current language is Hebrew (RTL)
   const isRTL = language === 'he';
@@ -108,56 +109,132 @@ export default function UserWeightLogs() {
   useEffect(() => {
     const style = document.createElement('style');
     style.textContent = `
-      .rtl-chart-container .recharts-legend-wrapper {
-        direction: rtl !important;
-        text-align: right !important;
-      }
-      
-      .rtl-chart-container .recharts-legend-item {
-        direction: rtl !important;
-        text-align: right !important;
-      }
-      
-      .rtl-chart-container .recharts-tooltip-wrapper {
-        direction: rtl !important;
-        text-align: right !important;
-      }
-      
-      /* Prevent number reversal in RTL mode */
-      .rtl-chart-container .recharts-cartesian-axis-tick-value {
+      /* Force LTR for all chart elements */
+      .chart-container-override {
         direction: ltr !important;
-        text-anchor: end !important;
+        transform: none !important;
+      }
+      
+      .chart-container-override * {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      /* Override all recharts elements */
+      .chart-container-override .recharts-wrapper {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      .chart-container-override .recharts-surface {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      .chart-container-override .recharts-cartesian-axis {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      .chart-container-override .recharts-cartesian-grid {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      /* Fix axis labels */
+      .chart-container-override .recharts-cartesian-axis-tick-value {
+        direction: ltr !important;
+        text-anchor: middle !important;
         unicode-bidi: plaintext !important;
+        transform: none !important;
       }
       
-      .rtl-chart-container .recharts-cartesian-axis-label {
-        direction: rtl !important;
-        text-anchor: end !important;
-      }
-      
-      /* Ensure numbers and dates are not reversed */
-      .rtl-chart-container .recharts-cartesian-axis-tick-value tspan {
+      .chart-container-override .recharts-cartesian-axis-tick-value tspan {
         direction: ltr !important;
         unicode-bidi: plaintext !important;
+        text-anchor: inherit !important;
       }
       
-      /* Fix hover line positioning for RTL */
-      .rtl-chart-container .recharts-cartesian-axis-tick-line {
+      /* Fix Y-axis specifically */
+      .chart-container-override .recharts-yAxis .recharts-cartesian-axis-tick-value {
+        text-anchor: end !important;
         direction: ltr !important;
       }
       
-      /* Fix cursor and hover line positioning */
-      .rtl-chart-container .recharts-cartesian-grid-horizontal line {
+      /* Fix X-axis specifically */
+      .chart-container-override .recharts-xAxis .recharts-cartesian-axis-tick-value {
+        text-anchor: middle !important;
         direction: ltr !important;
       }
       
-      .rtl-chart-container .recharts-cartesian-grid-vertical line {
+      /* Fix hover line and cursor */
+      .chart-container-override .recharts-cartesian-axis-tick-line {
         direction: ltr !important;
+        transform: none !important;
       }
       
-      /* Ensure proper cursor positioning */
-      .rtl-chart-container .recharts-cartesian-axis-tick {
+      .chart-container-override .recharts-cartesian-grid-horizontal line,
+      .chart-container-override .recharts-cartesian-grid-vertical line {
         direction: ltr !important;
+        transform: none !important;
+      }
+      
+      /* Fix tooltip positioning */
+      .chart-container-override .recharts-tooltip-wrapper {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      /* Fix legend */
+      .chart-container-override .recharts-legend-wrapper {
+        direction: ${isRTL ? 'rtl' : 'ltr'} !important;
+        text-align: ${isRTL ? 'right' : 'left'} !important;
+      }
+      
+      .chart-container-override .recharts-legend-item {
+        direction: ${isRTL ? 'rtl' : 'ltr'} !important;
+      }
+      
+      /* Prevent any RTL transformations */
+      .chart-container-override svg {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      .chart-container-override g {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      /* Force cursor and hover elements to LTR */
+      .chart-container-override .recharts-cursor {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      .chart-container-override .recharts-active-dot {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      /* Fix X-axis date label spacing and prevent overlap */
+      .chart-container-override .recharts-xAxis .recharts-cartesian-axis-tick-value {
+        text-anchor: middle !important;
+        direction: ltr !important;
+        unicode-bidi: plaintext !important;
+        dominant-baseline: hanging !important;
+      }
+      
+      .chart-container-override .recharts-xAxis .recharts-cartesian-axis-tick {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      /* Ensure proper spacing between X-axis ticks */
+      .chart-container-override .recharts-xAxis .recharts-cartesian-axis-tick-value tspan {
+        direction: ltr !important;
+        unicode-bidi: plaintext !important;
+        text-anchor: inherit !important;
       }
     `;
     document.head.appendChild(style);
@@ -208,6 +285,10 @@ export default function UserWeightLogs() {
             measurement_date: log.measurement_date ? 
               (() => {
                 const date = new Date(log.measurement_date);
+                // Check if date is valid
+                if (isNaN(date.getTime())) {
+                  return 'Invalid Date';
+                }
                 const day = date.getDate().toString().padStart(2, '0');
                 const month = (date.getMonth() + 1).toString().padStart(2, '0');
                 const year = date.getFullYear();
@@ -275,6 +356,7 @@ export default function UserWeightLogs() {
     }
 
     setFilteredLogs(filtered);
+    setDisplayedLogsCount(5); // Reset to show only top 5 when filters change
   }, [weightLogs, dateRange, searchTerm]);
 
   // Calculate statistics
@@ -414,16 +496,71 @@ export default function UserWeightLogs() {
             maxWidth: '200px'
           }}
         >
-          <p className="font-semibold text-foreground mb-2" style={{ direction: 'ltr', unicodeBidi: 'plaintext' }}>{label}</p>
+          <p className="font-semibold text-foreground mb-2" style={{ 
+            direction: 'ltr', 
+            unicodeBidi: 'plaintext',
+            textAlign: isRTL ? 'right' : 'left'
+          }}>
+            {label}
+          </p>
           {payload.map((entry, index) => (
-            <p key={index} style={{ color: entry.color, direction: 'ltr', unicodeBidi: 'plaintext' }} className="text-sm">
-              {entry.name}: {entry.value}
+            <p key={index} style={{ 
+              color: entry.color, 
+              direction: isRTL ? 'rtl' : 'ltr',
+              textAlign: isRTL ? 'right' : 'left'
+            }} className="text-sm">
+              <span style={{ direction: 'ltr', unicodeBidi: 'plaintext' }}>
+                {entry.value}
+              </span>
+              {isRTL ? ' :' : ': '}
+              {entry.name}
             </p>
           ))}
         </div>
       );
     }
     return null;
+  };
+
+  // Export weight logs data as CSV
+  const handleExport = () => {
+    if (!filteredLogs.length) return;
+
+    // Prepare CSV data
+    const headers = [
+      translations.date || 'Date',
+      translations.weightKg || 'Weight (kg)',
+      translations.bodyFatPercentage || 'Body Fat %',
+      translations.waistCm || 'Waist (cm)',
+      translations.hipCm || 'Hip (cm)',
+      translations.armCm || 'Arm (cm)'
+    ];
+
+    const csvData = filteredLogs.map(log => [
+      log.measurement_date,
+      log.weight_kg,
+      log.body_fat_percentage,
+      log.waist_circumference_cm,
+      log.hip_circumference_cm,
+      log.arm_circumference_cm
+    ]);
+
+    // Create CSV content
+    const csvContent = [
+      headers.join(','),
+      ...csvData.map(row => row.join(','))
+    ].join('\n');
+
+    // Create and download file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `weight_logs_${selectedClient?.user_code || 'client'}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Render chart based on type with RTL support
@@ -452,20 +589,20 @@ export default function UserWeightLogs() {
     // Common axis props with RTL support
     const commonAxisProps = {
       stroke: "#6b7280",
-      fontSize: 12,
+      fontSize: 11, // Slightly smaller font for better fit
       tickLine: false,
       axisLine: false,
       style: {
-        direction: isRTL ? 'ltr' : 'ltr', // Keep numbers in LTR direction
-        textAnchor: isRTL ? 'end' : 'start',
+        direction: 'ltr', // Always keep chart elements in LTR direction
+        textAnchor: 'middle', // Center align all labels
         unicodeBidi: 'plaintext' // Prevent number reversal
       }
     };
 
-    // Custom tick formatter to prevent reversal
+    // Custom tick formatter to prevent reversal and ensure proper date display
     const formatTick = (value) => {
       if (typeof value === 'string' && value.includes('/')) {
-        // This is a date, ensure it's not reversed
+        // This is a date, ensure it's not reversed and is properly formatted
         return value;
       }
       return value;
@@ -486,16 +623,28 @@ export default function UserWeightLogs() {
               <XAxis 
                 dataKey="date" 
                 {...commonAxisProps}
-                angle={isRTL ? -45 : 45}
-                textAnchor={isRTL ? 'end' : 'start'}
-                height={isRTL ? 80 : 60}
+                angle={0} // No rotation for better readability
+                textAnchor="middle"
+                height={80} // Increased height for better spacing
                 tickFormatter={formatTick}
+                interval="preserveStartEnd" // Show first and last tick, skip some in between
+                minTickGap={30} // Minimum gap between ticks to prevent overlap
+                style={{
+                  direction: 'ltr',
+                  textAnchor: 'middle',
+                  unicodeBidi: 'plaintext'
+                }}
               />
               <YAxis 
                 {...commonAxisProps}
                 domain={getYAxisDomain()}
-                orientation={isRTL ? 'right' : 'left'}
+                orientation="left" // Always use left orientation for consistency
                 tickFormatter={formatYAxisTick}
+                style={{
+                  direction: 'ltr',
+                  textAnchor: 'end',
+                  unicodeBidi: 'plaintext'
+                }}
               />
               <Tooltip content={<CustomTooltip />} />
               <Legend 
@@ -532,16 +681,28 @@ export default function UserWeightLogs() {
               <XAxis 
                 dataKey="date" 
                 {...commonAxisProps}
-                angle={isRTL ? -45 : 45}
-                textAnchor={isRTL ? 'end' : 'start'}
-                height={isRTL ? 80 : 60}
+                angle={0} // No rotation for better readability
+                textAnchor="middle"
+                height={80} // Increased height for better spacing
                 tickFormatter={formatTick}
+                interval="preserveStartEnd" // Show first and last tick, skip some in between
+                minTickGap={30} // Minimum gap between ticks to prevent overlap
+                style={{
+                  direction: 'ltr',
+                  textAnchor: 'middle',
+                  unicodeBidi: 'plaintext'
+                }}
               />
               <YAxis 
                 {...commonAxisProps}
                 domain={getYAxisDomain()}
-                orientation={isRTL ? 'right' : 'left'}
+                orientation="left" // Always use left orientation for consistency
                 tickFormatter={formatYAxisTick}
+                style={{
+                  direction: 'ltr',
+                  textAnchor: 'end',
+                  unicodeBidi: 'plaintext'
+                }}
               />
               <Tooltip content={<CustomTooltip />} />
               <Legend 
@@ -576,16 +737,28 @@ export default function UserWeightLogs() {
               <XAxis 
                 dataKey="date" 
                 {...commonAxisProps}
-                angle={isRTL ? -45 : 45}
-                textAnchor={isRTL ? 'end' : 'start'}
-                height={isRTL ? 80 : 60}
+                angle={0} // No rotation for better readability
+                textAnchor="middle"
+                height={80} // Increased height for better spacing
                 tickFormatter={formatTick}
+                interval="preserveStartEnd" // Show first and last tick, skip some in between
+                minTickGap={30} // Minimum gap between ticks to prevent overlap
+                style={{
+                  direction: 'ltr',
+                  textAnchor: 'middle',
+                  unicodeBidi: 'plaintext'
+                }}
               />
               <YAxis 
                 {...commonAxisProps}
                 domain={getYAxisDomain()}
-                orientation={isRTL ? 'right' : 'left'}
+                orientation="left" // Always use left orientation for consistency
                 tickFormatter={formatYAxisTick}
+                style={{
+                  direction: 'ltr',
+                  textAnchor: 'end',
+                  unicodeBidi: 'plaintext'
+                }}
               />
               <Tooltip content={<CustomTooltip />} />
               <Legend 
@@ -879,7 +1052,7 @@ export default function UserWeightLogs() {
                   {translations.refresh}
                 </Button>
 
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" onClick={handleExport}>
                   <Download className="w-4 h-4 mr-2" />
                   {translations.export}
                 </Button>
@@ -925,9 +1098,11 @@ export default function UserWeightLogs() {
             ) : (
               <div 
                 style={{ 
-                  textAlign: isRTL ? 'right' : 'left'
+                  direction: 'ltr', // Force LTR direction for chart container
+                  transform: 'none', // Prevent any transforms
+                  textAlign: 'left' // Always left align
                 }}
-                className={isRTL ? 'rtl-chart-container' : ''}
+                className="chart-container-override"
               >
                 {renderChart()}
               </div>
@@ -964,7 +1139,7 @@ export default function UserWeightLogs() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredLogs.map((log, index) => (
+                    {filteredLogs.slice(0, displayedLogsCount).map((log, index) => (
                       <tr key={index} className="border-b border-border/20 hover:bg-muted/20 transition-colors duration-200">
                         <td className={`p-4 text-sm ${isRTL ? 'text-right' : 'text-left'} text-foreground/80`}>{log.measurement_date}</td>
                         <td className={`p-4 text-sm font-medium ${isRTL ? 'text-right' : 'text-left'}`}>{log.weight_kg}</td>
@@ -976,6 +1151,26 @@ export default function UserWeightLogs() {
                     ))}
                   </tbody>
                 </table>
+                {filteredLogs.length > displayedLogsCount && (
+                  <div className="flex justify-center mt-6 gap-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setDisplayedLogsCount(prev => prev + 5)}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      {translations.loadMore}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setDisplayedLogsCount(filteredLogs.length)}
+                      className="text-primary hover:text-primary/80"
+                    >
+                      {translations.showAll}
+                    </Button>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

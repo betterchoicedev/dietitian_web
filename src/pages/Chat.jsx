@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChatUser, ChatMessage, ChatConversation } from '@/api/entities';
+import { ChatUser, ChatMessage, ChatConversation, MessageQueue } from '@/api/entities';
 import { Menu } from '@/api/entities';
 import { Client } from '@/api/entities';
 import { User } from '@/api/entities';
@@ -11,9 +11,10 @@ import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Image as ImageIcon, Send, Loader2, MessageSquare, InfoIcon, RefreshCw, Users, X } from 'lucide-react';
+import { Image as ImageIcon, Send, Loader2, MessageSquare, InfoIcon, RefreshCw, Users, X, CheckCircle } from 'lucide-react';
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { supabase } from '@/lib/supabase';
 
 export default function Chat() {
   const { language, translations } = useLanguage();
@@ -40,10 +41,78 @@ export default function Chat() {
   const [lastUserActivity, setLastUserActivity] = useState(Date.now());
   const [isRefreshing, setIsRefreshing] = useState(false); // Track refresh state
   const [lastRefreshTime, setLastRefreshTime] = useState(null); // Track last refresh time
+  const [currentDietitian, setCurrentDietitian] = useState(null); // Current authenticated dietitian
+  const [clientId, setClientId] = useState(null); // Client ID from chat_users table
+  const [showSuccessToast, setShowSuccessToast] = useState(false); // Success toast state
+  const [toastMessage, setToastMessage] = useState(''); // Toast message content
+  const [toastType, setToastType] = useState('success'); // Toast type (success, error, etc.)
   
   // Use refs to store intervals to prevent recreation issues
   const autoRefreshIntervalRef = useRef(null);
   const simpleRefreshIntervalRef = useRef(null);
+
+  // Function to show toast notification
+  const showToast = (message, type = 'success') => {
+    setToastMessage(message);
+    setToastType(type);
+    setShowSuccessToast(true);
+    
+    // Auto-hide after 3 seconds
+    setTimeout(() => {
+      setShowSuccessToast(false);
+    }, 3000);
+  };
+
+  // Get current authenticated user (dietitian)
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser();
+        if (error) {
+          console.error('Error getting current user:', error);
+          return;
+        }
+        if (user) {
+          setCurrentDietitian(user);
+          console.log('✅ Current dietitian loaded:', user.id);
+        }
+      } catch (err) {
+        console.error('Error in getCurrentUser:', err);
+      }
+    };
+
+    getCurrentUser();
+  }, []);
+
+  // Get client ID when selectedClient changes
+  useEffect(() => {
+    const getClientId = async () => {
+      if (!selectedClient?.user_code) return;
+      
+      try {
+        console.log('🔍 Getting client ID for user_code:', selectedClient.user_code);
+        const { data: client, error } = await supabase
+          .from('chat_users')
+          .select('id')
+          .eq('user_code', selectedClient.user_code)
+          .single();
+        
+        if (error) {
+          console.error('Error getting client ID:', error);
+          return;
+        }
+        
+        if (client) {
+          setClientId(client.id);
+          console.log('✅ Client ID loaded:', client.id);
+        }
+      } catch (err) {
+        console.error('Error getting client ID:', err);
+      }
+    };
+
+    getClientId();
+  }, [selectedClient?.user_code]);
 
   // Simple auto-refresh that always runs every 10 seconds (most reliable)
   useEffect(() => {
@@ -214,6 +283,30 @@ export default function Chat() {
     }
   };
 
+  // Function to view message queue (for testing)
+  const viewMessageQueue = async () => {
+    if (!selectedClient?.user_code) return;
+    
+    try {
+      console.log('📬 Viewing message queue for user:', selectedClient.user_code);
+      const pendingMessages = await MessageQueue.getPendingForUser(selectedClient.user_code);
+      
+      if (pendingMessages.length === 0) {
+        alert('No pending messages in queue for this user.');
+        return;
+      }
+      
+      const queueInfo = pendingMessages.map(msg => 
+        `ID: ${msg.id}\nStatus: ${msg.status}\nContent: ${msg.content.substring(0, 100)}...\nCreated: ${new Date(msg.created_at).toLocaleString()}\n---`
+      ).join('\n');
+      
+      alert(`Message Queue for ${selectedClient.full_name}:\n\n${queueInfo}`);
+    } catch (error) {
+      console.error('Error viewing message queue:', error);
+      setError('Failed to view message queue');
+    }
+  };
+
   // Fetch conversation and initial messages when client is selected
   useEffect(() => {
     if (selectedClient?.user_code) {
@@ -310,19 +403,72 @@ export default function Chat() {
 
   // When sending a message, after success, reload the latest 20 messages
   const handleSend = async () => {
-    if ((!message.trim() && !imageFile) || !selectedClient) return;
+    if ((!message.trim() && !imageFile) || !selectedClient || !conversationId) return;
 
     setIsLoading(true);
     try {
+      // Check if current user is a dietitian (has dietitian_id)
+      const isDietitian = currentDietitian?.id && clientId;
+      
+      if (isDietitian) {
+        // Dietitian is sending a message - send directly to queue
+        console.log('👨‍⚕️ Dietitian sending message directly...');
+        
+        // Add to message queue
+        const queueData = {
+          conversation_id: conversationId,
+          client_id: clientId,
+          dietitian_id: currentDietitian.id,
+          user_code: selectedClient.user_code,
+          content: message,
+          role: 'assistant',
+          status: 'pending',
+          priority: 1,
+          created_at: new Date().toISOString()
+        };
+        
+        await MessageQueue.addToQueue(queueData);
+        console.log('✅ Dietitian message added to queue');
+        
+        // Create a temporary message object for local display
+        const tempDietitianMessage = {
+          id: `temp-${Date.now()}`,
+          role: 'assistant',
+          content: message,
+          conversation_id: conversationId,
+          created_at: new Date().toISOString()
+        };
+        
+        // Update local state with the temporary message
+        setMessages(prev => [tempDietitianMessage, ...prev]);
+        
+        // Clear form
+        setMessage('');
+        setImageFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        
+        // Show success toast
+        showToast(`✅ Message sent to ${selectedClient.full_name}!`, 'success');
+        
+        console.log('✅ Dietitian message sent successfully');
+        return;
+      }
+
+      // Regular user message flow (AI response)
       // Create the user message object
-      let userMessage = { role: 'user', content: message };
+      let userMessage = { 
+        role: 'user', 
+        content: message,
+        conversation_id: conversationId,
+        created_at: new Date().toISOString()
+      };
 
       let base64Image = null;
       // Handle image upload if selected
       if (imageFile instanceof File) {
         try {
           base64Image = await toBase64(imageFile);
-          userMessage.image_url = `data:image/jpeg;base64,${base64Image}`;
+          userMessage.attachments = { image_url: `data:image/jpeg;base64,${base64Image}` };
         } catch (uploadError) {
           console.error("Error uploading image:", uploadError);
           setError(translations.failedToUpload);
@@ -331,11 +477,16 @@ export default function Chat() {
         }
       }
 
-      // Update chat with user message
-      const currentMessages = selectedChat?.messages || [];
-      const updatedMessages = [...currentMessages, userMessage];
+      // Store user message in database
+      console.log('💬 Storing user message in database...');
+      const storedUserMessage = await ChatMessage.create(userMessage);
+      console.log('✅ User message stored:', storedUserMessage);
 
-      const chatHistoryForPrompt = updatedMessages
+      // Update local state with the stored message
+      setMessages(prev => [storedUserMessage, ...prev]);
+
+      // Prepare chat history for AI prompt (include stored message)
+      const chatHistoryForPrompt = [storedUserMessage, ...messages]
         .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
         .join('\n');
 
@@ -475,7 +626,7 @@ Your task is to respond to the user's message below, taking into account their s
       }
 
       // Default fallback response in case AI fails
-      let aiResponse = `Hi ${selectedClient.full_name.split(' ')[0]}! Thank you for your message${userMessage.image_url ? ' and the food image' : ''}. \n\n`;
+      let aiResponse = `Hi ${selectedClient.full_name.split(' ')[0]}! Thank you for your message${base64Image ? ' and the food image' : ''}. \n\n`;
 
       // Include previous chat context if available
       if (clientProfile.user_context) {
@@ -566,7 +717,7 @@ Your task is to respond to the user's message below, taking into account their s
         }
       }
 
-      if (userMessage.image_url) {
+      if (base64Image) {
         aiResponse += `\n\nRegarding the food in your image:\n`;
         aiResponse += `- This appears to be a meal you've shared for analysis\n`;
         aiResponse += `- Consider how it fits into your daily nutrition goals\n`;
@@ -608,22 +759,56 @@ Your task is to respond to the user's message below, taking into account their s
         }
       }
 
-      // Update chat with AI response
-      const finalMessages = [...updatedMessages, { role: 'assistant', content: aiResponse }];
+      // Add AI response to message queue for processing (don't store in chat_messages)
+      console.log('📬 Adding AI response to message queue...');
+      const queueData = {
+        conversation_id: conversationId,
+        client_id: clientId, // Add client ID from chat_users table
+        dietitian_id: currentDietitian?.id, // Add dietitian ID from auth
+        user_code: selectedClient.user_code,
+        content: aiResponse,
+        role: 'assistant',
+        attachments: base64Image ? { image_url: `data:image/jpeg;base64,${base64Image}` } : null,
+        status: 'pending',
+        priority: 1,
+        created_at: new Date().toISOString()
+      };
+      
+      // Validate required fields before adding to queue
+      if (!queueData.client_id || !queueData.dietitian_id) {
+        console.error('❌ Missing required IDs for queue:', { clientId, dietitianId: currentDietitian?.id });
+        setError('Missing required user information for message queue');
+        return;
+      }
+      
+      await MessageQueue.addToQueue(queueData);
+      console.log('✅ AI response added to queue');
 
-      // Update local git add ,e
-      setSelectedChat(prev => ({
-        ...prev,
-        messages: finalMessages
-      }));
+      // Create a temporary message object for local display (not stored in database)
+      const tempAiMessage = {
+        id: `temp-${Date.now()}`,
+        role: 'assistant',
+        content: aiResponse,
+        conversation_id: conversationId,
+        created_at: new Date().toISOString(),
+        attachments: base64Image ? { image_url: `data:image/jpeg;base64,${base64Image}` } : null
+      };
+
+      // Update local state with the temporary AI message
+      setMessages(prev => [tempAiMessage, ...prev]);
 
       // Clear form
       setMessage('');
       setImageFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
+      
+      // Show success toast
+      showToast(`✅ AI response sent to ${selectedClient.full_name}!`, 'success');
+      
+      console.log('✅ Message exchange completed successfully');
     } catch (error) {
       console.error('Error sending message:', error);
-      setError(translations.failedToSend);
+      setError(translations.failedToSend || 'Failed to send message');
     } finally {
       setIsLoading(false);
     }
@@ -670,7 +855,7 @@ Your task is to respond to the user's message below, taking into account their s
   // Function to render message content with images
   const renderMessageContent = (msg) => {
     const { text, imageUrl } = extractImageFromContent(msg.content);
-    const hasDirectImage = msg.image_url;
+    const hasDirectImage = msg.attachments?.image_url;
     const hasContentImage = imageUrl;
     
     return (
@@ -680,7 +865,7 @@ Your task is to respond to the user's message below, taking into account their s
           <div className="mb-3">
             <img
               src={hasDirectImage}
-              alt={translations.uploadedFood}
+              alt={translations.uploadedFood || 'Uploaded food image'}
               className="rounded-lg max-w-full max-h-64 object-cover shadow-sm border border-gray-200 cursor-pointer hover:opacity-90 transition-opacity duration-200"
               onClick={() => handleImageClick(hasDirectImage)}
               onError={(e) => {
@@ -832,6 +1017,17 @@ Your task is to respond to the user's message below, taking into account their s
                       </>
                     )}
                   </Button>
+                  
+                  {/* View Queue Button */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={viewMessageQueue}
+                    className="px-3 py-2 bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200 hover:from-orange-100 hover:to-red-100 text-orange-700 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300"
+                  >
+                    📬 View Queue
+                  </Button>
+                  
                   {lastRefreshTime && (
                     <div className="text-xs text-slate-500 px-2">
                       Last: {lastRefreshTime.toLocaleTimeString()}
@@ -1041,6 +1237,48 @@ Your task is to respond to the user's message below, taking into account their s
           </DialogContent>
         </Dialog>
       </div>
+      
+      {/* Success Toast Notification */}
+      {showSuccessToast && (
+        <div className="fixed top-4 right-4 z-50 animate-in slide-in-from-right-2 duration-300">
+          <div className={`
+            flex items-center gap-3 p-4 rounded-xl shadow-2xl border-2 backdrop-blur-xl
+            ${toastType === 'success' 
+              ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200 text-green-800' 
+              : 'bg-gradient-to-r from-red-50 to-pink-50 border-red-200 text-red-800'
+            }
+          `}>
+            <div className={`
+              w-8 h-8 rounded-full flex items-center justify-center
+              ${toastType === 'success' 
+                ? 'bg-gradient-to-r from-green-500 to-emerald-600' 
+                : 'bg-gradient-to-r from-red-500 to-pink-600'
+              }
+            `}>
+              {toastType === 'success' ? (
+                <CheckCircle className="w-5 h-5 text-white" />
+              ) : (
+                <X className="w-5 h-5 text-white" />
+              )}
+            </div>
+            <div className="flex-1">
+              <p className="font-semibold text-sm">{toastMessage}</p>
+            </div>
+            <button
+              onClick={() => setShowSuccessToast(false)}
+              className={`
+                w-6 h-6 rounded-full flex items-center justify-center transition-colors
+                ${toastType === 'success' 
+                  ? 'hover:bg-green-200 text-green-600' 
+                  : 'hover:bg-red-200 text-red-600'
+                }
+              `}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
