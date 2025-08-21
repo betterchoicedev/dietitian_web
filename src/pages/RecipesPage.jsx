@@ -934,60 +934,8 @@ export default function RecipesPage() {
               <div className="w-2 h-2 bg-primary rounded-full"></div>
               <span className="text-sm font-medium text-primary">{translations.expertApproved || 'Expert Approved'}</span>
             </div>
-            <div className="flex items-center gap-2 px-4 py-2 bg-warning/10 border border-warning/30 rounded-xl">
-              <div className="w-2 h-2 bg-warning rounded-full"></div>
-              <span className="text-sm font-medium text-warning">Cache Active</span>
-            </div>
           </div>
           
-          {/* Cache Management */}
-          <div className="flex items-center justify-center gap-4 mt-6 animate-slide-up" style={{ animationDelay: '0.3s' }}>
-            <button
-              onClick={() => {
-                const cleaned = cleanExpiredCache();
-                if (cleaned > 0) {
-                  alert(`Cleaned ${cleaned} expired cache entries`);
-                } else {
-                  alert('No expired cache entries to clean');
-                }
-              }}
-              className="px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg text-sm font-medium transition-colors"
-            >
-              🧹 Clean Cache
-            </button>
-            <button
-              onClick={() => {
-                const keys = [];
-                for (let i = 0; i < localStorage.length; i++) {
-                  const key = localStorage.key(i);
-                  if (key && key.startsWith(CACHE_PREFIX)) {
-                    keys.push(key);
-                  }
-                }
-                alert(`Cache contains ${keys.length} translation entries`);
-              }}
-              className="px-4 py-2 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg text-sm font-medium transition-colors"
-            >
-              📊 Cache Info
-            </button>
-            <button
-              onClick={() => {
-                const keys = [];
-                for (let i = 0; i < localStorage.length; i++) {
-                  const key = localStorage.key(i);
-                  if (key && key.startsWith(CACHE_PREFIX)) {
-                    keys.push(key);
-                    localStorage.removeItem(key);
-                  }
-                }
-                alert(`Cleared ${keys.length} cache entries`);
-                window.location.reload();
-              }}
-              className="px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-sm font-medium transition-colors"
-            >
-              🗑️ Clear Cache
-            </button>
-          </div>
         </div>
       </section>
 

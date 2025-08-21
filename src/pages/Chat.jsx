@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChatUser, ChatMessage, ChatConversation, MessageQueue } from '@/api/entities';
+import { ChatUser, ChatMessage, ChatConversation } from '@/api/entities';
 import { Menu } from '@/api/entities';
 import { Client } from '@/api/entities';
 import { User } from '@/api/entities';
@@ -235,6 +235,77 @@ export default function Chat() {
     setCurrentImageUrl(null);
   };
 
+  // Function to add message to the new user_message_queue table
+  const addToUserMessageQueue = async (queueData) => {
+    try {
+      // Determine message type based on role and whether it's from dietitian or AI
+      let messageType;
+      if (queueData.role === 'user') {
+        messageType = 'user_message';
+      } else if (queueData.role === 'assistant') {
+        // If it has a dietitian_id, it's a dietitian message, otherwise it's AI
+        messageType = queueData.dietitian_id ? 'dietitian_message' : 'ai_response';
+      } else {
+        messageType = 'unknown';
+      }
+
+      const { data, error } = await supabase
+        .from('user_message_queue')
+        .insert({
+          user_id: queueData.client_id,
+          user_code: queueData.user_code,
+          message_type: messageType,
+          message_content: queueData.content,
+          message_priority: queueData.priority || 5,
+          scheduled_for: new Date().toISOString(),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          optimal_delivery_window: { start_hour: 8, end_hour: 20 },
+          trigger_type: 'immediate',
+          context_data: {
+            conversation_id: queueData.conversation_id,
+            dietitian_id: queueData.dietitian_id,
+            role: queueData.role,
+            attachments: queueData.attachments || null
+          },
+          status: 'pending'
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error adding to user_message_queue:', error);
+        throw error;
+      }
+
+      console.log('✅ Message added to user_message_queue:', data);
+      return data;
+    } catch (error) {
+      console.error('Failed to add to user_message_queue:', error);
+      throw error;
+    }
+  };
+
+  // Function to get pending messages from the new user_message_queue table
+  const getPendingMessagesFromQueue = async (userCode) => {
+    try {
+      const { data, error } = await supabase
+        .from('user_message_queue')
+        .select('*')
+        .eq('user_code', userCode)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error getting pending messages from queue:', error);
+        throw error;
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Failed to get pending messages from queue:', error);
+      return [];
+    }
+  };
 
   const handleRefresh = async () => {
     if (!selectedClient?.user_code || !conversationId) return;
@@ -283,13 +354,13 @@ export default function Chat() {
     }
   };
 
-  // Function to view message queue (for testing)
+  // Function to view message queue (for testing) - updated for new table
   const viewMessageQueue = async () => {
     if (!selectedClient?.user_code) return;
     
     try {
       console.log('📬 Viewing message queue for user:', selectedClient.user_code);
-      const pendingMessages = await MessageQueue.getPendingForUser(selectedClient.user_code);
+      const pendingMessages = await getPendingMessagesFromQueue(selectedClient.user_code);
       
       if (pendingMessages.length === 0) {
         alert('No pending messages in queue for this user.');
@@ -297,7 +368,7 @@ export default function Chat() {
       }
       
       const queueInfo = pendingMessages.map(msg => 
-        `ID: ${msg.id}\nStatus: ${msg.status}\nContent: ${msg.content.substring(0, 100)}...\nCreated: ${new Date(msg.created_at).toLocaleString()}\n---`
+        `ID: ${msg.id}\nType: ${msg.message_type}\nStatus: ${msg.status}\nContent: ${msg.message_content.substring(0, 100)}...\nScheduled: ${new Date(msg.scheduled_for).toLocaleString()}\nCreated: ${new Date(msg.created_at).toLocaleString()}\n---`
       ).join('\n');
       
       alert(`Message Queue for ${selectedClient.full_name}:\n\n${queueInfo}`);
@@ -411,10 +482,10 @@ export default function Chat() {
       const isDietitian = currentDietitian?.id && clientId;
       
       if (isDietitian) {
-        // Dietitian is sending a message - send directly to queue
+        // Dietitian is sending a message - send directly to new queue
         console.log('👨‍⚕️ Dietitian sending message directly...');
         
-        // Add to message queue
+        // Add to new user_message_queue table
         const queueData = {
           conversation_id: conversationId,
           client_id: clientId,
@@ -422,13 +493,11 @@ export default function Chat() {
           user_code: selectedClient.user_code,
           content: message,
           role: 'assistant',
-          status: 'pending',
-          priority: 1,
-          created_at: new Date().toISOString()
+          priority: 1
         };
         
-        await MessageQueue.addToQueue(queueData);
-        console.log('✅ Dietitian message added to queue');
+        await addToUserMessageQueue(queueData);
+        console.log('✅ Dietitian message added to new queue');
         
         // Create a temporary message object for local display
         const tempDietitianMessage = {
@@ -759,8 +828,8 @@ Your task is to respond to the user's message below, taking into account their s
         }
       }
 
-      // Add AI response to message queue for processing (don't store in chat_messages)
-      console.log('📬 Adding AI response to message queue...');
+      // Add AI response to new user_message_queue table
+      console.log('📬 Adding AI response to new user_message_queue...');
       const queueData = {
         conversation_id: conversationId,
         client_id: clientId, // Add client ID from chat_users table
@@ -768,10 +837,7 @@ Your task is to respond to the user's message below, taking into account their s
         user_code: selectedClient.user_code,
         content: aiResponse,
         role: 'assistant',
-        attachments: base64Image ? { image_url: `data:image/jpeg;base64,${base64Image}` } : null,
-        status: 'pending',
-        priority: 1,
-        created_at: new Date().toISOString()
+        priority: 1
       };
       
       // Validate required fields before adding to queue
@@ -781,8 +847,8 @@ Your task is to respond to the user's message below, taking into account their s
         return;
       }
       
-      await MessageQueue.addToQueue(queueData);
-      console.log('✅ AI response added to queue');
+      await addToUserMessageQueue(queueData);
+      console.log('✅ AI response added to new queue');
 
       // Create a temporary message object for local display (not stored in database)
       const tempAiMessage = {

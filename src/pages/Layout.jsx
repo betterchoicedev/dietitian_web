@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Link, useNavigate, Outlet } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { Link, useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -20,7 +20,8 @@ import {
   Globe,
   Scale,
   User,
-  Badge
+  Badge,
+  Search
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -43,27 +44,31 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { LanguageToggle } from '@/components/ui/language-toggle';
 import { EventBus } from '@/utils/EventBus';
+import { Input } from '@/components/ui/input';
 
 export default function Layout() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, signOut } = useAuth();
-  const { language, toggleLanguage, translations } = useLanguage();
-  const { clients, selectedUserCode, selectedClient, selectClient, isLoading: clientsLoading } = useClient();
+  const { language, translations, toggleLanguage } = useLanguage();
+  const { clients, selectedUserCode, selectClient, isLoading: clientsLoading } = useClient();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const [hasOpenDialog, setHasOpenDialog] = useState(false);
   const [error, setError] = useState(null);
   const [userData, setUserData] = useState(null);
-  const dataLoadedRef = React.useRef(false);
+  const [clientSearchTerm, setClientSearchTerm] = useState('');
+  const [isClientSelectOpen, setIsClientSelectOpen] = useState(false);
+  const dataLoadedRef = useRef(false);
 
   // Debug sidebar state changes
-  React.useEffect(() => {
+  useEffect(() => {
     console.log('Sidebar state changed to:', sidebarOpen, 'isMobile:', isMobile, 'language:', language);
   }, [sidebarOpen, isMobile, language]);
   
   // Check if mobile
-  React.useEffect(() => {
+  useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 768);
     };
@@ -74,7 +79,7 @@ export default function Layout() {
   }, []);
 
   // Check if any dialog is open and close sidebar if needed
-  React.useEffect(() => {
+  useEffect(() => {
     const checkForDialogs = () => {
       const dialogs = document.querySelectorAll('[role="dialog"], .dialog, [data-state="open"]');
       const hasOpenDialog = Array.from(dialogs).some(dialog => {
@@ -106,7 +111,7 @@ export default function Layout() {
   }, [sidebarOpen]);
 
   // Add visibility change listener
-  React.useEffect(() => {
+  useEffect(() => {
     const handleVisibilityChange = () => {
       console.log('Visibility changed:', document.visibilityState);
     };
@@ -117,7 +122,7 @@ export default function Layout() {
     };
   }, []);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const loadUserData = async () => {
       if (!user) return;
       // don't run twice
@@ -150,6 +155,8 @@ export default function Layout() {
 
   const handleClientChange = (userCode) => {
     selectClient(userCode);
+    setIsClientSelectOpen(false);
+    setClientSearchTerm(''); // Clear search when client is selected
     // Close sidebar on mobile when client is selected
     if (isMobile) {
       setSidebarOpen(false);
@@ -171,6 +178,11 @@ export default function Layout() {
       EventBus.emit('translateMenu', 'he');
     }
   };
+
+  // Filter clients based on search term
+  const filteredClients = clients.filter(client => 
+    client.full_name?.toLowerCase().includes(clientSearchTerm.toLowerCase())
+  );
 
   if (isLoading) {
     return (
@@ -241,24 +253,55 @@ export default function Layout() {
           {/* Client Selection */}
           <div className="flex-1 flex justify-center min-w-0">
             {clients.length > 0 && (
-              <Select value={selectedUserCode || ''} onValueChange={handleClientChange}>
+              <Select 
+                value={selectedUserCode || ''} 
+                onValueChange={handleClientChange}
+                open={isClientSelectOpen}
+                onOpenChange={setIsClientSelectOpen}
+              >
                 <SelectTrigger className="w-full max-w-[150px] sm:max-w-[200px] md:max-w-[280px] bg-white/90 backdrop-blur-sm border border-border/60 shadow-sm hover:border-primary/40 transition-all duration-300 text-xs sm:text-sm md:text-base h-9 sm:h-10 md:h-11 px-3 md:px-4 rounded-lg">
                   <SelectValue placeholder={translations.selectClient || 'Select Client'} />
                 </SelectTrigger>
-                <SelectContent className="bg-white/95 backdrop-blur-xl border-border/60 shadow-lg rounded-lg">
-                  {clients.map((client) => (
-                    <SelectItem key={client.user_code} value={client.user_code} className="hover:bg-primary/5 rounded-md">
-                      <div className="flex items-center gap-3">
-                        <div className="w-6 h-6 bg-primary/10 rounded-full flex items-center justify-center">
-                          <User className="h-3 w-3 text-primary" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-gray-800 truncate">{client.full_name}</div>
-                          <div className="text-xs text-gray-500 truncate">{client.user_code}</div>
-                        </div>
+                <SelectContent className="bg-white/95 backdrop-blur-xl border-border/60 shadow-lg rounded-lg w-[280px] max-w-[90vw]">
+                  {/* Search Input */}
+                  <div className="p-3 border-b border-border/30">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search clients..."
+                        value={clientSearchTerm}
+                        onChange={(e) => setClientSearchTerm(e.target.value)}
+                        className="pl-10 h-9 bg-white/80 border-border/40 focus:border-primary/60"
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  </div>
+                  
+                  {/* Client List */}
+                  <div className="max-h-[300px] overflow-y-auto overflow-x-hidden">
+                    {filteredClients.length > 0 ? (
+                      filteredClients.map((client) => (
+                        <SelectItem 
+                          key={client.user_code} 
+                          value={client.user_code} 
+                          className="hover:bg-primary/5 rounded-md mx-2 mb-1"
+                        >
+                          <div className="flex items-center gap-3 w-full min-w-0">
+                            <div className="w-6 h-6 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
+                              <User className="h-3 w-3 text-primary" />
+                            </div>
+                            <div className="flex-1 min-w-0 overflow-hidden">
+                              <div className="font-medium text-gray-800 truncate">{client.full_name}</div>
+                            </div>
+                          </div>
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="p-4 text-center text-sm text-muted-foreground">
+                        {clientSearchTerm ? 'No clients found matching your search.' : 'No clients available.'}
                       </div>
-                    </SelectItem>
-                  ))}
+                    )}
+                  </div>
                 </SelectContent>
               </Select>
             )}
