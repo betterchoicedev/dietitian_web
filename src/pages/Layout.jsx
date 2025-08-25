@@ -5,8 +5,8 @@ import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useClient } from '@/contexts/ClientContext';
 import {
-  FileText, 
-  Users, 
+  FileText,
+  Users,
   MessageSquare,
   Settings,
   Menu as MenuIcon,
@@ -21,7 +21,8 @@ import {
   Scale,
   User,
   Badge,
-  Search
+  Search,
+  Apple
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -420,6 +421,12 @@ export default function Layout() {
             <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-purple/8 hover:text-purple transition-all duration-300 group">
               <Scale className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
               <span className="font-medium">{translations.weightLogs || 'Weight Logs'}</span>
+            </Button>
+          </Link>
+          <Link to="/nutrition-analytics" onClick={() => setSidebarOpen(false)}>
+            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-emerald/8 hover:text-emerald transition-all duration-300 group">
+              <Apple className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+              <span className="font-medium">{translations.nutritionAnalytics || 'Nutrition Analytics'}</span>
             </Button>
           </Link>
           <Link to="/menuload" onClick={() => setSidebarOpen(false)}>

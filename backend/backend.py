@@ -2826,6 +2826,286 @@ def api_update_user_fields():
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
+
+@app.route("/api/weight-logs/<user_code>", methods=["GET"])
+def api_get_user_weight_logs(user_code):
+    """
+    Get weight logs for a specific user by user_code in URL path.
+    Alternative endpoint for getting user-specific weight logs.
+    """
+    try:
+        logger.info(f"🔍 Fetching weight logs for user_code: {user_code}")
+
+        # Query for specific user
+        response = supabase.table('weight_logs').select('*').eq('user_code', user_code).order('measurement_date', desc=True).execute()
+
+        if response.data is None:
+            logger.warning(f"❌ No data returned from weight_logs query for user_code: {user_code}")
+            return jsonify({"error": f"No weight logs found for user_code: {user_code}"}), 404
+
+        weight_logs = response.data
+        logger.info(f"✅ Retrieved {len(weight_logs)} weight log entries for user_code: {user_code}")
+
+        # Calculate trends and statistics
+        trends = {}
+        if weight_logs:
+            # Weight trend
+            weights = [log.get('weight_kg') for log in weight_logs if log.get('weight_kg') is not None]
+            if len(weights) > 1:
+                weight_change = weights[0] - weights[-1]  # Most recent minus oldest
+                trends['weight_change_kg'] = round(weight_change, 2)
+                trends['weight_trend'] = 'gaining' if weight_change > 0 else 'losing' if weight_change < 0 else 'stable'
+
+            # Body fat trend
+            body_fats = [log.get('body_fat_percentage') for log in weight_logs if log.get('body_fat_percentage') is not None]
+            if len(body_fats) > 1:
+                body_fat_change = body_fats[0] - body_fats[-1]
+                trends['body_fat_change'] = round(body_fat_change, 2)
+
+        # Return the data with summary and trends
+        return jsonify({
+            "weight_logs": weight_logs,
+            "summary": {
+                "total_entries": len(weight_logs),
+                "user_code": user_code,
+                "date_range": {
+                    "earliest": weight_logs[-1]["measurement_date"] if weight_logs else None,
+                    "latest": weight_logs[0]["measurement_date"] if weight_logs else None
+                } if weight_logs else None
+            },
+            "trends": trends if trends else None
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Exception in /api/weight-logs/{user_code}: {str(e)}")
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to fetch weight logs for user_code {user_code}: {str(e)}"}), 500
+
+
+@app.route("/api/convert-measurement", methods=["POST"])
+def api_convert_measurement():
+    """
+    Convert measurements using AI/LLM for ingredients.
+    Supports converting between household measurements and grams.
+    """
+    try:
+        data = request.get_json()
+
+        # Extract parameters
+        ingredient = data.get("ingredient", "").strip()
+        brand = data.get("brand", "").strip()
+        from_measurement = data.get("fromMeasurement", "").strip()
+        to_type = data.get("toType", "grams")  # "grams" or "household"
+        target_lang = data.get("targetLang", "en")
+        region = data.get("region", "israel").lower()
+
+        # Validate required parameters
+        if not ingredient:
+            return jsonify({"error": "Ingredient name is required"}), 400
+        if not from_measurement:
+            return jsonify({"error": "From measurement is required"}), 400
+        if to_type not in ["grams", "household"]:
+            return jsonify({"error": "toType must be 'grams' or 'household'"}), 400
+
+        logger.info(f"🤖 Converting measurement: {ingredient} ({brand}) from '{from_measurement}' to {to_type} for region {region}")
+
+        # Create comprehensive system prompt for measurement conversion
+        system_prompt = f"""You are an expert nutritionist and culinary professional specializing in accurate measurement conversions for dietary planning.
+
+**YOUR TASK:**
+Convert the given measurement to the requested format using your extensive knowledge of food weights, volumes, and regional serving sizes.
+
+**CONVERSION RULES:**
+1. **Weight to Volume Conversions:**
+   - Be precise with density considerations (e.g., 1 cup flour ≠ 1 cup sugar in weight)
+   - Account for ingredient-specific densities and packing methods
+   - Use standard measurement equivalents
+
+2. **Volume to Weight Conversions:**
+   - Consider ingredient density and typical packing
+   - Account for air space in volume measurements
+   - Use realistic, practical weight estimates
+
+3. **Regional Considerations:**
+   - Adjust for regional portion sizes and measurement standards
+   - Consider local brand packaging and serving sizes
+   - Use culturally appropriate measurement units
+
+4. **Precision Guidelines:**
+   - Provide realistic, practical measurements
+   - Round to appropriate significant figures
+   - Consider cooking/preparation effects on weight
+
+**RESPONSE FORMAT:**
+Return ONLY a valid JSON object with this exact structure:
+{{
+  "converted_measurement": "<the converted measurement>",
+  "confidence": "<high|medium|low>",
+  "method": "<brief explanation of conversion method>",
+  "notes": "<any relevant notes about the conversion>"
+}}
+
+**EXAMPLES:**
+Input: "1 cup rice" → grams
+Output: {{"converted_measurement": "185", "confidence": "high", "method": "Standard white rice density conversion", "notes": "Based on uncooked long-grain rice density"}}
+
+Input: "200g chicken breast" → household
+Output: {{"converted_measurement": "1 medium breast", "confidence": "medium", "method": "Standard chicken breast weight ranges", "notes": "Typical supermarket chicken breast size"}}"""
+
+        # Create detailed user prompt with regional context
+        region_context = {
+            'israel': {
+                'units': 'Use Israeli/common metric measurements. Consider local market standards.',
+                'examples': 'Israeli cottage cheese tubs (250g), hummus containers (400g), pita sizes (60-80g), typical vegetable portions'
+            },
+            'us': {
+                'units': 'Use American customary units (cups, tablespoons, ounces). Consider US market standards.',
+                'examples': 'US cottage cheese containers (16oz), yogurt cups (6-8oz), bread slices, typical American portions'
+            },
+            'uk': {
+                'units': 'Use British/metric measurements. Consider UK market standards.',
+                'examples': 'UK cottage cheese tubs (300g), yogurt pots (150-170g), bread slices, typical British portions'
+            },
+            'canada': {
+                'units': 'Use Canadian/metric measurements. Consider Canadian market standards.',
+                'examples': 'Canadian cottage cheese containers (500g), yogurt containers (175g), typical Canadian portions'
+            },
+            'australia': {
+                'units': 'Use Australian/metric measurements. Consider Australian market standards.',
+                'examples': 'Australian cottage cheese tubs (250g), yogurt tubs (170g), typical Australian portions'
+            }
+        }
+
+        region_info = region_context.get(region, region_context['israel'])
+
+        user_prompt = f"""
+**INGREDIENT DETAILS:**
+- Name: {ingredient}
+- Brand: {brand if brand else 'Generic'}
+- Current Measurement: {from_measurement}
+- Target Format: {to_type}
+- Region: {region}
+
+**REGIONAL CONTEXT:**
+{region_info['units']}
+{region_info['examples']}
+
+**CONVERSION REQUEST:**
+Convert "{from_measurement}" of "{ingredient}" to {to_type} measurement.
+
+**ADDITIONAL CONTEXT:**
+- Consider the brand "{brand}" if it affects typical serving sizes
+- Use {region} regional standards for portion sizes
+- Account for preparation state (raw, cooked, etc.) if mentioned
+- Provide practical, realistic measurements that people actually use
+
+Please provide the most accurate conversion based on nutritional and culinary standards."""
+
+        # Call Azure OpenAI
+        response = openai.ChatCompletion.create(
+            engine=deployment,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.1,  # Low temperature for consistent results
+            max_tokens=200
+        )
+
+        raw_response = response["choices"][0]["message"]["content"]
+        logger.info(f"🤖 Raw AI response: {raw_response}")
+
+        # Parse the JSON response
+        try:
+            result = json.loads(raw_response.strip())
+
+            # Validate required fields
+            required_fields = ["converted_measurement", "confidence", "method"]
+            if not all(field in result for field in required_fields):
+                logger.warning(f"❌ AI response missing required fields: {result}")
+                return jsonify({"error": "AI response missing required fields"}), 500
+
+            # Add additional metadata
+            result.update({
+                "ingredient": ingredient,
+                "brand": brand,
+                "from_measurement": from_measurement,
+                "to_type": to_type,
+                "region": region,
+                "timestamp": datetime.datetime.now().isoformat()
+            })
+
+            logger.info(f"✅ Successfully converted measurement: {from_measurement} → {result['converted_measurement']}")
+            return jsonify(result)
+
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Failed to parse AI response as JSON: {raw_response}")
+            logger.error(f"❌ JSON error: {str(e)}")
+
+            # Attempt to extract measurement from non-JSON response
+            fallback_measurement = extract_measurement_from_text(raw_response, to_type)
+            if fallback_measurement:
+                logger.info(f"🔄 Using fallback extraction: {fallback_measurement}")
+                return jsonify({
+                    "converted_measurement": fallback_measurement,
+                    "confidence": "low",
+                    "method": "Fallback text extraction",
+                    "notes": "Could not parse AI JSON response, used text extraction",
+                    "ingredient": ingredient,
+                    "from_measurement": from_measurement,
+                    "to_type": to_type
+                })
+            else:
+                return jsonify({"error": "Failed to parse AI response"}), 500
+
+    except Exception as e:
+        logger.error(f"❌ Exception in measurement conversion: {str(e)}")
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Measurement conversion failed: {str(e)}"}), 500
+
+
+def extract_measurement_from_text(text, to_type):
+    """
+    Fallback function to extract measurement from AI text response when JSON parsing fails.
+    """
+    try:
+        text = text.lower().strip()
+
+        if to_type == "grams":
+            # Look for weight measurements in grams
+            import re
+            gram_patterns = [
+                r'(\d+(?:\.\d+)?)\s*g(?:rams?)?',
+                r'(\d+(?:\.\d+)?)\s*gram',
+                r'about\s*(\d+(?:\.\d+)?)\s*g',
+                r'(\d+(?:\.\d+)?)\s*gr',
+            ]
+
+            for pattern in gram_patterns:
+                match = re.search(pattern, text)
+                if match:
+                    return match.group(1)
+
+        elif to_type == "household":
+            # Look for household measurements
+            household_patterns = [
+                r'(\d+(?:\.\d+)?)\s*(?:cups?|cups|tbsp|tablespoons?|tsp|teaspoons?|oz|ounces?|lbs?|pounds?|ml|liters?|pieces?|slices?|cloves?|heads?)',
+                r'(\d+(?:\.\d+)?)\s*(?:medium|large|small)\s*(\w+)',
+                r'about\s*(\d+(?:\.\d+)?)\s*(?:cups?|cups|tbsp|tablespoons?|tsp|teaspoons?|oz|ounces?|lbs?|pounds?|ml|liters?|pieces?|slices?|cloves?|heads?)',
+            ]
+
+            for pattern in household_patterns:
+                match = re.search(pattern, text)
+                if match:
+                    return match.group(0).strip()
+
+        return None
+
+    except Exception as e:
+        logger.error(f"❌ Error in fallback text extraction: {str(e)}")
+        return None
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)

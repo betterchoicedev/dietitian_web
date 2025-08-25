@@ -47,6 +47,11 @@ export default function Chat() {
   const [toastMessage, setToastMessage] = useState(''); // Toast message content
   const [toastType, setToastType] = useState('success'); // Toast type (success, error, etc.)
   
+  // Scroll position tracking for auto-refresh
+  const [userScrollPosition, setUserScrollPosition] = useState('bottom'); // 'bottom', 'middle', 'top'
+  const [lastScrollTop, setLastScrollTop] = useState(0);
+  const [hasNewMessages, setHasNewMessages] = useState(false); // Track if there are new messages when user is not at bottom
+  
   // Use refs to store intervals to prevent recreation issues
   const autoRefreshIntervalRef = useRef(null);
   const simpleRefreshIntervalRef = useRef(null);
@@ -137,12 +142,41 @@ export default function Chat() {
         
         if (reversedMessages.length > messages.length) {
           console.log(`🔄 Simple auto-refresh: New messages detected! Old: ${messages.length}, New: ${reversedMessages.length}`);
+          
+          // Store current scroll position before updating messages
+          const scrollArea = scrollAreaRef.current;
+          const prevScrollTop = scrollArea ? scrollArea.scrollTop : 0;
+          const prevScrollHeight = scrollArea ? scrollArea.scrollHeight : 0;
+          
           setMessages(reversedMessages);
           setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
           setHasMoreMessages(reversedMessages.length === 20);
           setLastRefreshTime(new Date());
+          
+          // Only auto-scroll to bottom if user was at bottom, otherwise preserve position
+          if (userScrollPosition === 'bottom') {
+            // User was at bottom, scroll to new messages
+            console.log('🔄 Auto-scrolling to bottom for new messages');
+            setTimeout(() => {
+              chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
+            }, 100);
+            setHasNewMessages(false); // Clear flag since we're scrolling to new messages
+          } else {
+            // User was scrolling up, preserve their position
+            console.log(`🔄 Preserving scroll position (user was at ${userScrollPosition}), setting new message indicator`);
+            setTimeout(() => {
+              if (scrollArea) {
+                const newScrollHeight = scrollArea.scrollHeight;
+                const heightDifference = newScrollHeight - prevScrollHeight;
+                scrollArea.scrollTop = prevScrollTop + heightDifference;
+              }
+            }, 100);
+            setHasNewMessages(true); // Set flag to show new message indicator
+          }
         } else {
           console.log('Simple auto-refresh: No new messages found');
+          // No new messages, preserve scroll position
+          setLastRefreshTime(new Date());
         }
       } catch (error) {
         console.warn('Simple auto-refresh failed:', error);
@@ -173,12 +207,41 @@ export default function Chat() {
         
         if (reversedMessages.length > messages.length) {
           console.log(`🔄 Aggressive auto-refresh: New messages detected! Old: ${messages.length}, New: ${reversedMessages.length}`);
+          
+          // Store current scroll position before updating messages
+          const scrollArea = scrollAreaRef.current;
+          const prevScrollTop = scrollArea ? scrollArea.scrollTop : 0;
+          const prevScrollHeight = scrollArea ? scrollArea.scrollHeight : 0;
+          
           setMessages(reversedMessages);
           setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
           setHasMoreMessages(reversedMessages.length === 20);
           setLastRefreshTime(new Date());
+          
+          // Only auto-scroll to bottom if user was at bottom, otherwise preserve position
+          if (userScrollPosition === 'bottom') {
+            // User was at bottom, scroll to new messages
+            console.log('🔄 Aggressive auto-refresh: Auto-scrolling to bottom for new messages');
+            setTimeout(() => {
+              chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
+            }, 100);
+            setHasNewMessages(false); // Clear flag since we're scrolling to new messages
+          } else {
+            // User was scrolling up, preserve their position
+            console.log(`🔄 Aggressive auto-refresh: Preserving scroll position (user was at ${userScrollPosition}), setting new message indicator`);
+            setTimeout(() => {
+              if (scrollArea) {
+                const newScrollHeight = scrollArea.scrollHeight;
+                const heightDifference = newScrollHeight - prevScrollHeight;
+                scrollArea.scrollTop = prevScrollTop + heightDifference;
+              }
+            }, 100);
+            setHasNewMessages(true); // Set flag to show new message indicator
+          }
         } else {
           console.log('Aggressive auto-refresh: No new messages found');
+          // No new messages, preserve scroll position
+          setLastRefreshTime(new Date());
         }
       } catch (error) {
         console.warn('Aggressive auto-refresh failed:', error);
@@ -190,6 +253,34 @@ export default function Chat() {
       clearInterval(aggressiveInterval);
     };
   }, [selectedClient?.user_code, conversationId, messages.length]);
+
+  // Initialize scroll position tracking
+  useEffect(() => {
+    if (messages.length > 0 && scrollAreaRef.current) {
+      // Set initial scroll position to bottom
+      setUserScrollPosition('bottom');
+      // Scroll to bottom on initial load
+      setTimeout(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
+      }, 100);
+    }
+  }, [messages.length]);
+
+  // Add scroll event listeners to ScrollArea viewport
+  useEffect(() => {
+    const scrollArea = scrollAreaRef.current;
+    if (!scrollArea) return;
+
+    // Find the viewport element within ScrollArea
+    const viewport = scrollArea.querySelector('[data-radix-scroll-area-viewport]');
+    if (viewport) {
+      viewport.addEventListener('scroll', trackScrollPosition, { passive: true });
+      
+      return () => {
+        viewport.removeEventListener('scroll', trackScrollPosition);
+      };
+    }
+  }, [scrollAreaRef.current]);
 
   // Track user activity (less aggressive)
   useEffect(() => {
@@ -313,6 +404,12 @@ export default function Chat() {
     try {
       setIsRefreshing(true);
       console.log('🔄 Manual refresh triggered');
+      
+      // Store current scroll position before updating messages
+      const scrollArea = scrollAreaRef.current;
+      const prevScrollTop = scrollArea ? scrollArea.scrollTop : 0;
+      const prevScrollHeight = scrollArea ? scrollArea.scrollHeight : 0;
+      
       // Fetch latest messages
       const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
       const reversedMessages = latestMessages.reverse();
@@ -321,6 +418,16 @@ export default function Chat() {
       setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
       setHasMoreMessages(reversedMessages.length === 20);
       setLastRefreshTime(new Date());
+      setHasNewMessages(false); // Clear new message indicator on manual refresh
+      
+      // Preserve scroll position after refresh
+      setTimeout(() => {
+        if (scrollArea) {
+          const newScrollHeight = scrollArea.scrollHeight;
+          const heightDifference = newScrollHeight - prevScrollHeight;
+          scrollArea.scrollTop = prevScrollTop + heightDifference;
+        }
+      }, 100);
       
       console.log('✅ Chat refreshed successfully');
     } catch (error) {
@@ -410,6 +517,9 @@ export default function Chat() {
 
   // Infinite scroll: load more messages when scrolled to top
   const handleScroll = async (e) => {
+    // Track scroll position for auto-refresh logic
+    trackScrollPosition();
+    
     if (e.target.scrollTop === 0 && hasMoreMessages && !isLoadingMore && conversationId && firstMessageId) {
       setIsLoadingMore(true);
       try {
@@ -486,12 +596,36 @@ export default function Chat() {
         console.log('👨‍⚕️ Dietitian sending message directly...');
         
         // Add to new user_message_queue table
+        const getProfessionalDietitianName = (user) => {
+          if (!user) return 'Dietitian';
+
+          // Get full name from metadata
+          const fullName = user?.user_metadata?.full_name || user?.user_metadata?.name;
+
+          if (fullName) {
+            // Use first name only for more professional, personal feel
+            const firstName = fullName.split(' ')[0];
+            // Add professional title if available in metadata
+            const title = user?.user_metadata?.title || user?.user_metadata?.professional_title;
+            return title ? `${title} ${firstName}` : firstName;
+          }
+
+          // Fallback to email username with professional formatting
+          const emailUsername = user?.email?.split('@')[0];
+          if (emailUsername) {
+            return emailUsername.charAt(0).toUpperCase() + emailUsername.slice(1);
+          }
+
+          return 'Dietitian';
+        };
+
+        const dietitianName = getProfessionalDietitianName(currentDietitian);
         const queueData = {
           conversation_id: conversationId,
           client_id: clientId,
           dietitian_id: currentDietitian.id,
           user_code: selectedClient.user_code,
-          content: message,
+          content: `${dietitianName}: ${message}`,
           role: 'assistant',
           priority: 1
         };
@@ -503,9 +637,10 @@ export default function Chat() {
         const tempDietitianMessage = {
           id: `temp-${Date.now()}`,
           role: 'assistant',
-          content: message,
+          content: `${dietitianName}: ${message}`,
           conversation_id: conversationId,
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
+          isDietitianMessage: true // Flag to identify dietitian messages for special styling
         };
         
         // Update local state with the temporary message
@@ -553,6 +688,7 @@ export default function Chat() {
 
       // Update local state with the stored message
       setMessages(prev => [storedUserMessage, ...prev]);
+      setHasNewMessages(false); // Clear new message indicator when user sends a message
 
       // Prepare chat history for AI prompt (include stored message)
       const chatHistoryForPrompt = [storedUserMessage, ...messages]
@@ -862,6 +998,7 @@ Your task is to respond to the user's message below, taking into account their s
 
       // Update local state with the temporary AI message
       setMessages(prev => [tempAiMessage, ...prev]);
+      setHasNewMessages(false); // Clear new message indicator when AI responds
 
       // Clear form
       setMessage('');
@@ -892,6 +1029,11 @@ Your task is to respond to the user's message below, taking into account their s
   };
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Update scroll position tracking
+    setTimeout(() => {
+      setUserScrollPosition('bottom');
+      setHasNewMessages(false); // Clear new message indicator when manually scrolling to bottom
+    }, 100);
   };
 
   const handleKeyPress = (e) => {
@@ -918,12 +1060,123 @@ Your task is to respond to the user's message below, taking into account their s
     return { text: content, imageUrl: null };
   };
 
+  // Function to track scroll position and determine user location
+  const trackScrollPosition = () => {
+    const scrollArea = scrollAreaRef.current;
+    if (!scrollArea) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = scrollArea;
+    const scrollBottom = scrollHeight - clientHeight;
+    const distanceFromBottom = scrollBottom - scrollTop;
+    
+    // Update last scroll position
+    setLastScrollTop(scrollTop);
+    
+    // Determine if user is at bottom, middle, or top
+    if (distanceFromBottom <= 50) {
+      setUserScrollPosition('bottom');
+      // Clear new message indicator when user scrolls to bottom
+      setHasNewMessages(false);
+      console.log('📍 User scrolled to bottom, cleared new message indicator');
+    } else if (scrollTop <= 50) {
+      setUserScrollPosition('top');
+      console.log('📍 User scrolled to top');
+    } else {
+      setUserScrollPosition('middle');
+      console.log('📍 User scrolled to middle, distance from bottom:', distanceFromBottom);
+    }
+  };
+
+  // Function to format message timestamp
+  const formatMessageTime = (timestamp) => {
+    if (!timestamp) return translations.justNow || 'Just now';
+    
+    const messageDate = new Date(timestamp);
+    const now = new Date();
+    const timeDiff = now.getTime() - messageDate.getTime();
+    const isToday = messageDate.toDateString() === now.toDateString();
+    const isYesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toDateString() === messageDate.toDateString();
+    
+    // For very recent messages (within last hour), show relative time
+    if (timeDiff < 60 * 60 * 1000) { // Less than 1 hour
+      const minutes = Math.floor(timeDiff / (60 * 1000));
+      if (minutes < 1) return translations.justNow || 'Just now';
+      if (minutes < 60) return `${minutes} ${translations.minAgo || 'min ago'}`;
+    }
+    
+    if (isToday) {
+      return messageDate.toLocaleTimeString([], { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        hour12: false 
+      });
+    } else if (isYesterday) {
+      return `${translations.yesterday || 'Yesterday'} ${messageDate.toLocaleTimeString([], { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        hour12: false 
+      })}`;
+    } else {
+      return messageDate.toLocaleDateString([], {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+    }
+  };
+
+  // Function to check if we need to show a date separator
+  const shouldShowDateSeparator = (currentMsg, previousMsg) => {
+    if (!currentMsg?.created_at || !previousMsg?.created_at) return false;
+    
+    const currentDate = new Date(currentMsg.created_at).toDateString();
+    const previousDate = new Date(previousMsg.created_at).toDateString();
+    
+    return currentDate !== previousDate;
+  };
+
+  // Function to format date separator
+  const formatDateSeparator = (timestamp) => {
+    if (!timestamp) return '';
+    
+    const messageDate = new Date(timestamp);
+    const now = new Date();
+    const isToday = messageDate.toDateString() === now.toDateString();
+    const isYesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toDateString() === messageDate.toDateString();
+    
+    if (isToday) {
+      return translations.today || 'Today';
+    } else if (isYesterday) {
+      return translations.yesterday || 'Yesterday';
+    } else {
+      return messageDate.toLocaleDateString([], {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    }
+  };
+
+  // Function to check if message is from dietitian
+  const isDietitianMessage = (msg) => {
+    // Check if message has dietitian flag or contains dietitian name pattern
+    return msg.isDietitianMessage ||
+           (msg.role === 'assistant' && msg.content && (
+             msg.content.startsWith('Dr. ') ||
+             msg.content.match(/^[A-Z][a-z]+: /) // Matches "Name: " pattern
+           ));
+  };
+
   // Function to render message content with images
   const renderMessageContent = (msg) => {
     const { text, imageUrl } = extractImageFromContent(msg.content);
     const hasDirectImage = msg.attachments?.image_url;
     const hasContentImage = imageUrl;
-    
+    const isFromDietitian = isDietitianMessage(msg);
+
     return (
       <>
         {/* Show direct image first (from image upload) */}
@@ -941,7 +1194,7 @@ Your task is to respond to the user's message below, taking into account their s
             />
           </div>
         )}
-        
+
         {/* Show image from content */}
         {hasContentImage && !hasDirectImage && (
           <div className="mb-3">
@@ -957,19 +1210,52 @@ Your task is to respond to the user's message below, taking into account their s
             />
           </div>
         )}
-        
-        {/* Show text content */}
-        <div className="whitespace-pre-wrap">{text}</div>
+
+        {/* Show text content with professional formatting for dietitians */}
+        {isFromDietitian ? (
+          <div className="space-y-1">
+            {/* Extract dietitian name and message content */}
+            {(() => {
+              const colonIndex = text.indexOf(': ');
+              if (colonIndex !== -1) {
+                const dietitianName = text.substring(0, colonIndex);
+                const messageContent = text.substring(colonIndex + 2);
+
+                return (
+                  <>
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-6 h-6 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-full flex items-center justify-center shadow-sm">
+                        <div className="w-2 h-2 bg-white rounded-full"></div>
+                      </div>
+                      <span className="text-sm font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg">
+                        {dietitianName}
+                      </span>
+                    </div>
+                    <div className="whitespace-pre-wrap text-slate-800 leading-relaxed pl-8 border-l-2 border-emerald-200">
+                      {messageContent}
+                    </div>
+                  </>
+                );
+              } else {
+                // Fallback if no colon found
+                return <div className="whitespace-pre-wrap">{text}</div>;
+              }
+            })()}
+          </div>
+        ) : (
+          <div className="whitespace-pre-wrap">{text}</div>
+        )}
       </>
     );
   };
 
   useEffect(() => {
     // Only scroll to bottom if not loading more (i.e., after initial load or sending)
-    if (!isLoadingMore && messages.length > 0) {
+    // AND if the user is at the bottom (not scrolling up)
+    if (!isLoadingMore && messages.length > 0 && userScrollPosition === 'bottom') {
       chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
     }
-  }, [messages, isLoadingMore]);
+  }, [messages, isLoadingMore, userScrollPosition]);
 
   const handleLoadMore = async () => {
     if (!conversationId || !firstMessageId || isLoadingMore) return;
@@ -1061,9 +1347,11 @@ Your task is to respond to the user's message below, taking into account their s
                   <div className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl">
                     <div className={`w-2 h-2 rounded-full ${isUserActive ? 'bg-yellow-500' : 'bg-green-500'} ${!isUserActive ? 'animate-pulse' : ''}`}></div>
                     <span className="text-sm font-medium text-green-700">
-                      {isUserActive ? 'User Active' : 'Auto-refresh'}
+                      {isUserActive ? translations.userActive || 'User Active' : translations.autoRefresh || 'Auto-refresh'}
                     </span>
                   </div>
+                  
+                 
                   <Button
                     variant="outline"
                     size="sm"
@@ -1074,7 +1362,7 @@ Your task is to respond to the user's message below, taking into account their s
                     {isRefreshing ? (
                       <div className="flex items-center gap-2">
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                        <span>Refreshing...</span>
+                        <span>{translations.refreshing || 'Refreshing...'}</span>
                       </div>
                     ) : (
                       <>
@@ -1101,16 +1389,7 @@ Your task is to respond to the user's message below, taking into account their s
                   )}
                   
                  
-                  <div className="p-3 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl shadow-lg">
-                    <div className="flex items-center gap-2 text-sm">
-                      <div className="w-6 h-6 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg flex items-center justify-center">
-                        <span className="text-white font-bold text-xs">✓</span>
-                      </div>
-                      <div>
-                        <span className="font-bold text-emerald-800">{translations.selected || 'Selected'}</span>
-                      </div>
-                    </div>
-                  </div>
+                
                 </div>
               </div>
             </div>
@@ -1126,7 +1405,22 @@ Your task is to respond to the user's message below, taking into account their s
               <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-green-400/10 to-blue-400/10 rounded-full blur-3xl"></div>
               
               <div className="relative z-10 flex-1 p-4 overflow-hidden">
-                <ScrollArea className="h-full pr-3" ref={scrollAreaRef}>
+                {/* New Message Indicator */}
+                {hasNewMessages && userScrollPosition !== 'bottom' && (
+                  <div className="flex justify-center mb-3">
+                    <Button
+                      onClick={scrollToBottom}
+                      className="bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold py-2 px-4 rounded-xl shadow-lg hover:from-green-600 hover:to-emerald-700 hover:shadow-xl transition-all duration-300 animate-pulse"
+                    >
+                      📬 {translations.newMessagesClickToView || 'New messages - Click to view'}
+                    </Button>
+                  </div>
+                )}
+                
+                <ScrollArea 
+                  className="h-full pr-3" 
+                  ref={scrollAreaRef}
+                >
                   {hasMoreMessages && (
                     <div className="flex justify-center py-3">
                       <Button
@@ -1147,10 +1441,10 @@ Your task is to respond to the user's message below, taking into account their s
                         {isLoadingMore ? (
                           <div className="flex items-center gap-2">
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                            {translations.loadingMore}
+                            {translations.loadingMore || 'Loading more...'}
                           </div>
                         ) : (
-                          translations.loadMore
+                          translations.loadMore || 'Load more'
                         )}
                       </Button>
                     </div>
@@ -1161,14 +1455,41 @@ Your task is to respond to the user's message below, taking into account their s
                         key={msg.id || index}
                         className={`mb-4 flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                       >
-                        <div
-                          className={`rounded-xl px-4 py-3 max-w-[80%] shadow-lg transition-all duration-300 hover:shadow-xl ${
-                            msg.role === 'user'
-                              ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white'
-                              : 'bg-gradient-to-r from-slate-50 to-white border border-slate-200 text-slate-800'
-                          }`}
-                        >
-                          {renderMessageContent(msg)}
+                        <div className="flex flex-col max-w-[85%]">
+                          {shouldShowDateSeparator(msg, messages[index - 1]) && (
+                            <div className="text-center py-4">
+                              <div className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-slate-100 to-slate-200 border border-slate-300 rounded-full shadow-sm">
+                                <div className="w-2 h-2 bg-slate-400 rounded-full"></div>
+                                <span className="text-slate-600 text-sm font-medium">
+                                  {formatDateSeparator(msg.created_at)}
+                                </span>
+                                <div className="w-2 h-2 bg-slate-400 rounded-full"></div>
+                              </div>
+                            </div>
+                          )}
+                          <div
+                            className={`rounded-xl px-4 py-3 pb-8 shadow-lg transition-all duration-300 hover:shadow-xl relative ${
+                              msg.role === 'user'
+                                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white'
+                                : 'bg-gradient-to-r from-slate-50 to-white border border-slate-200 text-slate-800'
+                            }`}
+                          >
+                            <div className="pr-16">
+                              {renderMessageContent(msg)}
+                            </div>
+                            {/* Message Timestamp - positioned inside message box on the right */}
+                            <div className={`absolute bottom-2.5 right-2.5 text-xs ${
+                              msg.role === 'user' ? 'text-emerald-50' : 'text-slate-400'
+                            }`}>
+                              <span className={`px-1.5 py-0.5 rounded-md font-mono text-center ${
+                                msg.role === 'user' 
+                                  ? 'bg-emerald-600/20' 
+                                  : 'bg-slate-100/80'
+                              }`}>
+                                {msg.id?.toString().startsWith('temp-') ? '⏳' : formatMessageTime(msg.created_at)}
+                              </span>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     ))

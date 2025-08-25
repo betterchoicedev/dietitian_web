@@ -49,6 +49,17 @@ const createTextCacheKey = (text, targetLang) => {
   }
 };
 
+// Function to create cache key for measurement conversions
+const createMeasurementCacheKey = (ingredient, fromMeasurement, toType, targetLang) => {
+  try {
+    const key = `${ingredient.item}_${fromMeasurement}_${toType}_${targetLang}`;
+    return `${CACHE_PREFIX}_measurement_${btoa(key).slice(0, 40)}`;
+  } catch (error) {
+    console.warn('Failed to create measurement cache key:', error);
+    return `${CACHE_PREFIX}_measurement_${Date.now()}`;
+  }
+};
+
 // Function to get cached translation
 const getCachedTranslation = (cacheKey) => {
   try {
@@ -122,6 +133,54 @@ const cleanExpiredCache = () => {
   } catch (error) {
     console.error('Failed to clean expired cache:', error);
     return 0;
+  }
+};
+
+// Function to convert measurements using AI
+const convertMeasurementWithAI = async (ingredient, fromMeasurement, toType, targetLang = 'en', client = { region: 'israel' }) => {
+  try {
+    // Check cache first
+    const cacheKey = createMeasurementCacheKey(ingredient, fromMeasurement, toType, targetLang);
+    const cachedResult = getCachedTranslation(cacheKey);
+
+    if (cachedResult) {
+      console.log('📚 Using cached measurement conversion:', cachedResult);
+      return cachedResult;
+    }
+
+    console.log('🤖 Converting measurement with AI:', { ingredient: ingredient.item, fromMeasurement, toType, targetLang });
+
+    const response = await fetch('https://dietitian-be.azurewebsites.net/api/convert-measurement', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ingredient: ingredient.item,
+        brand: ingredient['brand of pruduct'] || '',
+        fromMeasurement,
+        toType, // 'grams' or 'household'
+        targetLang,
+        region: (client && client.region) ? client.region : 'israel'
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Measurement conversion API error:', errorText);
+      throw new Error(`Failed to convert measurement: ${response.status} ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ AI measurement conversion result:', result);
+
+    // Cache the successful conversion
+    cacheTranslation(cacheKey, result);
+
+    return result;
+  } catch (error) {
+    console.error('❌ Error in measurement conversion:', error);
+    throw error;
   }
 };
 
@@ -202,6 +261,8 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
   const [hasMore, setHasMore] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [currentQuery, setCurrentQuery] = useState('');
+  const [isConverting, setIsConverting] = useState(false);
+  const [conversionMessage, setConversionMessage] = useState('');
   const inputRef = React.useRef(null);
   const searchTimeoutRef = React.useRef(null);
 
@@ -314,10 +375,10 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
     setSuggestionSelected(false);
   };
 
-  const handleDirectEdit = () => {
+  const handleDirectEdit = async () => {
     console.log('✏️ Saving direct edit:', editValue);
-    // Update only the item name, preserving all existing nutritional values
-    const updatedValues = {
+
+    let finalValues = {
       item: editValue,
       household_measure: currentIngredient?.household_measure || '',
       calories: currentIngredient?.calories || 0,
@@ -325,10 +386,64 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
       fat: currentIngredient?.fat || 0,
       carbs: currentIngredient?.carbs || 0,
       'brand of pruduct': currentIngredient?.['brand of pruduct'] || '',
-      UPC: currentIngredient?.UPC || currentIngredient?.gtinUpc || null
+      UPC: currentIngredient?.UPC || currentIngredient?.gtinUpc || null,
+      'portionSI(gram)': currentIngredient?.['portionSI(gram)'] || null
     };
-    
-    onChange(updatedValues, mealIndex, optionIndex, ingredientIndex);
+
+    // Check if the user entered a measurement in the ingredient name (e.g., "1 cup rice" or "200g chicken")
+    const measurementMatch = editValue.match(/(\d+(?:\.\d+)?)\s*(g|kg|cup|cups|tbsp|tbsp|oz|lb|ml|l|glass|glasses|slice|slices|piece|pieces|clove|cloves|head|heads)/i);
+
+    if (measurementMatch && !isConverting) {
+      const amount = measurementMatch[1];
+      const unit = measurementMatch[2].toLowerCase();
+
+      try {
+        setIsConverting(true);
+        setConversionMessage('🤖 Analyzing measurement in ingredient name...');
+
+        // Check if it's a weight measurement or volume measurement
+        const isWeight = ['g', 'kg', 'oz', 'lb'].includes(unit);
+
+        if (isWeight) {
+          // It's a weight measurement, extract the base ingredient name
+          const baseIngredient = editValue.replace(/\s*\d+(?:\.\d+)?\s*(g|kg|oz|lb)/i, '').trim();
+          finalValues.item = baseIngredient;
+          finalValues['portionSI(gram)'] = unit === 'kg' ? parseFloat(amount) * 1000 :
+                                          unit === 'oz' ? parseFloat(amount) * 28.35 :
+                                          unit === 'lb' ? parseFloat(amount) * 453.59 :
+                                          parseFloat(amount);
+          setConversionMessage(`✅ Extracted ${finalValues['portionSI(gram)']}g from "${editValue}"`);
+        } else {
+          // It's a household measurement, try to convert to grams
+          const baseIngredient = editValue.replace(/\s*\d+(?:\.\d+)?\s*(cup|cups|tbsp|tbsp|ml|l|glass|glasses|slice|slices|piece|pieces|clove|cloves|head|heads)/i, '').trim();
+          finalValues.item = baseIngredient;
+          finalValues.household_measure = `${amount} ${unit}`;
+
+          const conversionResult = await convertMeasurementWithAI(
+            { item: baseIngredient, 'brand of pruduct': currentIngredient?.['brand of pruduct'] || '' },
+            finalValues.household_measure,
+            'grams',
+            language,
+            selectedClient
+          );
+
+          if (conversionResult && conversionResult.converted_measurement) {
+            finalValues['portionSI(gram)'] = conversionResult.converted_measurement;
+            setConversionMessage(`✅ "${finalValues.household_measure}" = ${conversionResult.converted_measurement}g`);
+          }
+        }
+      } catch (conversionError) {
+        console.warn('⚠️ AI conversion failed for direct edit:', conversionError);
+        setConversionMessage('⚠️ Using manual entry');
+      } finally {
+        setTimeout(() => {
+          setConversionMessage('');
+          setIsConverting(false);
+        }, 2000);
+      }
+    }
+
+    onChange(finalValues, mealIndex, optionIndex, ingredientIndex);
     setSuggestionSelected(true);
     setIsEditing(false);
     setShowSuggestions(false);
@@ -344,6 +459,9 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
   const handleSelect = async (suggestion) => {
     console.log('🔍 handleSelect called with suggestion:', suggestion);
     try {
+      setIsConverting(true);
+      setConversionMessage('🤖 Analyzing ingredient data...');
+
       const url = `https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`;
       // const url = `http://localhost:3001/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`;
       console.log('🌐 Fetching from URL:', url);
@@ -362,18 +480,72 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
       console.log('🔍 Suggestion data:', suggestion);
       console.log('🔍 UPC values - suggestion.gtinUpc:', suggestion.gtinUpc, 'nutritionData.gtinUpc:', nutritionData.gtinUpc);
 
+      // Check if we need AI measurement conversion
+      let finalHouseholdMeasure = suggestion.household_measure || '';
+      let finalPortionGrams = null;
+
+      // If suggestion has a household measure but no portion grams, try to convert
+      if (suggestion.household_measure && !suggestion['portionSI(gram)']) {
+        try {
+          setConversionMessage(`🤖 Converting "${suggestion.household_measure}" to grams...`);
+          console.log('🤖 Attempting AI conversion for household measure:', suggestion.household_measure);
+
+          const conversionResult = await convertMeasurementWithAI(
+            { item: suggestion.english, 'brand of pruduct': suggestion.brand },
+            suggestion.household_measure,
+            'grams',
+            language,
+            selectedClient
+          );
+
+          if (conversionResult && conversionResult.converted_measurement) {
+            finalPortionGrams = conversionResult.converted_measurement;
+            console.log(`✅ AI converted ${suggestion.household_measure} to ${finalPortionGrams}g`);
+            setConversionMessage(`✅ Converted to ${finalPortionGrams}g`);
+          }
+        } catch (conversionError) {
+          console.warn('⚠️ AI conversion failed, using original data:', conversionError);
+          setConversionMessage('⚠️ Using standard portion data');
+        }
+      }
+      // If suggestion has grams but no household measure, try to convert the other way
+      else if (suggestion['portionSI(gram)'] && !suggestion.household_measure) {
+        try {
+          setConversionMessage(`🤖 Converting ${suggestion['portionSI(gram)']}g to household measure...`);
+          console.log('🤖 Attempting AI conversion for grams:', suggestion['portionSI(gram)']);
+
+          const conversionResult = await convertMeasurementWithAI(
+            { item: suggestion.english, 'brand of pruduct': suggestion.brand },
+            `${suggestion['portionSI(gram)']}g`,
+            'household',
+            language,
+            selectedClient
+          );
+
+          if (conversionResult && conversionResult.converted_measurement) {
+            finalHouseholdMeasure = conversionResult.converted_measurement;
+            console.log(`✅ AI converted ${suggestion['portionSI(gram)']}g to "${finalHouseholdMeasure}"`);
+            setConversionMessage(`✅ Converted to "${finalHouseholdMeasure}"`);
+          }
+        } catch (conversionError) {
+          console.warn('⚠️ AI conversion failed, using original data:', conversionError);
+          setConversionMessage('⚠️ Using standard portion data');
+        }
+      }
+
       const updatedValues = {
         item: suggestion.hebrew || suggestion.english,
-        household_measure: suggestion.household_measure || '',
+        household_measure: finalHouseholdMeasure,
         calories: nutritionData.Energy || 0,
         protein: nutritionData.Protein || 0,
         fat: nutritionData.Total_lipid__fat_ || 0,
         carbs: nutritionData.Carbohydrate || 0,
         'brand of pruduct': nutritionData.brand || '',
-        UPC: suggestion.gtinUpc || nutritionData.gtinUpc || null
+        UPC: suggestion.gtinUpc || nutritionData.gtinUpc || null,
+        'portionSI(gram)': finalPortionGrams || suggestion['portionSI(gram)'] || null
       };
       
-      console.log('✅ Updated values:', updatedValues);
+      console.log('✅ Updated values with AI conversion:', updatedValues);
       console.log('🔍 Final UPC value:', updatedValues.UPC);
 
       // First update the ingredient with the basic data
@@ -383,13 +555,21 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
       setShowSuggestions(false);
       setIsEditing(false);
 
-      // Then trigger the portion dialog
-      if (onPortionDialog) {
+      // Clear conversion message after a delay
+      setTimeout(() => {
+        setConversionMessage('');
+        setIsConverting(false);
+      }, 2000);
+
+      // Then trigger the portion dialog if no automatic conversion was made
+      if (onPortionDialog && !finalPortionGrams && !finalHouseholdMeasure) {
         onPortionDialog(updatedValues, mealIndex, optionIndex, ingredientIndex);
       }
     } catch (error) {
       console.error('❌ Error in handleSelect:', error);
       console.error('❌ Error stack:', error.stack);
+      setConversionMessage('❌ Error occurred');
+      setIsConverting(false);
     }
   };
 
@@ -443,6 +623,14 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
       {isLoading && (
         <div className="absolute left-2 top-1/2 transform -translate-y-1/2">
           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+        </div>
+      )}
+
+      {/* AI Conversion Status */}
+      {isConverting && (
+        <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center gap-2">
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-500"></div>
+          <span className="text-xs text-purple-600 font-medium">{conversionMessage}</span>
         </div>
       )}
 
@@ -592,6 +780,8 @@ const IngredientPortionDialog = ({ isOpen, onClose, onConfirm, ingredient, trans
   const [gramAmount, setGramAmount] = useState('');
   const [householdMeasure, setHouseholdMeasure] = useState('');
   const [adjustedNutrition, setAdjustedNutrition] = useState(null);
+  const [isAIConverting, setIsAIConverting] = useState(false);
+  const [aiConversionMessage, setAiConversionMessage] = useState('');
 
   useEffect(() => {
     if (isOpen && ingredient) {
@@ -666,6 +856,75 @@ const IngredientPortionDialog = ({ isOpen, onClose, onConfirm, ingredient, trans
     }
   };
 
+  // AI Conversion: Convert grams to household measure
+  const convertGramsToHousehold = async () => {
+    if (!gramAmount || !ingredient) return;
+
+    try {
+      setIsAIConverting(true);
+      setAiConversionMessage('🤖 Converting to household measure...');
+
+      const conversionResult = await convertMeasurementWithAI(
+        ingredient,
+        `${gramAmount}g`,
+        'household',
+        'en' // Use English for API consistency - no client needed for basic conversion
+      );
+
+      if (conversionResult && conversionResult.converted_measurement) {
+        setHouseholdMeasure(conversionResult.converted_measurement);
+        setAiConversionMessage(`✅ Converted to "${conversionResult.converted_measurement}"`);
+        console.log(`✅ AI converted ${gramAmount}g to "${conversionResult.converted_measurement}"`);
+      } else {
+        setAiConversionMessage('⚠️ Could not determine household measure');
+      }
+    } catch (error) {
+      console.error('❌ Error converting grams to household:', error);
+      setAiConversionMessage('❌ Conversion failed');
+    } finally {
+      setTimeout(() => {
+        setAiConversionMessage('');
+        setIsAIConverting(false);
+      }, 3000);
+    }
+  };
+
+  // AI Conversion: Convert household measure to grams
+  const convertHouseholdToGrams = async () => {
+    if (!householdMeasure.trim() || !ingredient) return;
+
+    try {
+      setIsAIConverting(true);
+      setAiConversionMessage('🤖 Converting to grams...');
+
+      const conversionResult = await convertMeasurementWithAI(
+        ingredient,
+        householdMeasure.trim(),
+        'grams',
+        'en' // Use English for API consistency - no client needed for basic conversion
+      );
+
+      if (conversionResult && conversionResult.converted_measurement) {
+        setGramAmount(conversionResult.converted_measurement.toString());
+        setAiConversionMessage(`✅ Converted to ${conversionResult.converted_measurement}g`);
+
+        // Recalculate nutrition for the new gram amount
+        handleGramAmountChange({ target: { value: conversionResult.converted_measurement.toString() } });
+        console.log(`✅ AI converted "${householdMeasure}" to ${conversionResult.converted_measurement}g`);
+      } else {
+        setAiConversionMessage('⚠️ Could not determine gram amount');
+      }
+    } catch (error) {
+      console.error('❌ Error converting household to grams:', error);
+      setAiConversionMessage('❌ Conversion failed');
+    } finally {
+      setTimeout(() => {
+        setAiConversionMessage('');
+        setIsAIConverting(false);
+      }, 3000);
+    }
+  };
+
   const handleConfirm = () => {
     if (!gramAmount || !householdMeasure.trim()) {
       alert(translations?.pleaseFillAllFields || 'Please fill in all fields');
@@ -713,6 +972,14 @@ const IngredientPortionDialog = ({ isOpen, onClose, onConfirm, ingredient, trans
         </p>
         
         <div className="space-y-4">
+          {/* AI Conversion Status */}
+          {aiConversionMessage && (
+            <div className="bg-purple-50 border border-purple-200 rounded-md p-3 flex items-center gap-2">
+              <div className="animate-pulse">🤖</div>
+              <span className="text-sm text-purple-700 font-medium">{aiConversionMessage}</span>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               {translations?.ingredient || 'Ingredient'}:
@@ -726,31 +993,57 @@ const IngredientPortionDialog = ({ isOpen, onClose, onConfirm, ingredient, trans
             <label className="block text-sm font-medium text-gray-700 mb-2">
               {translations?.amountInGrams || 'Amount (grams)'}:
             </label>
+            <div className="flex gap-2">
             <input
               type="number"
               value={gramAmount}
               onChange={handleGramAmountChange}
               onKeyDown={handleKeyPress}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="100"
               min="0"
               step="0.1"
               autoFocus
             />
+              <Button
+                type="button"
+                onClick={convertGramsToHousehold}
+                disabled={isAIConverting || !gramAmount}
+                variant="outline"
+                size="sm"
+                className="px-3 py-2 text-purple-600 border-purple-300 hover:bg-purple-50 whitespace-nowrap"
+                title="Use AI to convert grams to household measure"
+              >
+                {isAIConverting ? '🤖' : '🏠'}
+              </Button>
+            </div>
           </div>
           
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               {translations?.householdMeasure || 'Household Measure'}:
             </label>
+            <div className="flex gap-2">
             <input
               type="text"
               value={householdMeasure}
               onChange={(e) => setHouseholdMeasure(e.target.value)}
               onKeyDown={handleKeyPress}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder={translations?.householdMeasurePlaceholder || 'e.g., 1 cup, 2 tbsp, 1 medium apple'}
             />
+              <Button
+                type="button"
+                onClick={convertHouseholdToGrams}
+                disabled={isAIConverting || !householdMeasure.trim()}
+                variant="outline"
+                size="sm"
+                className="px-3 py-2 text-purple-600 border-purple-300 hover:bg-purple-50 whitespace-nowrap"
+                title="Use AI to convert household measure to grams"
+              >
+                {isAIConverting ? '🤖' : '⚖️'}
+              </Button>
+            </div>
           </div>
           
           {adjustedNutrition && (
