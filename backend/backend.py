@@ -2827,6 +2827,55 @@ def api_update_user_fields():
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
 
+@app.route("/api/weight-logs", methods=["GET"])
+def api_get_weight_logs():
+    """
+    Get all weight logs data from Supabase.
+    Optional query parameter: user_code to filter by specific user.
+    Returns all weight logs ordered by measurement_date descending.
+    """
+    try:
+        # Get optional user_code parameter
+        user_code = request.args.get("user_code")
+
+        logger.info(f"🔍 Fetching weight logs{' for user_code: ' + user_code if user_code else ' for all users'}")
+
+        # Build query
+        query = supabase.table('weight_logs').select('*').order('measurement_date', desc=True)
+
+        # Filter by user_code if provided
+        if user_code:
+            query = query.eq('user_code', user_code)
+
+        # Execute query
+        response = query.execute()
+
+        if response.data is None:
+            logger.warning("❌ No data returned from weight_logs query")
+            return jsonify({"error": "No weight logs found"}), 404
+
+        weight_logs = response.data
+        logger.info(f"✅ Retrieved {len(weight_logs)} weight log entries")
+
+        # Return the data with summary
+        return jsonify({
+            "weight_logs": weight_logs,
+            "summary": {
+                "total_entries": len(weight_logs),
+                "user_code": user_code,
+                "date_range": {
+                    "earliest": weight_logs[-1]["measurement_date"] if weight_logs else None,
+                    "latest": weight_logs[0]["measurement_date"] if weight_logs else None
+                } if weight_logs else None
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Exception in /api/weight-logs: {str(e)}")
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to fetch weight logs: {str(e)}"}), 500
+
+
 @app.route("/api/weight-logs/<user_code>", methods=["GET"])
 def api_get_user_weight_logs(user_code):
     """
