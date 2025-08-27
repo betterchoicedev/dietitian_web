@@ -834,15 +834,39 @@ export const entities = {
     },
     filter: async (query) => {
       try {
-        const res = await fetch('/client.json');
-        if (!res.ok) {
-          throw new Error('Failed to fetch client data');
+        console.log('🔍 Filtering clients with query:', query);
+        console.log('🔑 Current auth user:', (await supabase.auth.getUser()).data.user?.id);
+        
+        let supabaseQuery = supabase
+          .from('chat_users')
+          .select('*');
+        
+        // Apply filters
+        if (query.dietitian_id) {
+          console.log('🎯 Filtering by dietitian_id:', query.dietitian_id);
+          supabaseQuery = supabaseQuery.eq('provider_id', query.dietitian_id);
         }
-        const data = await res.json();
-        return [data];
-      } catch (error) {
-        console.error('Error fetching clients:', error);
-        return [];
+        
+        if (query.code) {
+          console.log('🎯 Filtering by code:', query.code);
+          supabaseQuery = supabaseQuery.eq('user_code', query.code);
+        }
+        
+        console.log(' Executing Supabase query...');
+        const { data, error } = await supabaseQuery.order('full_name', { ascending: true });
+        
+        if (error) {
+          console.error('❌ Supabase client filter error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        console.log('✅ Retrieved filtered clients from Supabase:', data?.length || 0, 'records');
+        console.log(' Data:', data);
+        return data || [];
+        
+      } catch (err) {
+        console.error('❌ Error in Client.filter:', err);
+        throw err;
       }
     },
     update: async (id, data) => {
@@ -857,7 +881,6 @@ export const entities = {
     getByUserId: async (user_id) => {
       try {
         console.log('🍽️ Getting food logs for user_id:', user_id);
-        
         const { data, error } = await supabase
           .from('food_logs')
           .select('*')
