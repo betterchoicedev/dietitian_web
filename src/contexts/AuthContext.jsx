@@ -68,6 +68,13 @@ export function AuthProvider({ children }) {
         if (error) throw error;
         return { error: null };
       } catch (error) {
+        // If session is missing, consider it already signed out (successful)
+        if (error.message?.includes('Auth session missing') || error.name === 'AuthSessionMissingError') {
+          console.log('Session already expired or missing - treating as successful sign out');
+          setUser(null); // Ensure user state is cleared
+          return { error: null };
+        }
+        
         console.error('Error signing out:', error);
         return { error };
       }

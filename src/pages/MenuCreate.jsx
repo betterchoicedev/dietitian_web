@@ -12,6 +12,7 @@ import { useClient } from '@/contexts/ClientContext';
 import { EventBus } from '@/utils/EventBus';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 
 import { supabase } from '@/lib/supabase';
 
@@ -1198,6 +1199,7 @@ const MenuCreate = () => {
   const [progressStep, setProgressStep] = useState('');
   const [enrichingUPC, setEnrichingUPC] = useState(false);
   const [users, setUsers] = useState([]);
+  const [removeBrandsFromPdf, setRemoveBrandsFromPdf] = useState(false);
 
   // Ingredient portion dialog state
   const [showPortionDialog, setShowPortionDialog] = useState(false);
@@ -1372,10 +1374,10 @@ const MenuCreate = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [undoStack, redoStack, menu]);
 
-  async function downloadPdf(menu) {
+  async function downloadPdf(menu, version = 'portrait') {
     try {
-      // Create HTML content for the PDF
-      const htmlContent = generateMenuHtml(menu);
+      // Create HTML content for the PDF with specified version
+      const htmlContent = generateMenuHtml(menu, version, removeBrandsFromPdf);
       
       // Create a blob from the HTML content
       const blob = new Blob([htmlContent], { type: 'text/html' });
@@ -1402,7 +1404,7 @@ const MenuCreate = () => {
     }
   }
 
-  function generateMenuHtml(menu) {
+  function generateMenuHtml(menu, version = 'portrait', removeBrands = false) {
     // Get current date in Hebrew
     const today = new Date();
     const hebrewDate = today.toLocaleDateString('he-IL', { 
@@ -1514,13 +1516,16 @@ const MenuCreate = () => {
         }
         
         .meal-title {
-            font-size: 18px;
+            font-size: 20px;
             font-weight: 700;
-            color: #666;
+            color: #2d5016;
             text-align: right;
             margin-bottom: 12px;
-            padding-bottom: 4px;
-            border-bottom: 2px dashed #ddd;
+            padding-bottom: 6px;
+            border-bottom: 2px solid #4CAF50;
+            background-color: #f0f8f0;
+            padding: 8px 12px;
+            border-radius: 6px;
         }
         
         .meal-subtitle {
@@ -1536,15 +1541,32 @@ const MenuCreate = () => {
         }
         
         .meal-option {
-            margin-bottom: 6px;
+            margin-bottom: 8px;
             font-size: 14px;
             line-height: 1.4;
+            padding-left: 15px;
+            padding-right: 15px;
+            position: relative;
         }
         
-        .option-number {
-            font-weight: 600;
+        .meal-option::before {
+            content: '•';
             color: #4CAF50;
-            margin-left: 8px;
+            font-weight: bold;
+            position: absolute;
+            left: 0;
+            top: 0;
+            font-size: 16px;
+        }
+        
+        [dir="rtl"] .meal-option {
+            padding-left: 0;
+            padding-right: 15px;
+        }
+        
+        [dir="rtl"] .meal-option::before {
+            left: auto;
+            right: 0;
         }
         
         .option-text {
@@ -1555,6 +1577,14 @@ const MenuCreate = () => {
             text-decoration: underline;
             text-decoration-color: #ff4444;
             text-decoration-thickness: 2px;
+        }
+        
+        .meal-dish-title {
+            font-weight: 700;
+            color: #4CAF50;
+            font-size: 14px;
+            margin-bottom: 4px;
+            text-decoration: underline;
         }
         
         .bold-note {
@@ -1569,7 +1599,7 @@ const MenuCreate = () => {
         }
         
         .contact-info {
-            color: white;
+            color: #333;
             font-size: 14px;
             line-height: 1.8;
         }
@@ -1579,10 +1609,10 @@ const MenuCreate = () => {
         }
         
         @media print {
-            /* Disable browser headers and footers */
+            /* ${version === 'landscape' ? 'Set to A4 landscape with 10mm margins' : 'Disable browser headers and footers'} */
             @page {
-                margin: 0;
-                size: A4;
+                margin: ${version === 'landscape' ? '10mm' : '0'};
+                size: A4${version === 'landscape' ? ' landscape' : ''};
             }
             
             body {
@@ -1590,6 +1620,33 @@ const MenuCreate = () => {
                 margin: 0;
                 padding: 0;
             }
+            
+            ${version === 'portrait' ? `
+            /* Portrait-specific: Footer at bottom of last page */
+            .page {
+                display: block !important;
+                min-height: auto !important;
+            }
+            
+            .content {
+                display: block !important;
+                page-break-after: auto;
+            }
+            
+            .footer {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                width: 100%;
+                z-index: 1000;
+            }
+            
+            /* Ensure content doesn't overlap with fixed footer */
+            .content {
+                margin-bottom: 80px;
+            }
+            ` : ''}
             
             .header {
                 padding: 20px;
@@ -1618,7 +1675,8 @@ const MenuCreate = () => {
             }
             
             .content {
-                padding: 20px;
+                padding: ${version === 'landscape' ? '6px 15px' : '20px'};
+                ${version === 'landscape' ? 'display: flex; flex-wrap: wrap; gap: 12px;' : ''}
             }
             
             .meal-title {
@@ -1634,6 +1692,18 @@ const MenuCreate = () => {
             .meal-option {
                 font-size: 14px;
                 margin-bottom: 6px;
+                padding-left: 15px;
+                padding-right: 15px;
+            }
+            
+            [dir="rtl"] .meal-option {
+                padding-left: 0;
+                padding-right: 15px;
+            }
+            
+            [dir="rtl"] .meal-option::before {
+                left: auto;
+                right: 0;
             }
             
             .footer {
@@ -1647,7 +1717,102 @@ const MenuCreate = () => {
             /* Keep meal sections together but allow natural flow */
             .meal-section {
                 page-break-inside: avoid;
+                break-inside: avoid;
+                ${version === 'landscape' ? 'flex: 1 1 calc(50% - 6px); min-width: 280px; margin-bottom: 12px;' : ''}
             }
+            
+            ${version === 'landscape' ? `
+            /* Landscape-specific styles */
+            body {
+                font-size: 11px !important;
+            }
+            
+            .header {
+                padding: 3px 15px !important;
+            }
+            
+            .logo {
+                width: 24px !important;
+                height: 24px !important;
+                font-size: 12px !important;
+                margin-bottom: 2px !important;
+            }
+            
+            .main-title {
+                font-size: 14px !important;
+                margin-bottom: 1px !important;
+            }
+            
+            .user-name {
+                font-size: 13px !important;
+                margin-bottom: 1px !important;
+            }
+            
+            .date {
+                font-size: 10px !important;
+                margin-bottom: 1px !important;
+            }
+            
+            .meal-title {
+                font-size: 16px !important;
+                margin-bottom: 6px !important;
+                padding: 4px 8px !important;
+            }
+            
+            .meal-subtitle {
+                font-size: 12px !important;
+                margin-bottom: 4px !important;
+            }
+            
+            .meal-option {
+                font-size: 11px !important;
+                margin-bottom: 4px !important;
+                padding-left: 12px !important;
+                padding-right: 12px !important;
+            }
+            
+            [dir="rtl"] .meal-option {
+                padding-left: 0 !important;
+                padding-right: 12px !important;
+            }
+            
+            [dir="rtl"] .meal-option::before {
+                left: auto !important;
+                right: 0 !important;
+            }
+            
+            .meal-dish-title {
+                font-size: 12px !important;
+                margin-bottom: 2px !important;
+            }
+            
+            .footer {
+                padding: 2px 15px !important;
+                font-size: 8px !important;
+            }
+            
+            .contact-info {
+                font-size: 8px !important;
+                line-height: 1.1 !important;
+            }
+            
+            .contact-info div {
+                margin-bottom: 1px !important;
+            }
+            
+            /* Fallback to three columns if needed for many meals */
+            @supports (display: grid) {
+                .content {
+                    display: grid !important;
+                    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)) !important;
+                    gap: 15px !important;
+                }
+                
+                .meal-section {
+                    flex: none !important;
+                }
+            }
+            ` : ''}
         }
         
         /* RTL Support */
@@ -1688,13 +1853,17 @@ const MenuCreate = () => {
                         
                         <div class="meal-options">
                             ${(() => {
-                                let optionNumber = 1;
                                 let options = [];
                                 
                                 // Add main meal
                                 if (meal.main && meal.main.ingredients && meal.main.ingredients.length > 0) {
+                                    const mainMealTitle = meal.main.meal_title || '';
                                     const mainIngredients = meal.main.ingredients.map(ing => {
                                         let text = ing.item || 'Ingredient';
+                                        // Conditionally remove brand information in parentheses from PDF display
+                                        if (removeBrands) {
+                                            text = text.replace(/\s*\([^)]*\)$/, '');
+                                        }
                                         // Highlight specific words (brands, types, etc.)
                                         text = text.replace(/\b(וגן|קוביה|בישבת|טורטיות|סולוג|מולך|אלשבע|בולים)\b/g, '<span class="highlighted">$1</span>');
                                         
@@ -1705,14 +1874,21 @@ const MenuCreate = () => {
                                         
                                         return text;
                                     }).join(', ');
-                                    options.push(`<div class="meal-option"><span class="option-number">${optionNumber}.</span><span class="option-text">${mainIngredients}</span></div>`);
-                                    optionNumber++;
+                                    
+                                    // Include meal title if available
+                                    const mealTitleText = mainMealTitle ? `<div class="meal-dish-title">${mainMealTitle}</div>` : '';
+                                    options.push(`<div class="meal-option"><span class="option-text">${mealTitleText}${mainIngredients}</span></div>`);
                                 }
                                 
                                 // Add alternative meal
                                 if (meal.alternative && meal.alternative.ingredients && meal.alternative.ingredients.length > 0) {
+                                    const altMealTitle = meal.alternative.meal_title || '';
                                     const altIngredients = meal.alternative.ingredients.map(ing => {
                                         let text = ing.item || 'Ingredient';
+                                        // Conditionally remove brand information in parentheses from PDF display
+                                        if (removeBrands) {
+                                            text = text.replace(/\s*\([^)]*\)$/, '');
+                                        }
                                         text = text.replace(/\b(וגן|קוביה|בישבת|טורטיות|סולוג|מולך|אלשבע|בולים)\b/g, '<span class="highlighted">$1</span>');
                                         
                                         // Add household measure if available
@@ -1722,16 +1898,23 @@ const MenuCreate = () => {
                                         
                                         return text;
                                     }).join(', ');
-                                    options.push(`<div class="meal-option"><span class="option-number">${optionNumber}.</span><span class="option-text">${altIngredients}</span></div>`);
-                                    optionNumber++;
+                                    
+                                    // Include meal title if available
+                                    const altMealTitleText = altMealTitle ? `<div class="meal-dish-title">${altMealTitle}</div>` : '';
+                                    options.push(`<div class="meal-option"><span class="option-text">${altMealTitleText}${altIngredients}</span></div>`);
                                 }
                                 
                                 // Add additional alternatives
                                 if (meal.alternatives && meal.alternatives.length > 0) {
                                     meal.alternatives.forEach(alt => {
                                         if (alt.ingredients && alt.ingredients.length > 0) {
+                                            const additionalAltMealTitle = alt.meal_title || '';
                                             const altIngredients = alt.ingredients.map(ing => {
                                                 let text = ing.item || 'Ingredient';
+                                                // Conditionally remove brand information in parentheses from PDF display
+                                                if (removeBrands) {
+                                                    text = text.replace(/\s*\([^)]*\)$/, '');
+                                                }
                                                 text = text.replace(/\b(וגן|קוביה|בישבת|טורטיות|סולוג|מולך|אלשבע|בולים)\b/g, '<span class="highlighted">$1</span>');
                                                 
                                                 // Add household measure if available
@@ -1741,8 +1924,10 @@ const MenuCreate = () => {
                                                 
                                                 return text;
                                             }).join(', ');
-                                            options.push(`<div class="meal-option"><span class="option-number">${optionNumber}.</span><span class="option-text">${altIngredients}</span></div>`);
-                                            optionNumber++;
+                                            
+                                            // Include meal title if available
+                                            const additionalAltMealTitleText = additionalAltMealTitle ? `<div class="meal-dish-title">${additionalAltMealTitle}</div>` : '';
+                                            options.push(`<div class="meal-option"><span class="option-text">${additionalAltMealTitleText}${altIngredients}</span></div>`);
                                         }
                                     });
                                 }
@@ -2911,7 +3096,7 @@ const MenuCreate = () => {
         } else if (templateRes.status === 503) {
           throw new Error("Menu generation service is temporarily unavailable. Please try again later.");
         } else {
-          throw new Error(`Unable to analyze client preferences (Error ${templateRes.status}). Please try again.`);
+          throw new Error("Please check that you've added all the necessary information to the client profile (dietary preferences, restrictions, goals, etc.) and try again.");
         }
       }
       
@@ -5008,7 +5193,28 @@ const MenuCreate = () => {
           </div>
         </>
       )}
-      <Button onClick={() => downloadPdf(menu)}>{translations.downloadAsPdf || 'Download as PDF'}</Button>
+      {/* PDF Options */}
+      <div className="space-y-3">
+        <div className="flex items-center space-x-2">
+          <Checkbox
+            id="removeBrands"
+            checked={removeBrandsFromPdf}
+            onCheckedChange={setRemoveBrandsFromPdf}
+          />
+          <Label htmlFor="removeBrands" className="text-sm font-medium text-gray-700">
+            {translations.removeBrandsFromPdf || 'Remove brand names from PDF'}
+          </Label>
+        </div>
+        
+        <div className="flex gap-3">
+          <Button onClick={() => downloadPdf(menu, 'portrait')} variant="outline">
+            {translations.downloadPortraitPdf || 'Download PDF (Portrait)'}
+          </Button>
+          <Button onClick={() => downloadPdf(menu, 'landscape')} className="bg-blue-600 hover:bg-blue-700">
+            {translations.downloadLandscapePdf || 'Download PDF (Landscape)'}
+          </Button>
+        </div>
+      </div>
 
       {/* Save Button and Cache Management (not in PDF) */}
       {menu && menu.meals && menu.meals.length > 0 && (
