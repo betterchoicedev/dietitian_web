@@ -122,7 +122,6 @@ export default function Clients() {
       protein: ''
     },
     dailyTotalCalories: '',
-    recommendations: '',
     food_limitations: '',
     Activity_level: '',
     goal: '',
@@ -422,9 +421,21 @@ export default function Clients() {
   // Validate macro percentages
   const validateMacroPercentages = () => {
     const total = calculateTotals().totalPercentage;
+    const dailyCalories = parseInt(formData.dailyTotalCalories) || 0;
+    
+    // If daily calories haven't been set yet, don't show red warning for 0% macros
+    if (dailyCalories === 0) {
+      return { 
+        isValid: true, 
+        warning: null, 
+        total,
+        isCaloriesNotSet: true 
+      };
+    }
+    
     const isValid = Math.abs(total - 100) < 0.1; // Allow small rounding differences
     const warning = !isValid ? `Macro percentages should add up to 100%. Current total: ${total.toFixed(1)}%` : null;
-    return { isValid, warning, total };
+    return { isValid, warning, total, isCaloriesNotSet: false };
   };
 
   // Auto-calculate initial macros when calories change
@@ -916,11 +927,10 @@ export default function Clients() {
         protein: ''
       },
       dailyTotalCalories: '', // Will be calculated automatically when required fields are filled
-      recommendations: '',
       food_limitations: '',
       Activity_level: '',
       goal: '',
-      number_of_meals: '5',
+      number_of_meals: '4',
       client_preference: '',
       region: 'israel',
       meal_plan_structure: getDefaultMealPlanStructure(translations)
@@ -979,13 +989,12 @@ export default function Clients() {
         protein: client.macros?.protein ? client.macros.protein.toString().replace('g', '') : ''
       },
       dailyTotalCalories: client.dailyTotalCalories?.toString() || '',
-      recommendations: typeof client.recommendations === 'object' ? JSON.stringify(client.recommendations, null, 2) : client.recommendations || '',
       food_limitations: Array.isArray(client.food_limitations) ? client.food_limitations.join(', ') : 
                        typeof client.food_limitations === 'object' ? JSON.stringify(client.food_limitations, null, 2) : 
                        client.food_limitations || '',
       Activity_level: client.Activity_level || '',
       goal: client.goal || '',
-      number_of_meals: client.number_of_meals?.toString() || '5',
+              number_of_meals: client.number_of_meals?.toString() || '4',
       client_preference: typeof client.client_preference === 'object' ? JSON.stringify(client.client_preference, null, 2) : client.client_preference || '',
       region: client.region || 'israel',
       meal_plan_structure: client.meal_plan_structure || getDefaultMealPlanStructure(translations)
@@ -1118,17 +1127,6 @@ export default function Clients() {
           return trimmedValue.split(',').map(item => item.trim()).filter(item => item);
         }
         return [trimmedValue];
-      } else if (fieldType === 'recommendations') {
-        // Convert to recommendations object format
-        if (trimmedValue.includes(',')) {
-          const items = trimmedValue.split(',').map(item => item.trim());
-          const result = {};
-          items.forEach((item, index) => {
-            result[`recommendation_${index + 1}`] = item;
-          });
-          return result;
-        }
-        return { general: trimmedValue };
       }
       
       // Default: return as string
@@ -1239,12 +1237,11 @@ export default function Clients() {
         weight_kg: formData.weight_kg ? parseFloat(formData.weight_kg) : null,
         height_cm: formData.height_cm ? parseFloat(formData.height_cm) : null,
         dailyTotalCalories: formData.dailyTotalCalories ? parseInt(formData.dailyTotalCalories) : null,
-        number_of_meals: formData.number_of_meals ? parseInt(formData.number_of_meals) : 5,
+        number_of_meals: formData.number_of_meals ? parseInt(formData.number_of_meals) : 4,
         date_of_birth: formData.date_of_birth && formData.date_of_birth.trim() !== '' ? formData.date_of_birth : null,
         food_allergies: parseArrayField(formData.food_allergies),
         food_limitations: parseJsonField(formData.food_limitations, 'array'),
         macros: parseMacrosField(macroInputs.protein.grams, macroInputs.carbs.grams, macroInputs.fat.grams),
-        recommendations: parseJsonField(formData.recommendations, 'recommendations'),
         client_preference: parseJsonField(formData.client_preference, 'array'),
         meal_plan_structure: formData.meal_plan_structure.map(meal => ({
           meal: meal.meal,
@@ -1425,10 +1422,14 @@ export default function Clients() {
     const updatedStructure = formData.meal_plan_structure.filter((_, i) => i !== index);
     const totalCalories = parseInt(formData.dailyTotalCalories) || 0;
     
+    // Update the number_of_meals to match the new structure length
+    const newNumberOfMeals = updatedStructure.length;
+    
     if (totalCalories === 0) {
       setFormData({
         ...formData,
-        meal_plan_structure: updatedStructure
+        meal_plan_structure: updatedStructure,
+        number_of_meals: newNumberOfMeals.toString()
       });
       return;
     }
@@ -1465,7 +1466,8 @@ export default function Clients() {
       
       setFormData({
         ...formData,
-        meal_plan_structure: rebalancedStructure
+        meal_plan_structure: rebalancedStructure,
+        number_of_meals: newNumberOfMeals.toString()
       });
       
       // Show warning
@@ -1517,7 +1519,8 @@ export default function Clients() {
     
     setFormData({
       ...formData,
-      meal_plan_structure: rebalancedStructure
+      meal_plan_structure: rebalancedStructure,
+      number_of_meals: newNumberOfMeals.toString()
     });
   };
 
@@ -1547,6 +1550,14 @@ export default function Clients() {
     }
   }, [formData.dailyTotalCalories]);
 
+  // Auto-resize textarea function
+  const autoResizeTextarea = (element) => {
+    if (element) {
+      element.style.height = 'auto';
+      element.style.height = Math.min(element.scrollHeight, 80) + 'px';
+    }
+  };
+
   // Update meal in meal plan structure
   const updateMealInPlan = (index, field, value) => {
     const updatedStructure = [...formData.meal_plan_structure];
@@ -1569,6 +1580,16 @@ export default function Clients() {
         ...formData,
         meal_plan_structure: updatedStructure
       });
+    }
+
+    // Auto-resize textarea if description was updated
+    if (field === 'description') {
+      setTimeout(() => {
+        const textarea = document.querySelector(`textarea[data-meal-index="${index}"]`);
+        if (textarea) {
+          autoResizeTextarea(textarea);
+        }
+      }, 0);
     }
   };
 
@@ -1699,6 +1720,56 @@ export default function Clients() {
       })
     }));
   }, [translations, language]);
+
+  // Update meal plan structure when number of meals changes
+  useEffect(() => {
+    const numberOfMeals = parseInt(formData.number_of_meals) || 4;
+    const currentStructure = formData.meal_plan_structure;
+    
+    if (numberOfMeals !== currentStructure.length) {
+      let newStructure = [];
+      
+      if (numberOfMeals > currentStructure.length) {
+        // Add more meals
+        newStructure = [...currentStructure];
+        for (let i = currentStructure.length; i < numberOfMeals; i++) {
+          newStructure.push({
+            meal: `${translations.meal || 'Meal'} ${i + 1}`,
+            calories_pct: Math.round((100 / numberOfMeals) * 10) / 10,
+            description: '',
+            calories: 0,
+            locked: false
+          });
+        }
+      } else {
+        // Remove meals (keep the first ones)
+        newStructure = currentStructure.slice(0, numberOfMeals);
+      }
+      
+      // Recalculate percentages to ensure they add up to 100%
+      const totalPercentage = newStructure.reduce((sum, meal) => sum + meal.calories_pct, 0);
+      if (Math.abs(totalPercentage - 100) > 0.1) {
+        newStructure = newStructure.map(meal => ({
+          ...meal,
+          calories_pct: Math.round((100 / numberOfMeals) * 10) / 10
+        }));
+      }
+      
+      // Recalculate calories based on new percentages
+      const totalCalories = parseInt(formData.dailyTotalCalories) || 0;
+      if (totalCalories > 0) {
+        newStructure = newStructure.map(meal => ({
+          ...meal,
+          calories: Math.round((meal.calories_pct / 100) * totalCalories)
+        }));
+      }
+      
+      setFormData(prev => ({
+        ...prev,
+        meal_plan_structure: newStructure
+      }));
+    }
+  }, [formData.number_of_meals, formData.dailyTotalCalories, translations]);
 
   // Toggle lock state for a specific macro
   const toggleMacroLock = (macroType) => {
@@ -2583,7 +2654,7 @@ export default function Clients() {
                       max="10"
                       value={formData.number_of_meals}
                       onChange={(e) => setFormData({...formData, number_of_meals: e.target.value})}
-                      placeholder={translations.mealsPlaceholder || '5'}
+                      placeholder={translations.mealsPlaceholder || '4'}
                       className="border-gray-300 focus:border-blue-500 focus:ring-blue-200"
                     />
                     <p className="text-xs text-gray-500">{translations.mealsDescription || 'How many meals per day does your client prefer?'}</p>
@@ -2696,11 +2767,28 @@ export default function Clients() {
                   
                   {/* Macro Input Rows */}
                   <div className="space-y-3">
-                    {[
-                      { key: 'protein', label: translations.protein, color: 'blue', maxGrams: 300, icon: '💪' },
-                      { key: 'carbs', label: translations.carbs, color: 'purple', maxGrams: 400, icon: '🍞' },
-                      { key: 'fat', label: translations.fat, color: 'teal', maxGrams: 150, icon: '🥑' }
-                    ].map(macro => (
+                    {(() => {
+                      // Dynamic macro configuration based on daily calories
+                      const dailyCalories = parseInt(formData.dailyTotalCalories) || 0;
+                      
+                      // Calculate maximum possible grams for each macro based on calories
+                      // Using extreme ratios: 100% protein (4 cal/g), 100% carbs (4 cal/g), 100% fat (9 cal/g)
+                      const maxProteinGrams = dailyCalories > 0 ? Math.ceil(dailyCalories / 4) : 300;
+                      const maxCarbsGrams = dailyCalories > 0 ? Math.ceil(dailyCalories / 4) : 400;
+                      const maxFatGrams = dailyCalories > 0 ? Math.ceil(dailyCalories / 9) : 150;
+                      
+                      // Set reasonable upper limits to prevent unrealistic values
+                      const maxProtein = Math.min(maxProteinGrams, 500);
+                      const maxCarbs = Math.min(maxCarbsGrams, 800);
+                      const maxFat = Math.min(maxFatGrams, 200);
+                      
+                      const macroConfig = [
+                        { key: 'protein', label: translations.protein, color: 'blue', maxGrams: maxProtein, icon: '💪' },
+                        { key: 'carbs', label: translations.carbs, color: 'purple', maxGrams: maxCarbs, icon: '🍞' },
+                        { key: 'fat', label: translations.fat, color: 'teal', maxGrams: maxFat, icon: '🥑' }
+                      ];
+                      
+                      return macroConfig.map(macro => (
                       <div key={macro.key} className="border border-gray-200 rounded-lg p-4 bg-gradient-to-r from-gray-50 to-white hover:shadow-sm transition-shadow">
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-2">
@@ -2801,38 +2889,51 @@ export default function Clients() {
                           </div>
                         </div>
                       </div>
-                    ))}
+                    ));
+                    })()}
                   </div>
                   
                   {/* Macro Summary */}
                   <div className={`border-2 rounded-xl p-6 ${
-                    validateMacroPercentages().isValid 
-                      ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200' 
-                      : 'bg-gradient-to-r from-red-50 to-pink-50 border-red-200'
+                    validateMacroPercentages().isCaloriesNotSet
+                      ? 'bg-gradient-to-r from-gray-50 to-slate-50 border-gray-200'
+                      : validateMacroPercentages().isValid 
+                        ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200' 
+                        : 'bg-gradient-to-r from-red-50 to-pink-50 border-red-200'
                   }`}>
                     <div className="flex items-center gap-3 mb-4">
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                        validateMacroPercentages().isValid 
-                          ? 'bg-green-500 text-white' 
-                          : 'bg-red-500 text-white'
+                        validateMacroPercentages().isCaloriesNotSet
+                          ? 'bg-gray-500 text-white' 
+                          : validateMacroPercentages().isValid 
+                            ? 'bg-green-500 text-white' 
+                            : 'bg-red-500 text-white'
                       }`}>
-                        {validateMacroPercentages().isValid ? '✓' : '⚠️'}
+                        {validateMacroPercentages().isCaloriesNotSet ? '⏳' : validateMacroPercentages().isValid ? '✓' : '⚠️'}
                       </div>
                       <div>
                         <h4 className={`font-semibold ${
-                          validateMacroPercentages().isValid ? 'text-green-800' : 'text-red-800'
+                          validateMacroPercentages().isCaloriesNotSet
+                            ? 'text-gray-800' 
+                            : validateMacroPercentages().isValid ? 'text-green-800' : 'text-red-800'
                         }`}>
-                          {validateMacroPercentages().isValid 
-                            ? translations.macrosPerfectlyBalanced || 'Macros are perfectly balanced!' 
-                            : translations.macroBalanceNeedsAttention || 'Macro balance needs attention'
+                          {validateMacroPercentages().isCaloriesNotSet 
+                            ? translations.caloriesNotSet || 'Daily calories not set yet' 
+                            : validateMacroPercentages().isValid 
+                              ? translations.macrosPerfectlyBalanced || 'Macros are perfectly balanced!' 
+                              : translations.macroBalanceNeedsAttention || 'Macro balance needs attention'
                           }
                         </h4>
                         <p className={`text-sm ${
-                          validateMacroPercentages().isValid ? 'text-green-600' : 'text-red-600'
+                          validateMacroPercentages().isCaloriesNotSet
+                            ? 'text-gray-600' 
+                            : validateMacroPercentages().isValid ? 'text-green-600' : 'text-red-600'
                         }`}>
-                          {validateMacroPercentages().isValid 
-                            ? translations.macrosReadyToGo || 'Your client\'s nutrition targets are ready to go!' 
-                            : validateMacroPercentages().warning
+                          {validateMacroPercentages().isCaloriesNotSet 
+                            ? translations.setCaloriesFirst || 'Set daily calories first to configure macro percentages' 
+                            : validateMacroPercentages().isValid 
+                              ? translations.macrosReadyToGo || 'Your client\'s nutrition targets are ready to go!' 
+                              : validateMacroPercentages().warning
                           }
                         </p>
                       </div>
@@ -2842,7 +2943,9 @@ export default function Clients() {
                       <div className="bg-white/60 rounded-lg p-3 border border-white/40">
                         <div className="text-sm text-gray-600">{translations.totalPercentages || 'Total Percentages'}</div>
                         <div className={`text-lg font-bold ${
-                          validateMacroPercentages().isValid ? 'text-green-700' : 'text-red-700'
+                          validateMacroPercentages().isCaloriesNotSet
+                            ? 'text-gray-700' 
+                            : validateMacroPercentages().isValid ? 'text-green-700' : 'text-red-700'
                         }`}>
                           {validateMacroPercentages().total.toFixed(1)}%
                         </div>
@@ -2913,36 +3016,75 @@ export default function Clients() {
               </div>
 
               {/* Dietary Information */}
-              <div className="space-y-4">
-                <h3 className="text-lg font-medium">{translations.dietaryInformation}</h3>
-                <div className="grid grid-cols-1 gap-4">
-                  <div>
-                    <Label htmlFor="food_allergies">{translations.foodAllergies}</Label>
+              <div className="space-y-6">
+                <h3 className="text-lg font-medium flex items-center gap-2">
+                  <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center">
+                    <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  {translations.dietaryInformation}
+                </h3>
+                
+                <div className="grid grid-cols-1 gap-6">
+                  {/* Food Allergies Section */}
+                  <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
+                    <Label htmlFor="food_allergies" className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+                      <div className="w-5 h-5 bg-red-100 rounded-full flex items-center justify-center">
+                        <svg className="w-3 h-3 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                        </svg>
+                      </div>
+                      {translations.foodAllergies}
+                    </Label>
                     <Input
                       id="food_allergies"
                       value={formData.food_allergies}
                       onChange={(e) => setFormData({...formData, food_allergies: e.target.value})}
                       placeholder={translations.foodAllergiesPlaceholder}
+                      className="border-gray-300 focus:border-red-500 focus:ring-red-500"
                     />
                   </div>
-                  <div>
-                    <Label htmlFor="food_limitations">{translations.foodLimitations}</Label>
+
+                  {/* Food Limitations Section */}
+                  <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
+                    <Label htmlFor="food_limitations" className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+                      <div className="w-5 h-5 bg-orange-100 rounded-full flex items-center justify-center">
+                        <svg className="w-3 h-3 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                      {translations.foodLimitations}
+                    </Label>
                     <Textarea
                       id="food_limitations"
                       value={formData.food_limitations}
                       onChange={(e) => setFormData({...formData, food_limitations: e.target.value})}
                       placeholder={translations.foodLimitationsPlaceholder}
                       rows={3}
+                      className="border-gray-300 focus:border-orange-500 focus:ring-orange-500 resize-none"
                     />
-                    <p className="text-xs text-gray-500 mt-1">
-                      {translations.foodLimitationsHelp}
-                    </p>
+                    {formData.food_limitations && (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        {formData.food_limitations.split(',').length} {translations.limitations || 'limitations'} specified
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <Label htmlFor="client_preference" className="flex items-center gap-2">
+
+                  {/* Client Preferences Section */}
+                  <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
+                    <Label htmlFor="client_preference" className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+                      <div className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center">
+                        <svg className="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                      </div>
                       {translations.foodDiary} /{translations.userPreferences} {translations.eatingHabitsAnalysis}
                       {foodLogsAnalysis && (
-                        <Badge variant="secondary" className="text-xs bg-green-100 text-green-800">
+                        <Badge variant="secondary" className="text-xs bg-green-100 text-green-800 ml-2">
                           {translations.autoPopulated || 'Auto-populated'} ({foodLogsAnalysis.total_logs} {translations.entriesFound || 'entries'})
                         </Badge>
                       )}
@@ -2955,10 +3097,10 @@ export default function Clients() {
                         onChange={(e) => setFormData({...formData, client_preference: e.target.value})}
                         placeholder={translations.clientPreferencesPlaceholder}
                         rows={3}
-                        className={`flex-1 transition-all duration-200 ${foodLogsAnalysis ? 'border-green-500 bg-green-100 text-green-900 font-semibold shadow-md ring-2 ring-green-300' : ''}`}
+                        className={`flex-1 transition-all duration-200 resize-none ${foodLogsAnalysis ? 'border-green-500 bg-green-50 text-green-900 font-medium shadow-sm ring-1 ring-green-300' : 'border-gray-300 focus:border-green-500 focus:ring-green-500'}`}
                         style={{ 
                           borderColor: foodLogsAnalysis ? '#10b981' : undefined,
-                          backgroundColor: foodLogsAnalysis ? '#dcfce7' : undefined,
+                          backgroundColor: foodLogsAnalysis ? '#f0fdf4' : undefined,
                           color: foodLogsAnalysis ? '#064e3b' : undefined
                         }}
                       />
@@ -2981,7 +3123,7 @@ export default function Clients() {
                             }
                           }}
                           disabled={translatingPreferences}
-                          className="whitespace-nowrap h-fit"
+                          className="whitespace-nowrap h-fit border-green-300 text-green-700 hover:bg-green-50"
                         >
                           {translatingPreferences ? (
                             <div className="animate-spin h-4 w-4" />
@@ -2991,30 +3133,17 @@ export default function Clients() {
                         </Button>
                       )}
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {foodLogsAnalysis ? (
-                        <span className="text-green-600 font-medium">
-                          ✨ {translations.preferencesAutoPopulated || 'Eating habits analysis completed'} from {foodLogsAnalysis.total_logs} food log entries. You can edit this analysis as needed.
-                        </span>
-                      ) : (
-                        translations.clientPreferencesHelp
-                      )}
-                    </p>
+                    {foodLogsAnalysis && (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        {translations.preferencesAutoPopulated || 'Eating habits analysis completed'} from {foodLogsAnalysis.total_logs} food log entries. You can edit this analysis as needed.
+                      </div>
+                    )}
+                  </div>
 
-                  </div>
-                  <div>
-                    <Label htmlFor="recommendations">{translations.recommendations}</Label>
-                    <Textarea
-                      id="recommendations"
-                      value={formData.recommendations}
-                      onChange={(e) => setFormData({...formData, recommendations: e.target.value})}
-                      placeholder={translations.recommendationsPlaceholder}
-                      rows={3}
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      {translations.recommendationsHelp}
-                    </p>
-                  </div>
+
                 </div>
               </div>
 
@@ -3041,12 +3170,12 @@ export default function Clients() {
                   <div className="border rounded-lg overflow-hidden">
                     <div className="bg-gray-50 px-4 py-2 border-b">
                       <div className="grid grid-cols-12 gap-2 text-xs font-medium text-gray-600">
-                        <div className="col-span-3">{translations.mealName || 'Meal Name'}</div>
-                        <div className="col-span-2">{translations.description || 'Description'}</div>
+                        <div className="col-span-2">{translations.mealName || 'Meal Name'}</div>
+                        <div className="col-span-4">{translations.description || 'Description'}</div>
                         <div className="col-span-2">{translations.caloriesLabel || 'Calories'}</div>
                         <div className="col-span-2">{translations.percentage || 'Percentage'}</div>
                         <div className="col-span-1">{translations.lock || 'Lock'}</div>
-                        <div className="col-span-2">{translations.actions || 'Actions'}</div>
+                        <div className="col-span-1">{translations.actions || 'Actions'}</div>
                       </div>
                     </div>
                     
@@ -3054,7 +3183,7 @@ export default function Clients() {
                       <div key={index} className="px-4 py-3 border-b last:border-b-0 bg-white">
                         <div className="grid grid-cols-12 gap-2 items-center">
                           {/* Meal Name */}
-                          <div className="col-span-3">
+                          <div className="col-span-2">
                             <Input
                               value={meal.meal}
                               onChange={(e) => updateMealInPlan(index, 'meal', e.target.value)}
@@ -3064,13 +3193,24 @@ export default function Clients() {
                           </div>
                           
                           {/* Description */}
-                          <div className="col-span-2">
-                            <Input
+                          <div className="col-span-4 relative">
+                            <Textarea
                               value={meal.description}
                               onChange={(e) => updateMealInPlan(index, 'description', e.target.value)}
-                              className="text-sm"
-                              placeholder={translations.mealDescriptionShort || translations.descriptionPlaceholder || 'Optional description'}
+                              onInput={(e) => autoResizeTextarea(e.target)}
+                              className="text-sm resize-none min-h-[32px] max-h-[80px] overflow-hidden"
+                              placeholder={translations.mealDescriptionShort || translations.descriptionPlaceholder || 'What\'s in this meal...'}
+                              rows={1}
+                              title={meal.description || 'Enter meal description'}
+                              data-meal-index={index}
                             />
+                            {meal.description && meal.description.length > 50 && (
+                              <div className="absolute top-0 right-0 mt-1 mr-1">
+                                <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800">
+                                  {meal.description.length} chars
+                                </Badge>
+                              </div>
+                            )}
                           </div>
                           
                           {/* Calories */}
@@ -3135,7 +3275,7 @@ export default function Clients() {
                           </div>
                           
                           {/* Actions */}
-                          <div className="col-span-2 flex items-center justify-center gap-1">
+                          <div className="col-span-1 flex items-center justify-center gap-1">
                             <Button
                               type="button"
                               variant="ghost"

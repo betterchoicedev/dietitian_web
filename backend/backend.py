@@ -2633,6 +2633,15 @@ def api_update_user_profile():
         date_of_birth = data.get("date_of_birth")
         gender = data.get("gender")
         
+        # Extract additional fields
+        language = data.get("language")
+        city = data.get("city")
+        timezone = data.get("timezone")
+        user_language = data.get("user_language")
+        activity_level = data.get("Activity_level")
+        goal = data.get("goal")
+        region = data.get("region")
+        
         # Validate required fields
         if not user_code or not full_name or not email:
             return jsonify({"error": "user_code, full_name and email are required fields"}), 400
@@ -2681,6 +2690,13 @@ def api_update_user_profile():
                     "age": age,
                     "date_of_birth": date_of_birth,
                     "gender": gender.lower() if gender else None,
+                    "language": language,
+                    "city": city,
+                    "timezone": timezone,
+                    "user_language": user_language,
+                    "Activity_level": activity_level,
+                    "goal": goal,
+                    "region": region,
                 }
                 
                 # Remove None values to avoid overwriting existing data with null
@@ -2710,6 +2726,16 @@ def api_update_user_profile():
                     "age": age,
                     "date_of_birth": date_of_birth,
                     "gender": gender.lower() if gender else None,
+                    "platform": "client_web",
+                    "verification_code": user_code,
+                    "whatsapp_number": phone_number,
+                    "language": language,
+                    "city": city,
+                    "timezone": timezone,
+                    "user_language": user_language,
+                    "Activity_level": activity_level,
+                    "goal": goal,
+                    "region": region,
                 }
                 
                 # Remove None values

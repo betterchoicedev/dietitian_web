@@ -13,6 +13,9 @@ import { EventBus } from '@/utils/EventBus';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 import { supabase } from '@/lib/supabase';
 
@@ -777,6 +780,144 @@ const EditableHouseholdMeasure = ({ value, onChange, mealIndex, optionIndex, ing
   );
 };
 
+const RecommendationForm = ({ recommendation, onSave, onCancel, translations }) => {
+  const [formData, setFormData] = useState({
+    id: recommendation?.id || Date.now(),
+    category: recommendation?.category || 'general',
+    title: recommendation?.title || '',
+    content: recommendation?.content || '',
+    priority: recommendation?.priority || 'medium'
+  });
+
+  useEffect(() => {
+    if (recommendation) {
+      setFormData({
+        id: recommendation.id,
+        category: recommendation.category,
+        title: recommendation.title,
+        content: recommendation.content,
+        priority: recommendation.priority
+      });
+    }
+  }, [recommendation]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!formData.title.trim() || !formData.content.trim()) {
+      alert(translations?.pleaseFillAllFields || 'Please fill in all required fields');
+      return;
+    }
+    onSave(formData);
+  };
+
+  const handleChange = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const categoryOptions = [
+    { value: 'general', label: translations?.generalRecommendation || 'General' },
+    { value: 'nutrition', label: translations?.nutritionRecommendation || 'Nutrition' },
+    { value: 'exercise', label: translations?.exerciseRecommendation || 'Exercise' },
+    { value: 'lifestyle', label: translations?.lifestyleRecommendation || 'Lifestyle' },
+    { value: 'supplements', label: translations?.supplementsRecommendation || 'Supplements' },
+    { value: 'hydration', label: translations?.hydrationRecommendation || 'Hydration' },
+    { value: 'sleep', label: translations?.sleepRecommendation || 'Sleep' }
+  ];
+
+  const priorityOptions = [
+    { value: 'low', label: translations?.lowPriority || 'Low Priority' },
+    { value: 'medium', label: translations?.mediumPriority || 'Medium Priority' },
+    { value: 'high', label: translations?.highPriority || 'High Priority' }
+  ];
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <Label htmlFor="category" className="text-sm font-medium text-gray-700">
+            {translations?.category || 'Category'}
+          </Label>
+          <Select value={formData.category} onValueChange={(value) => handleChange('category', value)}>
+            <SelectTrigger className="mt-1">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {categoryOptions.map(option => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        
+        <div>
+          <Label htmlFor="priority" className="text-sm font-medium text-gray-700">
+            {translations?.priority || 'Priority'}
+          </Label>
+          <Select value={formData.priority} onValueChange={(value) => handleChange('priority', value)}>
+            <SelectTrigger className="mt-1">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {priorityOptions.map(option => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div>
+        <Label htmlFor="title" className="text-sm font-medium text-gray-700">
+          {translations?.title || 'Title'} *
+        </Label>
+        <Input
+          id="title"
+          value={formData.title}
+          onChange={(e) => handleChange('title', e.target.value)}
+          className="mt-1"
+          placeholder={translations?.recommendationTitlePlaceholder || 'Enter recommendation title'}
+          required
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="content" className="text-sm font-medium text-gray-700">
+          {translations?.content || 'Content'} *
+        </Label>
+        <Textarea
+          id="content"
+          value={formData.content}
+          onChange={(e) => handleChange('content', e.target.value)}
+          className="mt-1 min-h-[120px]"
+          placeholder={translations?.recommendationContentPlaceholder || 'Enter detailed recommendation content'}
+          required
+        />
+      </div>
+
+      <DialogFooter className="flex gap-3 sm:gap-3">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onCancel}
+          className="flex-1 border-gray-300 text-gray-700 hover:bg-gray-50"
+        >
+          {translations?.cancel || 'Cancel'}
+        </Button>
+        <Button
+          type="submit"
+          className="flex-1 bg-purple-600 hover:bg-purple-700 text-white"
+        >
+          {translations?.save || 'Save'}
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+};
+
 const IngredientPortionDialog = ({ isOpen, onClose, onConfirm, ingredient, translations }) => {
   const [gramAmount, setGramAmount] = useState('');
   const [householdMeasure, setHouseholdMeasure] = useState('');
@@ -1198,6 +1339,7 @@ const MenuCreate = () => {
   const [progress, setProgress] = useState(0);
   const [progressStep, setProgressStep] = useState('');
   const [enrichingUPC, setEnrichingUPC] = useState(false);
+  const [showEmptyMealPlanDialog, setShowEmptyMealPlanDialog] = useState(false);
   const [users, setUsers] = useState([]);
   const [removeBrandsFromPdf, setRemoveBrandsFromPdf] = useState(false);
 
@@ -1269,6 +1411,22 @@ const MenuCreate = () => {
   // State for temporary calorie inputs (before Enter confirmation)
   const [tempCalorieInputs, setTempCalorieInputs] = useState({});
   const [calorieInputErrors, setCalorieInputErrors] = useState({});
+  
+  // State for recommendations
+  const [recommendations, setRecommendations] = useState(() => {
+    try {
+      const saved = localStorage.getItem('menuCreate_recommendations');
+      console.log('📋 Loading recommendations from localStorage:', saved);
+      const parsed = saved ? JSON.parse(saved) : [];
+      console.log('📋 Parsed recommendations:', parsed);
+      return parsed;
+    } catch (err) {
+      console.warn('Failed to load recommendations from localStorage:', err);
+      return [];
+    }
+  });
+  const [showRecommendationsDialog, setShowRecommendationsDialog] = useState(false);
+  const [editingRecommendation, setEditingRecommendation] = useState(null);
   
   // UPC Cache to avoid duplicate lookups - persistent across sessions
   const [upcCache, setUpcCache] = useState(() => {
@@ -1346,6 +1504,22 @@ const MenuCreate = () => {
       console.warn('Failed to save userTargets to localStorage:', err);
     }
   }, [userTargets]);
+
+  // Save recommendations state to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      console.log('💾 Recommendations changed, saving to localStorage:', recommendations);
+      if (recommendations && recommendations.length > 0) {
+        localStorage.setItem('menuCreate_recommendations', JSON.stringify(recommendations));
+        console.log('✅ Recommendations saved to localStorage');
+      } else {
+        localStorage.removeItem('menuCreate_recommendations');
+        console.log('🗑️ Recommendations removed from localStorage');
+      }
+    } catch (err) {
+      console.warn('Failed to save recommendations to localStorage:', err);
+    }
+  }, [recommendations]);
 
   // Auto-calculate meal calories when total calories change
   useEffect(() => {
@@ -2995,9 +3169,11 @@ const MenuCreate = () => {
       localStorage.removeItem('menuCreate_menu');
       localStorage.removeItem('menuCreate_originalMenu');
       localStorage.removeItem('menuCreate_userTargets');
+      localStorage.removeItem('menuCreate_recommendations');
       setMenu(null);
       setOriginalMenu(null);
       setUserTargets(null);
+      setRecommendations([]);
       setError(null);
       console.log('✅ Menu state cleared successfully');
     } catch (err) {
@@ -3005,10 +3181,306 @@ const MenuCreate = () => {
     }
   };
 
+  // Handler for empty meal plan dialog
+  const handleEmptyMealPlanConfirm = async () => {
+    setShowEmptyMealPlanDialog(false);
+    // Proceed with menu generation
+    await proceedWithMenuGeneration();
+  };
+
+  const handleEmptyMealPlanCancel = () => {
+    setShowEmptyMealPlanDialog(false);
+  };
+
+  // Extracted menu generation logic
+  const proceedWithMenuGeneration = async () => {
+    // Clear any existing errors at the start
+    setError(null);
+
+    // Refresh nutrition targets like when selecting a user
+    console.log('🔄 Refreshing nutrition targets like user selection...');
+    setProgress(0);
+    setProgressStep('🔄 Refreshing nutrition targets...');
+    
+    // Create a promise that resolves when userTargets is updated
+    const waitForUserTargets = () => {
+      return new Promise((resolve) => {
+        const checkTargets = () => {
+          if (userTargets) {
+            resolve(userTargets);
+          } else {
+            setTimeout(checkTargets, 100);
+          }
+        };
+        checkTargets();
+      });
+    };
+    
+    // Call fetchUserTargets and wait for the state to update
+    fetchUserTargets(selectedClient.user_code);
+    
+    // Wait for userTargets to be updated
+    const updatedTargets = await waitForUserTargets();
+    
+    // If we got targets, proceed with menu generation
+    if (updatedTargets) {
+      console.log('✅ User targets loaded successfully:', updatedTargets);
+    } else {
+      console.warn('⚠️ First attempt failed, trying one more time...');
+      setProgressStep('🔄 Retrying nutrition targets...');
+      
+      // Try one more time
+      fetchUserTargets(selectedClient.user_code);
+      const retryTargets = await waitForUserTargets();
+      
+      // If still no targets, then show error
+      if (!retryTargets) {
+        setError('Unable to load client nutritional targets. Please check the client data and try again.');
+        setProgress(0);
+        setProgressStep('');
+        return;
+      }
+    }
+
+    try {
+      // Clear previous menu data when generating new menu
+      clearSavedMenuState();
+
+      setLoading(true);
+      setError(null);
+      setProgress(0);
+      setProgressStep('Initializing...');
+
+      console.log('🧠 Generating menu for user:', selectedClient.user_code);
+      console.log('🔍 Selected client data:', selectedClient);
+      console.log('🎯 Current user targets:', userTargets);
+
+      // Step 1: Get meal template (25% progress)
+      setProgress(5);
+      setProgressStep('🎯 Analyzing client preferences...');
+
+      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_code: selectedClient.user_code })
+      });
+      
+      console.log('📡 Template API response status:', templateRes.status);
+      
+      if (!templateRes.ok) {
+        const errorText = await templateRes.text();
+        console.error('❌ Template API error response:', errorText);
+        
+        if (templateRes.status === 404) {
+          throw new Error("Client not found. Please check if the client exists in the database.");
+        } else if (templateRes.status === 500) {
+          throw new Error("Server error while analyzing client preferences. Please try again in a moment.");
+        } else if (templateRes.status === 503) {
+          throw new Error("Menu generation service is temporarily unavailable. Please try again later.");
+        } else {
+          throw new Error("Please fill all the client data in the client page (dietary preferences, restrictions, goals, physical information, etc.) and try again.");
+        }
+      }
+      
+      const templateData = await templateRes.json();
+      console.log('📋 Template API response data:', templateData);
+      
+      if (templateData.error) {
+        if (templateData.error.includes("Template validation failed")) {
+          throw new Error("Unable to create a balanced meal plan that meets the client's nutritional requirements. Please check the client's dietary restrictions and try again.");
+        } else if (templateData.error.includes("Failed to generate template")) {
+          throw new Error("Unable to create a meal template. The system is having trouble with the client's dietary preferences. Please review the client's profile and try again.");
+        } else {
+          throw new Error(`Template creation failed: ${templateData.error}`);
+        }
+      }
+      
+      if (!templateData.template) {
+        throw new Error("No meal template was generated. Please check the client's profile and try again.");
+      }
+      
+      const template = templateData.template;
+
+      setProgress(25);
+      setProgressStep('✅ Client analysis complete!');
+
+      // Step 2: Build menu (50% progress)
+      setProgress(30);
+      setProgressStep('🍽️ Creating personalized meals...');
+
+                   // Start gradual progress animation from 30% to 99% during meal generation
+             const progressInterval = setInterval(() => {
+               setProgress(prev => {
+                 if (prev >= 99) {
+                   clearInterval(progressInterval);
+                   return 99;
+                 }
+                 return prev + 1;
+               });
+             }, 2000); // Increment by 1% every 2 seconds (much slower progress)
+
+      // Ensure template has carbs for each meal
+      const ensureCarbs = (opt) => {
+        if (!opt || typeof opt !== 'object') return opt;
+        
+        // For alternatives that have main and alternative arrays
+        if (opt.main && Array.isArray(opt.main)) {
+          return {
+            ...opt,
+            main: opt.main.map(item => ({
+              ...item,
+              carbs: item.carbs ?? 50 // Default carbs if missing
+            }))
+          };
+        }
+        
+        // For regular templates that are arrays
+        if (Array.isArray(opt)) {
+          return opt.map(item => ({
+            ...item,
+            carbs: item.carbs ?? 50 // Default carbs if missing
+          }));
+        }
+        
+        // For single items
+        return {
+          ...opt,
+          carbs: opt.carbs ?? 50 // Default carbs if missing
+        };
+      };
+
+      const normalizedTemplate = template.map(m => ({
+        meal: m.meal,
+        main: ensureCarbs(m.main),
+        alternative: ensureCarbs(m.alternative)
+      }));
+
+      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ template: normalizedTemplate, user_code: selectedClient.user_code }),
+      });
+      
+      if (!buildRes.ok) {
+        if (buildRes.status === 500) {
+          throw new Error("Server error while creating meals. Please try again in a moment.");
+        } else if (buildRes.status === 503) {
+          throw new Error("Meal creation service is temporarily unavailable. Please try again later.");
+        } else {
+          const errText = await buildRes.text().catch(() => '');
+          throw new Error(`Unable to create meals (Error ${buildRes.status}). ${errText || ''}`);
+        }
+      }
+      
+      const buildData = await buildRes.json();
+      if (buildData.error) {
+        if (buildData.error.includes("Template validation failed")) {
+          throw new Error("The meal plan doesn't meet the client's nutritional requirements. Please try generating a new menu.");
+        } else if (buildData.error.includes("Menu build failed")) {
+          throw new Error("Unable to create the complete meal plan. Please try again.");
+        } else {
+          throw new Error(`Meal creation failed: ${buildData.error}`);
+        }
+      }
+      
+      if (!buildData.menu) {
+        throw new Error("No meals were created. Please try generating the menu again.");
+      }
+
+      setProgress(60);
+      setProgressStep('🔢 Calculating nutrition values...');
+
+      const menuData = {
+        meals: buildData.menu,
+        totals: calculateMainTotals({ meals: buildData.menu }),
+        note: buildData.note || ''
+      };
+
+      setProgress(70);
+      setProgressStep('🛒 Adding product codes...');
+
+      // Step 3: Show menu immediately, then enrich with UPC codes in background
+      setMenu(menuData);
+      setOriginalMenu(menuData);
+      
+      setProgress(85);
+      setProgressStep('🌐 Preparing menu display...');
+
+      // Display the correct version based on the current language
+      if (language === 'he') {
+        setProgressStep('🌐 Translating to Hebrew...');
+        const translatedMenu = await translateMenu(menuData, 'he');
+        setMenu(translatedMenu);
+      }
+
+      setProgress(100);
+      setProgressStep('🎉 Menu ready!');
+
+      // Clear progress after a short delay to show completion
+      setTimeout(() => {
+        setProgress(0);
+        setProgressStep('');
+      }, 1500);
+
+      // Run UPC enrichment in the background (non-blocking)
+      console.log('🔄 Starting background UPC enrichment...');
+      setEnrichingUPC(true);
+      enrichMenuWithUPC(menuData).then(enrichedMenu => {
+        console.log('✅ Background UPC enrichment completed');
+        setOriginalMenu(enrichedMenu);
+        if (language === 'he') {
+          translateMenu(enrichedMenu, 'he').then(translatedEnrichedMenu => {
+            setMenu(translatedEnrichedMenu);
+          });
+        } else {
+          setMenu(enrichedMenu);
+        }
+        
+        // Automatically minimize the Meal Plan Structure section after successful menu generation
+        setIsMealPlanMinimized(true);
+        
+      }).catch(err => {
+        console.error('❌ Background UPC enrichment failed:', err);
+        // Menu is already displayed, so this is not critical
+      }).finally(() => {
+        setEnrichingUPC(false);
+      });
+
+    } catch (err) {
+      console.error("Error generating menu:", err);
+      setError(err.message || 'Failed to generate menu. Please try again.');
+      setProgress(0);
+      setProgressStep('');
+      // Clear the progress interval if it exists
+      if (typeof progressInterval !== 'undefined') {
+        clearInterval(progressInterval);
+      }
+    } finally {
+      setLoading(false);
+      // Clear the progress interval if it exists
+      if (typeof progressInterval !== 'undefined') {
+        clearInterval(progressInterval);
+      }
+    }
+  };
+
   const fetchMenu = async () => {
     if (!selectedClient) {
       setError('Please select a client before generating a menu.');
       return;
+    }
+
+    // Check if meal plan structure is empty or all meals have empty descriptions
+    const hasEmptyMealPlan = !mealPlanStructure || mealPlanStructure.length === 0;
+    const allMealsEmpty = mealPlanStructure && mealPlanStructure.every(meal => 
+      !meal.description || meal.description.trim() === ''
+    );
+
+    if (hasEmptyMealPlan || allMealsEmpty) {
+      setShowEmptyMealPlanDialog(true);
+      return; // Don't proceed until user confirms
     }
 
     // Clear any existing errors at the start
@@ -3096,7 +3568,7 @@ const MenuCreate = () => {
         } else if (templateRes.status === 503) {
           throw new Error("Menu generation service is temporarily unavailable. Please try again later.");
         } else {
-          throw new Error("Please check that you've added all the necessary information to the client profile (dietary preferences, restrictions, goals, etc.) and try again.");
+          throw new Error("Please fill all the client data in the client page (dietary preferences, restrictions, goals, physical information, etc.) and try again.");
         }
       }
       
@@ -3125,6 +3597,17 @@ const MenuCreate = () => {
       // Step 2: Build menu (50% progress)
       setProgress(30);
       setProgressStep('🍽️ Creating personalized meals...');
+
+      // Start gradual progress animation from 30% to 99% during meal generation
+      const progressInterval2 = setInterval(() => {
+        setProgress(prev => {
+          if (prev >= 99) {
+            clearInterval(progressInterval2);
+            return 99;
+          }
+          return prev + 1;
+        });
+      }, 2000); // Increment by 1% every 2 seconds (much slower progress)
 
       // Normalize template: ensure each option has carbs derived from (cal - 4P - 9F)/4 if missing
       const ensureCarbs = (opt) => {
@@ -3253,8 +3736,16 @@ const MenuCreate = () => {
       
       setProgress(0);
       setProgressStep('');
+      // Clear the progress interval if it exists
+      if (typeof progressInterval2 !== 'undefined') {
+        clearInterval(progressInterval2);
+      }
     } finally {
       setLoading(false);
+      // Clear the progress interval if it exists
+      if (typeof progressInterval2 !== 'undefined') {
+        clearInterval(progressInterval2);
+      }
     }
   };
 
@@ -3461,7 +3952,7 @@ const MenuCreate = () => {
           carbs: translatedMenu.totals?.carbs || 250,
           fat: translatedMenu.totals?.fat || 80,
         },
-        recommendations: translatedMenu.recommendations || {},
+        recommendations: recommendations, // Use the recommendations state
         dietary_restrictions: {},
         user_code: selectedClient?.user_code || null, // Use selected user's code
         dietitian_id: user.id
@@ -4137,6 +4628,55 @@ const MenuCreate = () => {
     });
   };
 
+  // Recommendations management functions
+  const addRecommendation = () => {
+    console.log('➕ Adding new recommendation...');
+    const newRecommendation = {
+      id: Date.now(),
+      category: 'general',
+      title: '',
+      content: '',
+      priority: 'medium'
+    };
+    console.log('📝 New recommendation object:', newRecommendation);
+    setEditingRecommendation(newRecommendation);
+    setShowRecommendationsDialog(true);
+  };
+
+  const editRecommendation = (recommendation) => {
+    setEditingRecommendation(recommendation);
+    setShowRecommendationsDialog(true);
+  };
+
+  const deleteRecommendation = (id) => {
+    setRecommendations(prev => prev.filter(rec => rec.id !== id));
+  };
+
+  const saveRecommendation = (recommendation) => {
+    console.log('💾 Saving recommendation:', recommendation);
+    console.log('📋 Current editingRecommendation:', editingRecommendation);
+    console.log('📋 Current recommendations list:', recommendations);
+    
+    if (editingRecommendation && editingRecommendation.id && recommendations.some(rec => rec.id === editingRecommendation.id)) {
+      console.log('🔄 Updating existing recommendation');
+      // Update existing recommendation (one that was already in the list)
+      setRecommendations(prev => 
+        prev.map(rec => rec.id === editingRecommendation.id ? recommendation : rec)
+      );
+    } else {
+      console.log('➕ Adding new recommendation to list');
+      // Add new recommendation
+      setRecommendations(prev => [...prev, recommendation]);
+    }
+    setShowRecommendationsDialog(false);
+    setEditingRecommendation(null);
+  };
+
+  const cancelRecommendationEdit = () => {
+    setShowRecommendationsDialog(false);
+    setEditingRecommendation(null);
+  };
+
   // Delete meal option (main or alternative) from a meal
   const deleteMealOption = (mealIndex, optionType) => {
     if (!menu || !menu.meals || mealIndex < 0 || mealIndex >= menu.meals.length) {
@@ -4250,10 +4790,13 @@ const MenuCreate = () => {
       {!menu && !loading && (() => {
         try {
           const savedMenu = localStorage.getItem('menuCreate_menu');
-          if (!savedMenu) return false;
-          const parsed = JSON.parse(savedMenu);
-          const savedAt = parsed._savedAt ? new Date(parsed._savedAt).toLocaleString() : 'Unknown time';
-          const savedUser = parsed._selectedUser?.full_name || 'Unknown client';
+          const savedRecommendations = localStorage.getItem('menuCreate_recommendations');
+          if (!savedMenu && !savedRecommendations) return false;
+          
+          const parsed = savedMenu ? JSON.parse(savedMenu) : null;
+          const savedAt = parsed?._savedAt ? new Date(parsed._savedAt).toLocaleString() : 'Unknown time';
+          const savedUser = parsed?._selectedUser?.full_name || 'Unknown client';
+          const hasRecommendations = savedRecommendations ? JSON.parse(savedRecommendations).length > 0 : false;
 
           return (
             <Alert className="border-blue-200 bg-blue-50">
@@ -4261,6 +4804,7 @@ const MenuCreate = () => {
               <AlertTitle className="text-blue-800">{translations.previousMenuFound || 'Previous Menu Found'}</AlertTitle>
               <AlertDescription className="text-blue-700">
                 {translations.previousMenuDescription || 'We found a previously generated menu for'} <strong>{savedUser}</strong> {translations.fromTime || 'from'} <strong>{savedAt}</strong>.
+                {hasRecommendations && <span className="block mt-1">💡 {translations.recommendationsAlsoFound || 'Recommendations were also found and will be restored.'}</span>}
                 {translations.continueOrStartFresh || 'Would you like to continue working on it or start fresh?'}
                 <div className="flex gap-3 mt-3">
                   <Button
@@ -4343,20 +4887,26 @@ const MenuCreate = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div className="flex flex-wrap gap-4">
-                <Button
-                  onClick={fetchMenu}
-                  disabled={loading || !selectedClient}
-                  className="bg-green-600 hover:bg-green-700 text-white px-6 py-3"
-                >
-                  {loading ? (
-                    <Loader className="animate-spin h-5 w-5 mr-2" />
-                  ) : (
+              {/* Show button only when not loading */}
+              {!loading && (
+                <div className="flex flex-wrap gap-4">
+                  <Button
+                    onClick={fetchMenu}
+                    disabled={!selectedClient}
+                    className="bg-green-600 hover:bg-green-700 text-white px-6 py-3"
+                  >
                     <span className="text-lg">🎯</span>
-                  )}
-                  {loading ? translations.generating || 'Generating...' : translations.generateMenu || 'Generate Menu'}
-                </Button>
-              </div>
+                    {translations.generateMenu || 'Generate Menu'}
+                  </Button>
+                </div>
+              )}
+              
+              {/* Loading Progress Indicator */}
+              {loading && (
+                <div className="mt-6">
+                  <WaterBarLoading />
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -4606,6 +5156,92 @@ const MenuCreate = () => {
               </div>
             </CardContent>
           )}
+        </Card>
+      )}
+
+      {/* Recommendations Section */}
+      {selectedClient && (
+        <Card className="border-purple-200 bg-purple-50/30 mb-6">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-purple-800">
+                <span>💡</span>
+                <CardTitle>{translations.recommendations || 'Recommendations'}</CardTitle>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={addRecommendation}
+                className="text-purple-600 border-purple-600 hover:bg-purple-50"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                {translations.addRecommendation || 'Add Recommendation'}
+              </Button>
+            </div>
+            <CardDescription className="text-purple-600">
+              {translations.recommendationsDescription || 'Add personalized recommendations for this meal plan'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {recommendations.length > 0 ? (
+              <div className="space-y-3">
+                {recommendations.map((rec, index) => (
+                  <div key={rec.id} className="bg-white rounded-lg p-4 border border-purple-200 shadow-sm">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <Badge 
+                          variant="outline" 
+                          className={`${
+                            rec.priority === 'high' ? 'bg-red-50 border-red-200 text-red-700' :
+                            rec.priority === 'medium' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
+                            'bg-green-50 border-green-200 text-green-700'
+                          }`}
+                        >
+                          {rec.priority === 'high' ? '🔴' : rec.priority === 'medium' ? '🟡' : '🟢'} {rec.priority}
+                        </Badge>
+                        <Badge variant="outline" className="bg-purple-50 border-purple-200 text-purple-700">
+                          {rec.category}
+                        </Badge>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => editRecommendation(rec)}
+                          className="text-blue-600 border-blue-600 hover:bg-blue-50"
+                        >
+                          ✏️
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            if (window.confirm(translations.confirmDeleteRecommendation || 'Are you sure you want to delete this recommendation?')) {
+                              deleteRecommendation(rec.id);
+                            }
+                          }}
+                          className="text-red-600 border-red-600 hover:bg-red-50"
+                        >
+                          🗑️
+                        </Button>
+                      </div>
+                    </div>
+                    <h4 className="font-semibold text-gray-900 mb-2">{rec.title}</h4>
+                    <p className="text-gray-700 text-sm leading-relaxed">{rec.content}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-gray-500">
+                <div className="text-4xl mb-2">💡</div>
+                <p className="text-sm">{translations.noRecommendations || 'No recommendations added yet'}</p>
+                <p className="text-xs mt-1">{translations.addRecommendationsPrompt || 'Click "Add Recommendation" to get started'}</p>
+              </div>
+            )}
+          </CardContent>
         </Card>
       )}
 
@@ -5343,6 +5979,73 @@ const MenuCreate = () => {
         ingredient={selectedIngredientForDialog}
         translations={translations}
       />
+
+      {/* Recommendations Dialog */}
+      <Dialog open={showRecommendationsDialog} onOpenChange={setShowRecommendationsDialog}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-purple-600">
+              <span className="text-2xl">💡</span>
+              {editingRecommendation ? (translations.editRecommendation || 'Edit Recommendation') : (translations.addRecommendation || 'Add Recommendation')}
+            </DialogTitle>
+            <DialogDescription className="text-gray-600 pt-2">
+              {translations.recommendationDialogDescription || 'Add personalized recommendations for this meal plan'}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <RecommendationForm
+            recommendation={editingRecommendation}
+            onSave={saveRecommendation}
+            onCancel={cancelRecommendationEdit}
+            translations={translations}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Empty Meal Plan Warning Dialog */}
+      <Dialog open={showEmptyMealPlanDialog} onOpenChange={setShowEmptyMealPlanDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <span className="text-2xl">⚠️</span>
+              {translations.emptyMealPlanWarning || 'Empty Meal Plan Warning'}
+            </DialogTitle>
+            <DialogDescription className="text-gray-600 pt-2">
+              {translations.emptyMealPlanMessage || "You didn't fill any of the meals. Are you sure you want to generate with no structure?"}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 my-4">
+            <div className="flex items-start gap-3">
+              <div className="text-amber-600 text-lg">💡</div>
+              <div>
+                <h4 className="font-medium text-amber-800 mb-1">
+                  {translations.whatThisMeans || 'What this means:'}
+                </h4>
+                <p className="text-sm text-amber-700">
+                  {translations.genericMealPlanExplanation || 'The system will create a generic meal plan without your specific preferences for each meal type. For better results, consider filling in meal descriptions in the Meal Plan Structure section.'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-3 sm:gap-3">
+            <Button
+              variant="outline"
+              onClick={handleEmptyMealPlanCancel}
+              className="flex-1 border-gray-300 text-gray-700 hover:bg-gray-50"
+            >
+              {translations.goBack || 'Go Back'}
+            </Button>
+            <Button
+              onClick={handleEmptyMealPlanConfirm}
+              className="flex-1 bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              {translations.continueAnyway || 'Continue Anyway'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
