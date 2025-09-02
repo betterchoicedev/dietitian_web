@@ -2736,11 +2736,28 @@ def api_update_user_profile():
         
         # Check if user exists by user_code
         try:
-            existing_user = supabase.table('chat_users').select('id').eq('user_code', user_code).execute()
+            existing_user = supabase.table('chat_users').select('id, email, phone_number').eq('user_code', user_code).execute()
             
             if existing_user.data:
                 # User exists, update their profile
                 user_id = existing_user.data[0]['id']
+                
+                # Check for duplicate user_code (should not happen for existing users, but check anyway)
+                user_code_check = supabase.table('chat_users').select('id').eq('user_code', user_code).neq('id', user_id).execute()
+                if user_code_check.data:
+                    return jsonify({"error": f"User code '{user_code}' is already in use by another user"}), 400
+                
+                # Check for duplicate email
+                if email:
+                    email_check = supabase.table('chat_users').select('id').eq('email', email).neq('id', user_id).execute()
+                    if email_check.data:
+                        return jsonify({"error": f"Email '{email}' is already in use by another user"}), 400
+                
+                # Check for duplicate phone number
+                if phone_number:
+                    phone_check = supabase.table('chat_users').select('id').eq('phone_number', phone_number).neq('id', user_id).execute()
+                    if phone_check.data:
+                        return jsonify({"error": f"Phone number '{phone_number}' is already in use by another user"}), 400
                 
                 # Prepare update data
                 update_data = {
@@ -2777,6 +2794,23 @@ def api_update_user_profile():
                     
             else:
                 # User doesn't exist, create new user with the provided user_code
+                # Check for duplicate user_code
+                user_code_check = supabase.table('chat_users').select('id').eq('user_code', user_code).execute()
+                if user_code_check.data:
+                    return jsonify({"error": f"User code '{user_code}' is already in use"}), 400
+                
+                # Check for duplicate email
+                if email:
+                    email_check = supabase.table('chat_users').select('id').eq('email', email).execute()
+                    if email_check.data:
+                        return jsonify({"error": f"Email '{email}' is already in use by another user"}), 400
+                
+                # Check for duplicate phone number
+                if phone_number:
+                    phone_check = supabase.table('chat_users').select('id').eq('phone_number', phone_number).execute()
+                    if phone_check.data:
+                        return jsonify({"error": f"Phone number '{phone_number}' is already in use by another user"}), 400
+                
                 # Prepare insert data
                 insert_data = {
                     "user_code": user_code,

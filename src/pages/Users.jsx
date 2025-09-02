@@ -87,8 +87,8 @@ export default function Clients() {
   const [showAll, setShowAll] = useState(false);
   
   // Sorting and filtering state
-  const [sortField, setSortField] = useState('full_name');
-  const [sortDirection, setSortDirection] = useState('asc');
+  const [sortField, setSortField] = useState('created_at');
+  const [sortDirection, setSortDirection] = useState('desc');
   const [filters, setFilters] = useState({
     goal: 'all',
     activity: 'all',
@@ -678,6 +678,12 @@ export default function Clients() {
         bValue = parseFloat(bValue) || 0;
       }
       
+      // Handle date fields
+      if (sortField === 'created_at') {
+        aValue = a.created_at ? new Date(a.created_at) : new Date(0);
+        bValue = b.created_at ? new Date(b.created_at) : new Date(0);
+      }
+      
       // Handle string comparison
       if (typeof aValue === 'string' && typeof bValue === 'string') {
         aValue = aValue.toLowerCase();
@@ -1097,11 +1103,42 @@ export default function Clients() {
     setError(null);
     
     try {
+      // First, check if client has associated meal plans
+      const { Menu } = await import('@/api/entities');
+      const clientMenus = await Menu.filter({ user_code: clientId });
+      
+      if (clientMenus && clientMenus.length > 0) {
+        const confirmDeleteAll = window.confirm(
+          `This client has ${clientMenus.length} meal plan(s) associated with them. Do you want to delete the client and ALL their meal plans? This action cannot be undone.`
+        );
+        
+        if (!confirmDeleteAll) {
+          setDeleteLoading(null);
+          return;
+        }
+        
+        // Delete all meal plans first
+        console.log(`Deleting ${clientMenus.length} meal plans for client ${clientId}`);
+        for (const menu of clientMenus) {
+          try {
+            await Menu.delete(menu.id);
+            console.log(`✅ Deleted meal plan: ${menu.meal_plan_name || menu.id}`);
+          } catch (menuError) {
+            console.error(`❌ Failed to delete meal plan ${menu.id}:`, menuError);
+            // Continue with other meal plans even if one fails
+          }
+        }
+      }
+      
+      // Now delete the client
       await ChatUser.delete(clientId);
       await loadClients(); // Reload the clients list
       
       // Show success message
-      alert(`${translations.clientDeleted}: ${clientName}`);
+      const message = clientMenus && clientMenus.length > 0 
+        ? `${translations.clientDeleted}: ${clientName} (and ${clientMenus.length} meal plan(s))`
+        : `${translations.clientDeleted}: ${clientName}`;
+      alert(message);
       
     } catch (error) {
       console.error('Error deleting client:', error);
@@ -2066,6 +2103,15 @@ export default function Clients() {
                     </TableHead>
                     <TableHead>{translations.region}</TableHead>
                     <TableHead>{translations.meals}</TableHead>
+                    <TableHead 
+                      className="cursor-pointer hover:bg-gray-50"
+                      onClick={() => handleSort('created_at')}
+                    >
+                      <div className="flex items-center gap-1">
+                        {translations.createdAt || 'Created'}
+                        {getSortIcon('created_at')}
+                      </div>
+                    </TableHead>
                     <TableHead className="text-right">{translations.actions}</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -2190,6 +2236,20 @@ export default function Clients() {
                               {client.number_of_meals || '—'} {translations.meals}
                             </Badge>
                           </TableCell>
+                          <TableCell>
+                            <div className="text-sm text-gray-600">
+                              {client.created_at ? (
+                                <div>
+                                  <div>{new Date(client.created_at).toLocaleDateString()}</div>
+                                  <div className="text-xs text-gray-400">
+                                    {new Date(client.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </div>
+                          </TableCell>
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-1">
                               <Button
@@ -2222,7 +2282,7 @@ export default function Clients() {
                     })
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={10} className="text-center py-6 text-gray-500">
+                      <TableCell colSpan={11} className="text-center py-6 text-gray-500">
                         {searchTerm ? translations.noClientsFound : translations.noClientsFoundGeneral}
                       </TableCell>
                     </TableRow>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ArrowLeft, Loader, Save, Search, Filter, Utensils, Edit, CalendarRange, Download } from 'lucide-react';
+import { ArrowLeft, Loader, Save, Search, Filter, Utensils, Edit, CalendarRange, Download, Trash2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useNavigate } from 'react-router-dom';
 import { Menu } from '@/api/entities';
@@ -308,6 +308,7 @@ const MenuLoad = () => {
   const [loading, setLoading] = useState(false);
   const [userTargets, setUserTargets] = useState(null);
   const [loadingUserTargets, setLoadingUserTargets] = useState(false);
+  const [deletingMenu, setDeletingMenu] = useState(null);
   const navigate = useNavigate();
   const { language, translations } = useLanguage();
   const { selectedClient } = useClient();
@@ -1007,6 +1008,42 @@ const MenuLoad = () => {
       setError('Failed to update menu status: ' + error.message);
     } finally {
       setUpdatingStatus(false);
+    }
+  };
+
+  const handleDeleteMenu = async (menu) => {
+    const menuName = menu.meal_plan_name || 'Untitled Menu';
+    const userCode = menu.user_code || 'Unknown Client';
+    
+    if (!window.confirm(`${translations.confirmDeleteMenu || 'Are you sure you want to delete'} "${menuName}" ${translations.forClient || 'for client'} ${userCode}? ${translations.deleteWarning || 'This action cannot be undone.'}`)) {
+      return;
+    }
+    
+    setDeletingMenu(menu.id);
+    setError(null);
+    
+    try {
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !user) {
+        setError('You must be logged in to delete menus');
+        return;
+      }
+
+      await Menu.delete(menu.id);
+      console.log('✅ Menu deleted successfully:', menu.id);
+      
+      // Show success message
+      alert(`${translations.menuDeleted || 'Menu deleted successfully'}: ${menuName}`);
+      
+      // Refresh the menu list
+      loadMenus();
+      
+    } catch (error) {
+      console.error('Error deleting menu:', error);
+      setError(`${translations.failedToDeleteMenu || 'Failed to delete menu'}: ${error.message}`);
+    } finally {
+      setDeletingMenu(null);
     }
   };
 
@@ -2367,17 +2404,35 @@ const MenuLoad = () => {
                     {translations.loadAndEditMenu || 'Load & Edit Menu'}
                   </Button>
                   
-                  <Button 
-                    variant="outline"
-                    className="w-full border-blue-300 text-blue-700 hover:bg-blue-50"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleStatusChange(menu);
-                    }}
-                  >
-                    <span className="text-sm">⚙️</span>
-                    {translations.manageStatus || 'Manage Status'}
-                  </Button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button 
+                      variant="outline"
+                      className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleStatusChange(menu);
+                      }}
+                    >
+                      <span className="text-sm">⚙️</span>
+                      {translations.manageStatus || 'Manage Status'}
+                    </Button>
+                    
+                    <Button 
+                      variant="outline"
+                      className="border-red-300 text-red-700 hover:bg-red-50"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteMenu(menu);
+                      }}
+                      disabled={deletingMenu === menu.id}
+                    >
+                      {deletingMenu === menu.id ? (
+                        <Loader className="animate-spin h-4 w-4" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>

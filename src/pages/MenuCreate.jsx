@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { ArrowLeft, Loader, Save, Clock, Utensils, CalendarRange, ArrowRight, RefreshCw, Plus, ArrowUp, ArrowDown, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Menu } from '@/api/entities';
+import { Menu, ChatUser } from '@/api/entities';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from "@/components/ui/separator";
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -1350,6 +1350,16 @@ const MenuCreate = () => {
 
   // Use global client selection from ClientContext instead of local state
   const { selectedClient } = useClient();
+  
+  // Local state for number of meals (can be different from selectedClient during editing)
+  const [numberOfMeals, setNumberOfMeals] = useState(() => selectedClient?.number_of_meals || 4);
+  
+  // Update local numberOfMeals when selectedClient changes
+  useEffect(() => {
+    if (selectedClient?.number_of_meals) {
+      setNumberOfMeals(selectedClient.number_of_meals);
+    }
+  }, [selectedClient?.number_of_meals]);
 
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [userTargets, setUserTargets] = useState(() => {
@@ -1367,12 +1377,61 @@ const MenuCreate = () => {
   const [generatingAlt, setGeneratingAlt] = useState({});
   
   // Meal Plan Structure state
-  const getDefaultMealPlanStructure = (t) => ([
+  const getDefaultMealPlanStructure = (t, numberOfMeals = 4) => {
+    const baseMeals = [
+      { key: 'breakfast', meal: t.breakfast || 'Breakfast', calories_pct: 0, description: '', calories: 0, locked: false },
+      { key: 'lunch', meal: t.lunch || 'Lunch', calories_pct: 0, description: '', calories: 0, locked: false },
+      { key: 'dinner', meal: t.dinner || 'Dinner', calories_pct: 0, description: '', calories: 0, locked: false },
+      { key: 'snacks', meal: t.snacks || 'Snack', calories_pct: 0, description: '', calories: 0, locked: false },
+    ];
+
+    // If numberOfMeals is specified and different from default, create custom structure
+    if (numberOfMeals && numberOfMeals !== 4) {
+      const customMeals = [];
+      const mealNames = [
+        t.breakfast || 'Breakfast',
+        t.lunch || 'Lunch', 
+        t.dinner || 'Dinner',
+        t.snacks || 'Snack'
+      ];
+      
+      // Add additional meal names for more than 4 meals
+      if (numberOfMeals > 4) {
+        for (let i = 4; i < numberOfMeals; i++) {
+          mealNames.push(`Meal ${i + 1}`);
+        }
+      }
+      
+      // Create meals based on numberOfMeals
+      for (let i = 0; i < numberOfMeals; i++) {
+        const mealName = mealNames[i] || `Meal ${i + 1}`;
+        const key = i < 4 ? baseMeals[i].key : `meal_${i + 1}`;
+        customMeals.push({
+          key,
+          meal: mealName,
+          calories_pct: 0,
+          description: '',
+          calories: 0,
+          locked: false
+        });
+      }
+      
+      // Distribute calories evenly
+      const caloriesPerMeal = Math.round(100 / numberOfMeals * 10) / 10;
+      return customMeals.map(meal => ({
+        ...meal,
+        calories_pct: caloriesPerMeal
+      }));
+    }
+    
+    // Default 4-meal structure with traditional percentages
+    return [
     { key: 'breakfast', meal: t.breakfast || 'Breakfast', calories_pct: 30, description: '', calories: 0, locked: false },
-    { key: 'lunch',      meal: t.lunch || 'Lunch',         calories_pct: 30, description: '', calories: 0, locked: false },
-    { key: 'dinner',     meal: t.dinner || 'Dinner',       calories_pct: 30, description: '', calories: 0, locked: false },
-    { key: 'snacks',     meal: t.snacks || 'Snack',        calories_pct: 10, description: '', calories: 0, locked: false },
-  ]);
+      { key: 'lunch', meal: t.lunch || 'Lunch', calories_pct: 30, description: '', calories: 0, locked: false },
+      { key: 'dinner', meal: t.dinner || 'Dinner', calories_pct: 30, description: '', calories: 0, locked: false },
+      { key: 'snacks', meal: t.snacks || 'Snack', calories_pct: 10, description: '', calories: 0, locked: false },
+    ];
+  };
 
   const normalize = (s) => (s || '').toString().trim().toLowerCase();
   const inferMealKey = (name) => {
@@ -1389,7 +1448,11 @@ const MenuCreate = () => {
     return undefined;
   };
 
-  const [mealPlanStructure, setMealPlanStructure] = useState(() => getDefaultMealPlanStructure(translations));
+  const [mealPlanStructure, setMealPlanStructure] = useState(() => {
+    // Initialize with numberOfMeals if available
+    const meals = numberOfMeals || selectedClient?.number_of_meals || 4;
+    return getDefaultMealPlanStructure(translations, meals);
+  });
 
   // When language changes, update default meal labels while preserving user edits
   useEffect(() => {
@@ -2311,6 +2374,26 @@ const MenuCreate = () => {
     setShowPortionDialog(false);
     setSelectedIngredientForDialog(null);
     setDialogIngredientContext(null);
+  };
+
+  // Handle number of meals change
+  const handleNumberOfMealsChange = async (newNumberOfMeals) => {
+    if (!selectedClient || newNumberOfMeals < 1 || newNumberOfMeals > 10) return;
+    
+    setNumberOfMeals(newNumberOfMeals);
+    
+    // Update meal plan structure based on new number of meals
+    const newStructure = getDefaultMealPlanStructure(translations, newNumberOfMeals);
+    setMealPlanStructure(newStructure);
+    
+    // Save to client profile
+    try {
+      await ChatUser.update(selectedClient.user_code, { number_of_meals: newNumberOfMeals });
+      console.log('✅ Updated number of meals for client:', newNumberOfMeals);
+    } catch (error) {
+      console.error('❌ Failed to update number of meals:', error);
+      setError('Failed to update number of meals: ' + error.message);
+    }
   };
 
   const handleConfirmPortionDialog = (updatedIngredient) => {
@@ -4871,6 +4954,41 @@ const MenuCreate = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Number of Meals per Day Section */}
+      {selectedClient && (
+        <Card className="border-purple-200 bg-purple-50/30">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-purple-800">
+              <span>🍽️</span>
+              {translations.numberOfMeals || 'Number of Meals per Day'}
+            </CardTitle>
+            <CardDescription className="text-purple-600">
+              {translations.configureMealsPerDay || 'Configure how many meals this client has per day'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-purple-700">
+                  {translations.mealsPerDay || 'Meals per day'}:
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={numberOfMeals}
+                  onChange={(e) => handleNumberOfMealsChange(parseInt(e.target.value) || 4)}
+                  className="w-20 px-3 py-1 border border-purple-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                />
+              </div>
+              <div className="text-sm text-purple-600">
+                {translations.currentValue || 'Current'}: {numberOfMeals} {translations.meals || 'meals'}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* User Targets Display */}
       {/* Menu Generation Section */}
