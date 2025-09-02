@@ -295,6 +295,13 @@ def api_translate_text():
 
 @app.route("/api/translate", methods=["POST"])
 def api_translate_menu():
+    """
+    Translate menu text while preserving nutritional values and measurements.
+    
+    This endpoint translates ingredient names and household measures but preserves
+    the original nutritional values (calories, protein, fat, carbs) and gram amounts
+    to prevent values from changing during translation.
+    """
     data = request.get_json()
     menu = data.get("menu", {})
     target = data.get("targetLang", "he")
@@ -403,7 +410,7 @@ def api_translate_menu():
         resp = requests.post(url, headers=headers, json=body)
         resp.raise_for_status()
         translations = resp.json()   # a list, same length as body
-    # 4. Restore placeholders with Hebrew terms
+    # 4. Restore placeholders with Hebrew terms and preserve nutritional values
     new_menu = deepcopy(menu)
     for idx, trans_item in enumerate(translations):
         translated = trans_item["translations"][0]["text"]
@@ -415,6 +422,59 @@ def api_translate_menu():
         for key in path[:-1]:
             obj = obj[key]
         obj[path[-1]] = translated
+
+    # 5. Preserve original nutritional values and gram amounts after translation
+    # This prevents nutritional values from changing during translation
+    if menu.get("meals"):
+        for mi, meal in enumerate(menu.get("meals", [])):
+            original_meal = menu["meals"][mi]
+            translated_meal = new_menu["meals"][mi]
+            
+            # Preserve values for main and alternative options
+            for optKey in ("main", "alternative"):
+                if optKey in original_meal and optKey in translated_meal:
+                    original_opt = original_meal[optKey]
+                    translated_opt = translated_meal[optKey]
+                    
+                    if "ingredients" in original_opt and "ingredients" in translated_opt:
+                        for ii, original_ing in enumerate(original_opt["ingredients"]):
+                            if ii < len(translated_opt["ingredients"]):
+                                translated_ing = translated_opt["ingredients"][ii]
+                                
+                                # Preserve nutritional values and gram amounts
+                                nutritional_fields = ["calories", "protein", "fat", "carbs", "portionSI(gram)"]
+                                for field in nutritional_fields:
+                                    if field in original_ing:
+                                        translated_ing[field] = original_ing[field]
+                                
+                                # Preserve other important fields that shouldn't change
+                                preserve_fields = ["brand of pruduct", "UPC"]
+                                for field in preserve_fields:
+                                    if field in original_ing:
+                                        translated_ing[field] = original_ing[field]
+            
+            # Preserve values for alternatives array if it exists
+            if "alternatives" in original_meal and "alternatives" in translated_meal:
+                for ai, original_alt in enumerate(original_meal["alternatives"]):
+                    if ai < len(translated_meal["alternatives"]):
+                        translated_alt = translated_meal["alternatives"][ai]
+                        
+                        if "ingredients" in original_alt and "ingredients" in translated_alt:
+                            for ii, original_ing in enumerate(original_alt["ingredients"]):
+                                if ii < len(translated_alt["ingredients"]):
+                                    translated_ing = translated_alt["ingredients"][ii]
+                                    
+                                    # Preserve nutritional values and gram amounts
+                                    nutritional_fields = ["calories", "protein", "fat", "carbs", "portionSI(gram)"]
+                                    for field in nutritional_fields:
+                                        if field in original_ing:
+                                            translated_ing[field] = original_ing[field]
+                                    
+                                    # Preserve other important fields
+                                    preserve_fields = ["brand of pruduct", "UPC"]
+                                    for field in preserve_fields:
+                                        if field in original_ing:
+                                            translated_ing[field] = original_ing[field]
 
     # Clean ingredient names before returning
     cleaned_menu = clean_ingredient_names(new_menu)

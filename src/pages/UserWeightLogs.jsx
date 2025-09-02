@@ -105,7 +105,7 @@ export default function UserWeightLogs() {
   // Check if current language is Hebrew (RTL)
   const isRTL = language === 'he';
 
-  // Add RTL-specific styles for charts
+  // Add RTL-specific styles for charts to force LTR direction
   useEffect(() => {
     const style = document.createElement('style');
     style.textContent = `
