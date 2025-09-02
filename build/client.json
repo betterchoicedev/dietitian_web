@@ -1,0 +1,24 @@
+{
+    "id": "client-1",
+    "full_name": "Roee Bina",
+    "email": "roee.bina@example.com",
+    "phone": "+972-50-1234567",
+    "user_code": "AABBCC",
+    "user_id_number": 1111,
+    "height": 182,
+    "weight": 77,
+    "age": 28,
+    "gender": "male",
+    "activity_level": "moderate",
+    "goal": "maintain",
+    "dietary_restrictions": ["Pork", "Shellfish"],
+    "notes": "Active lifestyle, follows a personalized nutrition plan",
+    "meals": 5,
+    "client_preference":[
+      "loves pasta"
+    ] 
+
+   
+  }
+  
+  
