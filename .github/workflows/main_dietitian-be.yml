@@ -16,15 +16,36 @@ jobs:
       # (optional) local tests
       - name: Install deps for local checks
         run: |
-          cd backend
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pwd
+          ls -la
+          if [ -d "backend" ]; then
+            echo "Backend directory found"
+            cd backend
+            ls -la
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+          else
+            echo "Backend directory not found, checking current directory"
+            ls -la
+            if [ -f "requirements.txt" ]; then
+              python -m pip install --upgrade pip
+              pip install -r requirements.txt
+            else
+              echo "requirements.txt not found in current directory"
+              exit 1
+            fi
+          fi
 
       # package only the backend folder contents (not the folder itself)
       - name: Zip backend for Azure
         run: |
-          cd backend
-          find . -type f -not -path "./venv/*" -not -path "./__pycache__/*" -exec zip ../backend.zip {} \;
+          if [ -d "backend" ]; then
+            cd backend
+            find . -type f -not -path "./venv/*" -not -path "./__pycache__/*" -not -path "./myenv/*" -exec zip ../backend.zip {} \;
+          else
+            echo "Backend directory not found for zipping"
+            exit 1
+          fi
 
       - name: Deploy to App Service
         uses: azure/webapps-deploy@v3
