@@ -1,6 +1,6 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-import openai
+from openai import AzureOpenAI
 import os
 import json
 from dotenv import load_dotenv
@@ -621,17 +621,18 @@ def load_user_preferences(user_code=None):
         raise Exception(f"Failed to load user preferences: {str(e)}")
 
 # Azure OpenAI config
-openai.api_type = "azure"
-openai.api_base = os.getenv("AZURE_OPENAI_API_BASE")
-openai.api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
-openai.api_key = os.getenv("AZURE_OPENAI_API_KEY")
+client = AzureOpenAI(
+    api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
+    azure_endpoint=os.getenv("AZURE_OPENAI_API_BASE"),
+    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+)
 
-deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "obi1")
+deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "obi2")
 
 def require_api_key(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not openai.api_key:
+        if not os.getenv("AZURE_OPENAI_API_KEY"):
             logger.error("API key not configured")
             return jsonify({"error": "Service not configured properly"}), 503
         return f(*args, **kwargs)
@@ -796,13 +797,13 @@ Generate meal options that are practical, delicious, and respect all dietary res
 
             # logger.info("🧠 Sending to OpenAI (/template):\nSystem: %s\nUser: %s", system_prompt, user_prompt["content"])
 
-            response = openai.ChatCompletion.create(
-                engine=deployment,
+            response = client.chat.completions.create(
+                model=deployment,
                 messages=[{"role": "system", "content": system_prompt}, user_prompt],
                 temperature=0.1
             )
 
-            result = response["choices"][0]["message"]["content"]
+            result = response.choices[0].message.content
             logger.info("✅ Raw response from OpenAI (/template):\n%s", result)
 
             try:
@@ -894,14 +895,14 @@ def calculate_totals(meals):
     return totals
 
 # ---------- Helpers & Prompt (top-level) ----------
-
 MEAL_BUILDER_PROMPT = """You are a professional HEALTHY dietitian AI.
 
 TASK
 Build the {option_type} option for ONE meal using the exact macro targets provided.
 Return JSON ONLY (no markdown, no comments).
-
+critical: you must out the ingredients true macros and calories, make sure you read the data and not guess.
 #  🔑  PRIMARY SUCCESS CRITERIA  🔑
+• 
 • Calories and protein from the *template* are **top priority**.  
   – They must be hit with 0 % tolerance.  
   – If you must make tiny trade-offs, adjust carbs and fat *before* calories or protein.  
@@ -1058,15 +1059,15 @@ def _build_option_with_retries(
             "preferences": preferences
         }
 
-        response = openai.ChatCompletion.create(
-            engine=deployment,
+        response = client.chat.completions.create(
+            model=deployment,
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)}
             ],
             temperature=0.1
         )
-        raw = _strip_markdown_fences(response["choices"][0]["message"]["content"])
+        raw = _strip_markdown_fences(response.choices[0].message.content)
 
         try:
             candidate = json.loads(raw)
@@ -2100,15 +2101,15 @@ If there were dietary restriction violations, ensure strict compliance.
                 "user_preferences": preferences
             }
 
-            response = openai.ChatCompletion.create(
-                engine=deployment,
+            response = client.chat.completions.create(
+                model=deployment,
                 messages=[
                     {"role": "system", "content": enhanced_system_prompt},
                     {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)}
                 ],
                 temperature=0
             )
-            raw = _strip_markdown_fences(response["choices"][0]["message"]["content"])
+            raw = _strip_markdown_fences(response.choices[0].message.content)
 
             try:
                 candidate = json.loads(raw)
@@ -2456,15 +2457,15 @@ def generate_alternative_meal_by_id():
         })
     }
     try:
-        response = openai.ChatCompletion.create(
-            engine=deployment,
+        response = client.chat.completions.create(
+            model=deployment,
             messages=[
                 {"role": "system", "content": system_prompt},
                 user_prompt
             ],
             temperature=0
         )
-        raw = response["choices"][0]["message"]["content"]
+        raw = response.choices[0].message.content
         try:
             parsed = json.loads(raw)
             # Clean ingredient names in the generated alternative meal
@@ -2645,8 +2646,8 @@ Write this as a comprehensive, structured prompt that can be directly used as in
         try:
             logger.info("🧠 Sending eating habits analysis to OpenAI")
             
-            response = openai.ChatCompletion.create(
-                deployment_id=deployment,
+            response = client.chat.completions.create(
+                model=deployment,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": "Please analyze my eating habits and create a comprehensive menu generation prompt."}
@@ -3171,8 +3172,8 @@ Convert "{from_measurement}" of "{ingredient}" to {to_type} measurement.
 Please provide the most accurate conversion based on nutritional and culinary standards."""
 
         # Call Azure OpenAI
-        response = openai.ChatCompletion.create(
-            engine=deployment,
+        response = client.chat.completions.create(
+            model=deployment,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -3181,7 +3182,7 @@ Please provide the most accurate conversion based on nutritional and culinary st
             max_tokens=200
         )
 
-        raw_response = response["choices"][0]["message"]["content"]
+        raw_response = response.choices[0].message.content
         logger.info(f"🤖 Raw AI response: {raw_response}")
 
         # Parse the JSON response
