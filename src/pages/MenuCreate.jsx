@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { ArrowLeft, Loader, Save, Clock, Utensils, CalendarRange, ArrowRight, RefreshCw, Plus, ArrowUp, ArrowDown, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Menu, ChatUser } from '@/api/entities';
+import { Menu } from '@/api/entities';
+import { entities } from '@/api/client';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from "@/components/ui/separator";
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -543,7 +544,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
         calories: nutritionData.Energy || 0,
         protein: nutritionData.Protein || 0,
         fat: nutritionData.Total_lipid__fat_ || 0,
-        carbs: nutritionData.Carbohydrate || 0,
+        carbs: nutritionData.Carbohydrate__by_difference || 0,
         'brand of pruduct': nutritionData.brand || '',
         UPC: suggestion.gtinUpc || nutritionData.gtinUpc || null,
         'portionSI(gram)': finalPortionGrams || suggestion['portionSI(gram)'] || null
@@ -1488,6 +1489,11 @@ const MenuCreate = () => {
       return [];
     }
   });
+  
+  // State for client recommendations from chat_users table
+  const [clientRecommendations, setClientRecommendations] = useState([]);
+  const [loadingClientRecommendations, setLoadingClientRecommendations] = useState(false);
+  
   const [showRecommendationsDialog, setShowRecommendationsDialog] = useState(false);
   const [editingRecommendation, setEditingRecommendation] = useState(null);
   
@@ -2576,62 +2582,33 @@ const MenuCreate = () => {
         return null;
       }
 
-      // Test database connectivity first
-      console.log('🔍 Testing database connectivity...');
-      const { data: testData, error: testError } = await supabase
-        .from('chat_users')
-        .select('user_code')
-        .limit(1);
-      
-      console.log('🔍 Database connectivity test:', { testData, testError });
-      
-      if (testError) {
-        console.error('❌ Database connectivity issue:', testError);
-        setError('Database connection issue: ' + testError.message);
-        return null;
-      }
+      // Use the client.js API to get user data
+      console.log('🔍 Fetching user data using client.js API for user_code:', userCode);
+      const userData = await entities.ChatUser.getByUserCode(userCode);
 
-      console.log('🔍 Querying database for user_code:', userCode);
-      const { data, error } = await supabase
-        .from('chat_users')
-        .select('dailyTotalCalories, macros, region, food_allergies, food_limitations, age, gender, weight_kg, height_cm, client_preference, meal_plan_structure')
-        .eq('user_code', userCode)
-        .single();
+      console.log('📊 Client API response:', userData);
+      console.log('📊 User data keys:', userData ? Object.keys(userData) : 'No user data');
 
-      console.log('📊 Database response:', { data, error });
-
-      if (error) {
-        console.error('❌ Error fetching user targets:', error);
-        if (error.code === 'PGRST116') {
-          // No rows returned
+      if (!userData) {
           console.error('❌ No user found with code:', userCode);
           setError(`No user found with code: ${userCode}. Please check if the user exists in the database.`);
-        } else {
-          setError('Failed to load user targets: ' + error.message);
-        }
         return null;
       }
 
-      if (!data) {
-        console.error('❌ No data returned from database');
-        setError('No data returned from database for user: ' + userCode);
-        return null;
-      }
-
-      console.log('✅ Fetched user targets:', data);
+      console.log('✅ Fetched user targets:', userData);
 
       // Check if essential fields are missing
       const missingFields = [];
-      if (!data.dailyTotalCalories) missingFields.push('dailyTotalCalories');
-      if (!data.macros) missingFields.push('macros');
+      if (!userData.dailyTotalCalories) missingFields.push('dailyTotalCalories');
+      if (!userData.macros) missingFields.push('macros');
       
       if (missingFields.length > 0) {
         console.warn('⚠️ Missing essential fields:', missingFields);
-        console.log('Available data:', data);
+        console.log('Available data:', userData);
       }
 
       // Parse macros if it's a string
-      let parsedMacros = data.macros;
+      let parsedMacros = userData.macros;
       if (typeof parsedMacros === 'string') {
         try {
           parsedMacros = JSON.parse(parsedMacros);
@@ -2655,28 +2632,28 @@ const MenuCreate = () => {
       };
 
       const userTargetsData = {
-        calories: data.dailyTotalCalories || 2000,
+        calories: userData.dailyTotalCalories || 2000,
         macros: {
           protein: parseFloat(parsedMacros?.protein?.replace('g', '') || '150'),
           fat: parseFloat(parsedMacros?.fat?.replace('g', '') || '80'),
           carbs: parseFloat(parsedMacros?.carbs?.replace('g', '') || '250')
         },
-        region: data.region || 'israel',
-        allergies: parseArrayField(data.food_allergies),
-        limitations: parseArrayField(data.food_limitations),
-        age: data.age,
-        gender: data.gender,
-        weight_kg: data.weight_kg,
-        height_cm: data.height_cm,
-        client_preference: parseArrayField(data.client_preference),
-        meal_plan_structure: parseArrayField(data.meal_plan_structure)
+        region: userData.region || 'israel',
+        allergies: parseArrayField(userData.food_allergies),
+        limitations: parseArrayField(userData.food_limitations),
+        age: userData.age,
+        gender: userData.gender,
+        weight: userData.weight_kg,
+        height: userData.height_cm,
+        client_preference: userData.client_preference || {},
+        meal_plan_structure: userData.meal_plan_structure || {}
       };
 
       console.log('✅ Processed user targets:', userTargetsData);
       setUserTargets(userTargetsData);
       
       // Set meal plan structure with fallback to default
-      const loadedMealPlan = parseArrayField(data.meal_plan_structure);
+      const loadedMealPlan = userData.meal_plan_structure;
       if (loadedMealPlan && loadedMealPlan.length > 0) {
         // Add locked property to each meal (default to false)
         const mealPlanWithLocks = loadedMealPlan.map(meal => ({
@@ -2700,6 +2677,123 @@ const MenuCreate = () => {
       return null;
     } finally {
       setLoadingUserTargets(false);
+    }
+  };
+
+  // Load client recommendations from chat_users table
+  const fetchClientRecommendations = async (userCode) => {
+    try {
+      setLoadingClientRecommendations(true);
+      console.log('📋 Fetching client recommendations for user:', userCode);
+
+      if (!userCode) {
+        console.log('⚠️ No user code provided for client recommendations');
+        return;
+      }
+
+      // Use the client.js API to get user data with recommendations
+      const userData = await entities.ChatUser.getByUserCode(userCode);
+      
+      console.log('📋 Full user data from client.js API:', userData);
+      console.log('📋 Recommendations field:', userData?.recommendations);
+      
+      if (userData && userData.recommendations) {
+        let recommendations = userData.recommendations;
+        
+        // Parse recommendations if they're stored as a string
+        if (typeof recommendations === 'string') {
+          try {
+            recommendations = JSON.parse(recommendations);
+          } catch (e) {
+            console.warn('Failed to parse recommendations as JSON:', e);
+            recommendations = {};
+          }
+        }
+        
+        console.log('📋 Parsed recommendations:', recommendations);
+        console.log('📋 Recommendations type:', typeof recommendations);
+        console.log('📋 Is array:', Array.isArray(recommendations));
+        console.log('📋 Is object:', typeof recommendations === 'object' && recommendations !== null);
+        
+        // Handle both array and object formats
+        let clientRecs = [];
+        
+        if (Array.isArray(recommendations)) {
+          // Handle array format
+          clientRecs = recommendations.map((rec, index) => {
+            if (typeof rec === 'object' && rec !== null) {
+              return {
+                ...rec,
+                id: `client_${userCode}_${index}`,
+                source: 'client',
+                client_user_code: userCode
+              };
+            } else {
+              // Handle simple string recommendations
+              return {
+                id: `client_${userCode}_${index}`,
+                title: 'Client Recommendation',
+                content: String(rec),
+                category: 'general',
+                priority: 'medium',
+                source: 'client',
+                client_user_code: userCode
+              };
+            }
+          });
+        } else if (typeof recommendations === 'object' && recommendations !== null) {
+          // Handle object format (like your database structure)
+          clientRecs = Object.entries(recommendations).map(([category, content], index) => {
+            console.log(`📋 Processing recommendation ${index}:`, { category, content, contentType: typeof content });
+            
+            // Ensure content is a string and make it user-friendly
+            let contentStr = content;
+            if (typeof content === 'object' && content !== null) {
+              // If it's an object, try to extract meaningful text
+              if (content.text) {
+                contentStr = content.text;
+              } else if (content.content) {
+                contentStr = content.content;
+              } else if (content.message) {
+                contentStr = content.message;
+              } else {
+                // Fallback to a clean string representation
+                contentStr = Object.values(content).join(' ');
+              }
+            } else {
+              contentStr = String(content);
+            }
+            
+            return {
+              id: `client_${userCode}_${index}`,
+              title: `${category.charAt(0).toUpperCase() + category.slice(1)} Recommendation`,
+              content: contentStr,
+              category: category,
+              priority: 'medium',
+              source: 'client',
+              client_user_code: userCode
+            };
+          });
+        }
+        
+        console.log('✅ Loaded client recommendations:', clientRecs);
+        console.log('✅ Client recommendations details:', clientRecs.map(rec => ({ 
+          id: rec.id, 
+          title: rec.title, 
+          content: rec.content, 
+          category: rec.category 
+        })));
+        setClientRecommendations(clientRecs);
+      } else {
+        console.log('ℹ️ No recommendations found for user:', userCode);
+        setClientRecommendations([]);
+      }
+      
+    } catch (err) {
+      console.error('❌ Error fetching client recommendations:', err);
+      setClientRecommendations([]);
+    } finally {
+      setLoadingClientRecommendations(false);
     }
   };
 
@@ -4467,11 +4561,15 @@ const MenuCreate = () => {
   // REMOVED: This useEffect had a condition that prevented fetching when userTargets already existed
   // Now using the useEffect below that fetches whenever selectedClient changes
 
-  // Auto-fetch user targets when selectedClient changes
+  // Auto-fetch user targets and client recommendations when selectedClient changes
   useEffect(() => {
     if (selectedClient) {
       console.log('🔄 Fetching user targets for selected client:', selectedClient.user_code);
       fetchUserTargets(selectedClient.user_code);
+      
+      // Also fetch client recommendations
+      console.log('🔄 Fetching client recommendations for selected client:', selectedClient.user_code);
+      fetchClientRecommendations(selectedClient.user_code);
     }
   }, [selectedClient]);
 
@@ -5284,7 +5382,13 @@ const MenuCreate = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-purple-800">
                 <span>💡</span>
-                <CardTitle>{translations.recommendations || 'Recommendations'}</CardTitle>
+                <CardTitle>
+                  {translations.recommendations || 'Recommendations'}
+                  {(clientRecommendations.length > 0 || recommendations.length > 0) && (
+                    <span className="ml-2 text-sm font-normal text-purple-600">
+                    </span>
+                  )}
+                </CardTitle>
               </div>
               <Button
                 type="button"
@@ -5302,6 +5406,116 @@ const MenuCreate = () => {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="space-y-6">
+              {/* Client Recommendations Section */}
+              {selectedClient && (
+                <div>
+                  <div className="flex items-center gap-2 mb-4">
+                    <h3 className="text-lg font-semibold text-gray-800">
+                      {translations.clientRecommendations || 'Client Recommendations'}
+                    </h3>
+                    <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-700">
+                      {translations.fromDatabase || 'From Database'}
+                    </Badge>
+                    {loadingClientRecommendations && (
+                      <Loader className="animate-spin h-4 w-4 text-blue-600" />
+                    )}
+                  </div>
+                  
+                  {clientRecommendations.length > 0 ? (
+                    <div className="space-y-3">
+                      {clientRecommendations.map((rec, index) => (
+                        <div key={rec.id} className="bg-blue-50 rounded-lg p-4 border border-blue-200 shadow-sm">
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <Badge 
+                                variant="outline" 
+                                className={`${
+                                  rec.priority === 'high' ? 'bg-red-50 border-red-200 text-red-700' :
+                                  rec.priority === 'medium' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
+                                  'bg-green-50 border-green-200 text-green-700'
+                                }`}
+                              >
+                                {rec.priority === 'high' ? '🔴' : rec.priority === 'medium' ? '🟡' : '🟢'} {translations[rec.priority + 'Priority'] || rec.priority}
+                              </Badge>
+                              <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-700">
+                                {translations[rec.category + 'Recommendation'] || rec.category}
+                              </Badge>
+                              <Badge variant="outline" className="bg-gray-50 border-gray-200 text-gray-600">
+                                {translations.clients || 'Client'}
+                              </Badge>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  // Convert client recommendation to meal plan recommendation
+                                  const mealPlanRec = {
+                                    id: Date.now(),
+                                    category: rec.category,
+                                    title: rec.title,
+                                    content: rec.content,
+                                    priority: rec.priority,
+                                    source: 'meal_plan'
+                                  };
+                                  setRecommendations(prev => [...prev, mealPlanRec]);
+                                  setClientRecommendations(prev => prev.filter(r => r.id !== rec.id));
+                                }}
+                                className="text-green-600 border-green-600 hover:bg-green-50"
+                                title={translations.addRecommendation || 'Add Recommendation'}
+                              >
+                                ➕
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  if (window.confirm(translations.confirmRemoveClientRecommendation || 'Remove this client recommendation from the meal plan? (This will not affect the original client data)')) {
+                                    setClientRecommendations(prev => prev.filter(r => r.id !== rec.id));
+                                  }
+                                }}
+                                className="text-orange-600 border-orange-600 hover:bg-orange-50"
+                                title={translations.delete || 'Delete'}
+                              >
+                                ➖
+                              </Button>
+                            </div>
+                          </div>
+                          <h4 className="font-semibold text-gray-900 mb-2">
+                            {translations[rec.category + 'Recommendation'] || rec.title}
+                          </h4>
+                          <p className="text-gray-700 text-sm leading-relaxed">{rec.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-4 text-gray-500">
+                      <div className="text-2xl mb-2">📋</div>
+                      <p className="text-sm">{translations.noClientRecommendations || 'No client recommendations found'}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Separator */}
+              {selectedClient && (recommendations.length > 0 || clientRecommendations.length > 0) && (
+                <Separator className="my-4" />
+              )}
+
+              {/* Meal Plan Recommendations Section */}
+              <div>
+                <div className="flex items-center gap-2 mb-4">
+                  <h3 className="text-lg font-semibold text-gray-800">
+                    {translations.mealPlanRecommendations || 'Meal Plan Recommendations'}
+                  </h3>
+                  <Badge variant="outline" className="bg-purple-50 border-purple-200 text-purple-700">
+                    {translations.mealPlanSpecific || 'Meal Plan Specific'}
+                  </Badge>
+                </div>
+                
             {recommendations.length > 0 ? (
               <div className="space-y-3">
                 {recommendations.map((rec, index) => (
@@ -5316,10 +5530,13 @@ const MenuCreate = () => {
                             'bg-green-50 border-green-200 text-green-700'
                           }`}
                         >
-                          {rec.priority === 'high' ? '🔴' : rec.priority === 'medium' ? '🟡' : '🟢'} {rec.priority}
+                          {rec.priority === 'high' ? '🔴' : rec.priority === 'medium' ? '🟡' : '🟢'} {translations[rec.priority + 'Priority'] || rec.priority}
                         </Badge>
                         <Badge variant="outline" className="bg-purple-50 border-purple-200 text-purple-700">
-                          {rec.category}
+                          {translations[rec.category + 'Recommendation'] || rec.category}
+                        </Badge>
+                            <Badge variant="outline" className="bg-gray-50 border-gray-200 text-gray-600">
+                              {translations.menuPlan || 'Meal Plan'}
                         </Badge>
                       </div>
                       <div className="flex gap-2">
@@ -5347,7 +5564,9 @@ const MenuCreate = () => {
                         </Button>
                       </div>
                     </div>
-                    <h4 className="font-semibold text-gray-900 mb-2">{rec.title}</h4>
+                    <h4 className="font-semibold text-gray-900 mb-2">
+                      {translations[rec.category + 'Recommendation'] || rec.title}
+                    </h4>
                     <p className="text-gray-700 text-sm leading-relaxed">{rec.content}</p>
                   </div>
                 ))}
@@ -5355,10 +5574,12 @@ const MenuCreate = () => {
             ) : (
               <div className="text-center py-8 text-gray-500">
                 <div className="text-4xl mb-2">💡</div>
-                <p className="text-sm">{translations.noRecommendations || 'No recommendations added yet'}</p>
+                    <p className="text-sm">{translations.noMealPlanRecommendations || 'No meal plan recommendations added yet'}</p>
                 <p className="text-xs mt-1">{translations.addRecommendationsPrompt || 'Click "Add Recommendation" to get started'}</p>
               </div>
             )}
+              </div>
+            </div>
           </CardContent>
         </Card>
       )}

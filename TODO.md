@@ -5,21 +5,21 @@
 ### 1. Fix Macro Rebalancing
 - **File**: `src/pages/Users.jsx` (lines 244-373)
 - **Issue**: Macro adjustment rebalancing logic needs fixing
-- **Status**: Pending
+- **Status**: Fixed
 
 ### 2. User Creation Supplements Flow
 - **Issue**: When user is created, prompt them to send images and specify what supplements they are taking and how much
-- **Status**: Pending
+- **Status**: Fixed
 
 ### 3. Show Supplements in Menu Creation
 - **File**: `src/pages/MenuCreate.jsx`
 - **Issue**: Display user's supplements when creating meal plans
-- **Status**: Pending
+- **Status**: Fixed
 
 ### 4. Fix Ingredient Carbs Calculation
 - **Files**: `src/pages/MenuCreate.jsx`, `src/pages/MenuLoad.jsx`
 - **Issue**: Carbs are not calculated correctly when changing ingredients
-- **Status**: Pending
+- **Status**: Fixed
 
 ## User Experience Improvements
 
@@ -41,7 +41,7 @@
 
 ### 9. Edit AI Ingredient Amounts
 - **Issue**: Make it so you can edit the amount of ingredients that the AI has created
-- **Status**: Pending
+- **Status**: fixed
 
 ## Display & Formatting
 

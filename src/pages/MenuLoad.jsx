@@ -170,7 +170,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
             calories: nutritionData.Energy || 0,
             protein: nutritionData.Protein || 0,
             fat: nutritionData.Total_lipid__fat_ || 0,
-            carbs: nutritionData.Carbohydrate || 0,
+            carbs: nutritionData.Carbohydrate__by_difference || 0,
             'brand of pruduct': nutritionData.brand || ''
           };
         } else {
@@ -192,7 +192,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
           calories: Math.round(suggestion.Energy || 0),
           protein: Math.round(suggestion.Protein || 0),
           fat: Math.round(suggestion.Fat || 0),
-          carbs: Math.round(suggestion.Carbohydrate || 0)
+          carbs: Math.round(suggestion.Carbohydrate__by_difference || 0)
         };
 
         updatedValues = {
