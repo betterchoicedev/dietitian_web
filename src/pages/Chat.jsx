@@ -143,36 +143,40 @@ export default function Chat() {
         if (reversedMessages.length > messages.length) {
           console.log(`🔄 Simple auto-refresh: New messages detected! Old: ${messages.length}, New: ${reversedMessages.length}`);
           
-          // Store current scroll position before updating messages
+          // Capture user's scroll position before updating messages
           const scrollArea = scrollAreaRef.current;
-          const prevScrollTop = scrollArea ? scrollArea.scrollTop : 0;
-          const prevScrollHeight = scrollArea ? scrollArea.scrollHeight : 0;
+          const viewport = scrollArea?.querySelector('[data-radix-scroll-area-viewport]');
+          const prevScrollTop = viewport ? viewport.scrollTop : 0;
+          const prevScrollHeight = viewport ? viewport.scrollHeight : 0;
+          const prevClientHeight = viewport ? viewport.clientHeight : 0;
+          
+          // Check if user was at the bottom (within 50px)
+          const distanceFromBottom = prevScrollHeight - prevScrollTop - prevClientHeight;
+          const wasAtBottom = distanceFromBottom <= 50;
           
           setMessages(reversedMessages);
           setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
           setHasMoreMessages(reversedMessages.length === 20);
           setLastRefreshTime(new Date());
           
-          // Only auto-scroll to bottom if user was at bottom, otherwise preserve position
-          if (userScrollPosition === 'bottom') {
-            // User was at bottom, scroll to new messages
-            console.log('🔄 Auto-scrolling to bottom for new messages');
-            setTimeout(() => {
+          // Restore scroll position after DOM updates
+          setTimeout(() => {
+            if (wasAtBottom) {
+              // User was at bottom, scroll to new messages
+              console.log('🔄 Auto-scrolling to bottom for new messages');
               chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
-            }, 100);
-            setHasNewMessages(false); // Clear flag since we're scrolling to new messages
-          } else {
-            // User was scrolling up, preserve their position
-            console.log(`🔄 Preserving scroll position (user was at ${userScrollPosition}), setting new message indicator`);
-            setTimeout(() => {
-              if (scrollArea) {
-                const newScrollHeight = scrollArea.scrollHeight;
+              setHasNewMessages(false); // Clear flag since we're scrolling to new messages
+            } else {
+              // User was scrolling up, preserve their position
+              console.log('🔄 Preserving scroll position, user was not at bottom');
+              if (viewport) {
+                const newScrollHeight = viewport.scrollHeight;
                 const heightDifference = newScrollHeight - prevScrollHeight;
-                scrollArea.scrollTop = prevScrollTop + heightDifference;
+                viewport.scrollTop = prevScrollTop + heightDifference;
               }
-            }, 100);
-            setHasNewMessages(true); // Set flag to show new message indicator
-          }
+              setHasNewMessages(true); // Set flag to show new message indicator
+            }
+          }, 0);
         } else {
           console.log('Simple auto-refresh: No new messages found');
           // No new messages, preserve scroll position
@@ -208,36 +212,40 @@ export default function Chat() {
         if (reversedMessages.length > messages.length) {
           console.log(`🔄 Aggressive auto-refresh: New messages detected! Old: ${messages.length}, New: ${reversedMessages.length}`);
           
-          // Store current scroll position before updating messages
+          // Capture user's scroll position before updating messages
           const scrollArea = scrollAreaRef.current;
-          const prevScrollTop = scrollArea ? scrollArea.scrollTop : 0;
-          const prevScrollHeight = scrollArea ? scrollArea.scrollHeight : 0;
+          const viewport = scrollArea?.querySelector('[data-radix-scroll-area-viewport]');
+          const prevScrollTop = viewport ? viewport.scrollTop : 0;
+          const prevScrollHeight = viewport ? viewport.scrollHeight : 0;
+          const prevClientHeight = viewport ? viewport.clientHeight : 0;
+          
+          // Check if user was at the bottom (within 50px)
+          const distanceFromBottom = prevScrollHeight - prevScrollTop - prevClientHeight;
+          const wasAtBottom = distanceFromBottom <= 50;
           
           setMessages(reversedMessages);
           setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
           setHasMoreMessages(reversedMessages.length === 20);
           setLastRefreshTime(new Date());
           
-          // Only auto-scroll to bottom if user was at bottom, otherwise preserve position
-          if (userScrollPosition === 'bottom') {
-            // User was at bottom, scroll to new messages
-            console.log('🔄 Aggressive auto-refresh: Auto-scrolling to bottom for new messages');
-            setTimeout(() => {
+          // Restore scroll position after DOM updates
+          setTimeout(() => {
+            if (wasAtBottom) {
+              // User was at bottom, scroll to new messages
+              console.log('🔄 Aggressive auto-refresh: Auto-scrolling to bottom for new messages');
               chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
-            }, 100);
-            setHasNewMessages(false); // Clear flag since we're scrolling to new messages
-          } else {
-            // User was scrolling up, preserve their position
-            console.log(`🔄 Aggressive auto-refresh: Preserving scroll position (user was at ${userScrollPosition}), setting new message indicator`);
-            setTimeout(() => {
-              if (scrollArea) {
-                const newScrollHeight = scrollArea.scrollHeight;
+              setHasNewMessages(false); // Clear flag since we're scrolling to new messages
+            } else {
+              // User was scrolling up, preserve their position
+              console.log('🔄 Aggressive auto-refresh: Preserving scroll position, user was not at bottom');
+              if (viewport) {
+                const newScrollHeight = viewport.scrollHeight;
                 const heightDifference = newScrollHeight - prevScrollHeight;
-                scrollArea.scrollTop = prevScrollTop + heightDifference;
+                viewport.scrollTop = prevScrollTop + heightDifference;
               }
-            }, 100);
-            setHasNewMessages(true); // Set flag to show new message indicator
-          }
+              setHasNewMessages(true); // Set flag to show new message indicator
+            }
+          }, 0);
         } else {
           console.log('Aggressive auto-refresh: No new messages found');
           // No new messages, preserve scroll position
@@ -254,17 +262,17 @@ export default function Chat() {
     };
   }, [selectedClient?.user_code, conversationId, messages.length]);
 
-  // Initialize scroll position tracking
+  // Initialize scroll position tracking - only on very first load
   useEffect(() => {
-    if (messages.length > 0 && scrollAreaRef.current) {
-      // Set initial scroll position to bottom
+    if (messages.length > 0 && scrollAreaRef.current && !firstMessageId) {
+      // Set initial scroll position to bottom only on first load
       setUserScrollPosition('bottom');
-      // Scroll to bottom on initial load
+      // Scroll to bottom on initial load only
       setTimeout(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
       }, 100);
     }
-  }, [messages.length]);
+  }, [messages.length, firstMessageId]);
 
   // Add scroll event listeners to ScrollArea viewport
   useEffect(() => {
@@ -405,10 +413,16 @@ export default function Chat() {
       setIsRefreshing(true);
       console.log('🔄 Manual refresh triggered');
       
-      // Store current scroll position before updating messages
+      // Capture user's scroll position before updating messages
       const scrollArea = scrollAreaRef.current;
-      const prevScrollTop = scrollArea ? scrollArea.scrollTop : 0;
-      const prevScrollHeight = scrollArea ? scrollArea.scrollHeight : 0;
+      const viewport = scrollArea?.querySelector('[data-radix-scroll-area-viewport]');
+      const prevScrollTop = viewport ? viewport.scrollTop : 0;
+      const prevScrollHeight = viewport ? viewport.scrollHeight : 0;
+      const prevClientHeight = viewport ? viewport.clientHeight : 0;
+      
+      // Check if user was at the bottom (within 50px)
+      const distanceFromBottom = prevScrollHeight - prevScrollTop - prevClientHeight;
+      const wasAtBottom = distanceFromBottom <= 50;
       
       // Fetch latest messages
       const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
@@ -420,14 +434,22 @@ export default function Chat() {
       setLastRefreshTime(new Date());
       setHasNewMessages(false); // Clear new message indicator on manual refresh
       
-      // Preserve scroll position after refresh
+      // Restore scroll position after DOM updates
       setTimeout(() => {
-        if (scrollArea) {
-          const newScrollHeight = scrollArea.scrollHeight;
-          const heightDifference = newScrollHeight - prevScrollHeight;
-          scrollArea.scrollTop = prevScrollTop + heightDifference;
+        if (wasAtBottom) {
+          // User was at bottom, scroll to new messages
+          console.log('🔄 Manual refresh: Auto-scrolling to bottom for new messages');
+          chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
+        } else {
+          // User was scrolling up, preserve their position
+          console.log('🔄 Manual refresh: Preserving scroll position, user was not at bottom');
+          if (viewport) {
+            const newScrollHeight = viewport.scrollHeight;
+            const heightDifference = newScrollHeight - prevScrollHeight;
+            viewport.scrollTop = prevScrollTop + heightDifference;
+          }
         }
-      }, 100);
+      }, 0);
       
       console.log('✅ Chat refreshed successfully');
     } catch (error) {
@@ -650,6 +672,13 @@ export default function Chat() {
         setMessage('');
         setImageFile(null);
         if (fileInputRef.current) fileInputRef.current.value = '';
+        
+        // Always scroll to bottom after sending message
+        setTimeout(() => {
+          chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+          setUserScrollPosition('bottom');
+          setHasNewMessages(false);
+        }, 100);
         
         // Show success toast
         showToast(`✅ Message sent to ${selectedClient.full_name}!`, 'success');
@@ -1005,6 +1034,13 @@ Your task is to respond to the user's message below, taking into account their s
       setImageFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       
+      // Always scroll to bottom after sending message
+      setTimeout(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        setUserScrollPosition('bottom');
+        setHasNewMessages(false);
+      }, 100);
+      
       // Show success toast
       showToast(`✅ AI response sent to ${selectedClient.full_name}!`, 'success');
       
@@ -1249,13 +1285,12 @@ Your task is to respond to the user's message below, taking into account their s
     );
   };
 
-  useEffect(() => {
-    // Only scroll to bottom if not loading more (i.e., after initial load or sending)
-    // AND if the user is at the bottom (not scrolling up)
-    if (!isLoadingMore && messages.length > 0 && userScrollPosition === 'bottom') {
-      chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
-    }
-  }, [messages, isLoadingMore, userScrollPosition]);
+  // Removed the blanket scroll-to-bottom useEffect that was causing issues
+  // Scroll behavior is now handled specifically in:
+  // 1. Auto-refresh intervals (preserves position unless user was at bottom)
+  // 2. Manual refresh (preserves position unless user was at bottom) 
+  // 3. Send message (always scrolls to bottom for current user)
+  // 4. Initial load (scrolls to bottom once)
 
   const handleLoadMore = async () => {
     if (!conversationId || !firstMessageId || isLoadingMore) return;

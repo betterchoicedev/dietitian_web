@@ -227,167 +227,94 @@ export default function Clients() {
     if (calories <= 0) return;
 
     let newMacros = { ...macroInputs };
+    let targetPercentage = 0;
     
+    // Calculate target percentage based on input type
     if (inputType === 'percentage') {
-      // Validate percentage input (0-100)
-      const validPercentage = Math.max(0, Math.min(100, value));
-      
-      // Calculate grams from percentage (divide by 100 first!)
-      const grams = Math.round((validPercentage / 100) * calories / (macroType === 'fat' ? 9 : 4));
-      
-      newMacros[macroType] = {
-        percentage: validPercentage,
-        grams: grams,
-        gramsPerKg: weight > 0 ? Math.round((grams / weight) * 10) / 10 : 0
-      };
-      
-      // Rebalance other macros to maintain 100% total
-      const otherMacros = Object.keys(newMacros).filter(key => key !== macroType);
-      const currentTotal = otherMacros.reduce((sum, key) => sum + newMacros[key].percentage, 0) + validPercentage;
-      
-      if (currentTotal > 100) {
-        // If total exceeds 100%, reduce other macros proportionally (only unlocked ones)
-        const excess = currentTotal - 100;
-        const unlockedOtherMacros = otherMacros.filter(key => !lockedMacros[key]);
-        const lockedOtherMacros = otherMacros.filter(key => lockedMacros[key]);
-        
-        // Calculate total of locked macros
-        const lockedTotal = lockedOtherMacros.reduce((sum, key) => sum + newMacros[key].percentage, 0);
-        
-        // If we have locked macros, we need to respect their values
-        if (lockedTotal > 0) {
-          // Calculate how much we can allocate to unlocked macros
-          const availableForUnlocked = 100 - validPercentage - lockedTotal;
-          
-          if (availableForUnlocked < 0) {
-            // If locked macros + current macro exceed 100%, we can't maintain the lock
-            // This is an error state - user needs to unlock some macros
-            console.warn(`Cannot maintain 100% total with current locked macros. Locked total: ${lockedTotal}%, current macro: ${validPercentage}%`);
-            return;
-          }
-          
-          // Distribute available percentage among unlocked macros based on their current ratios
-          if (unlockedOtherMacros.length > 0) {
-            const unlockedTotal = unlockedOtherMacros.reduce((sum, key) => sum + newMacros[key].percentage, 0);
-            
-            if (unlockedTotal > 0) {
-              unlockedOtherMacros.forEach(key => {
-                const ratio = newMacros[key].percentage / unlockedTotal;
-                const newPercentage = Math.round(availableForUnlocked * ratio * 10) / 10;
-                
-                // Recalculate grams for this macro
-                const newGrams = Math.round((newPercentage / 100) * calories / (key === 'fat' ? 9 : 4));
-                newMacros[key] = {
-                  percentage: newPercentage,
-                  grams: newGrams,
-                  gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 10) / 10 : 0
-                };
-              });
-            }
-          }
-        } else {
-          // No locked macros, proceed with normal rebalancing
-          const otherTotal = otherMacros.reduce((sum, key) => sum + newMacros[key].percentage, 0);
-          
-          if (otherTotal > 0) {
-            otherMacros.forEach(key => {
-              const ratio = newMacros[key].percentage / otherTotal;
-              const reduction = ratio * excess;
-              const newPercentage = Math.max(0, newMacros[key].percentage - reduction);
-              
-              // Recalculate grams for this macro
-              const newGrams = Math.round((newPercentage / 100) * calories / (key === 'fat' ? 9 : 4));
-              newMacros[key] = {
-                percentage: Math.round(newPercentage * 10) / 10,
-                grams: newGrams,
-                gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 10) / 10 : 0
-              };
-            });
-          }
-        }
-      } else if (currentTotal < 100 && otherMacros.some(key => newMacros[key].percentage === 0)) {
-        // If total is less than 100% and some other macros are at 0%, redistribute the remaining percentage
-        const remainingPercentage = 100 - validPercentage;
-        const zeroMacros = otherMacros.filter(key => newMacros[key].percentage === 0 && !lockedMacros[key]);
-        const nonZeroMacros = otherMacros.filter(key => newMacros[key].percentage > 0 && !lockedMacros[key]);
-        const lockedMacrosList = otherMacros.filter(key => lockedMacros[key]);
-        
-        // Calculate how much is already allocated to locked macros
-        const lockedTotal = lockedMacrosList.reduce((sum, key) => sum + newMacros[key].percentage, 0);
-        const availableForUnlocked = remainingPercentage - lockedTotal;
-        
-        if (zeroMacros.length > 0 && availableForUnlocked > 0) {
-          // Use previous distribution ratios for zero macros, but scale to fit remaining percentage
-          const zeroMacrosPreviousTotal = zeroMacros.reduce((sum, key) => sum + previousMacroDistribution[key], 0);
-          
-          if (zeroMacrosPreviousTotal > 0) {
-            // Distribute available percentage based on previous ratios
-            zeroMacros.forEach(key => {
-              const ratio = previousMacroDistribution[key] / zeroMacrosPreviousTotal;
-              const newPercentage = Math.round(availableForUnlocked * ratio * 10) / 10;
-              const newGrams = Math.round((newPercentage / 100) * calories / (key === 'fat' ? 9 : 4));
-              
-              newMacros[key] = {
-                percentage: newPercentage,
-                grams: newGrams,
-                gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 10) / 10 : 0
-              };
-            });
-          } else {
-            // Fallback: equal distribution if no previous ratios
-            const percentagePerZeroMacro = availableForUnlocked / zeroMacros.length;
-            
-            zeroMacros.forEach(key => {
-              const newPercentage = Math.round(percentagePerZeroMacro * 10) / 10;
-              const newGrams = Math.round((newPercentage / 100) * calories / (key === 'fat' ? 9 : 4));
-              
-              newMacros[key] = {
-                percentage: newPercentage,
-                grams: newGrams,
-                gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 10) / 10 : 0
-              };
-            });
-          }
-          
-          // If there are non-zero macros, adjust them proportionally to maintain their relative ratios
-          if (nonZeroMacros.length > 0) {
-            const nonZeroTotal = nonZeroMacros.reduce((sum, key) => sum + newMacros[key].percentage, 0);
-            const targetNonZeroTotal = availableForUnlocked - zeroMacros.reduce((sum, key) => sum + newMacros[key].percentage, 0);
-            
-            if (targetNonZeroTotal > 0 && nonZeroTotal > 0) {
-              const scalingFactor = targetNonZeroTotal / nonZeroTotal;
-              
-              nonZeroMacros.forEach(key => {
-                const newPercentage = Math.round(newMacros[key].percentage * scalingFactor * 10) / 10;
-                const newGrams = Math.round((newPercentage / 100) * calories / (key === 'fat' ? 9 : 4));
-                
-                newMacros[key] = {
-                  percentage: newPercentage,
-                  grams: newGrams,
-                  gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 10) / 10 : 0
-                };
-              });
-            }
-          }
-        }
-      }
-      
+      targetPercentage = Math.max(0, Math.min(100, value));
     } else if (inputType === 'grams') {
-      // Calculate percentage from grams
-      const percentage = Math.round(((value * (macroType === 'fat' ? 9 : 4)) / calories) * 100);
-      newMacros[macroType] = {
-        percentage: percentage,
-        grams: value,
-        gramsPerKg: weight > 0 ? Math.round((value / weight) * 10) / 10 : 0
-      };
+      targetPercentage = calories > 0 ? (value * (macroType === 'fat' ? 9 : 4) / calories) * 100 : 0;
     } else if (inputType === 'gramsPerKg') {
-      // Calculate grams from grams per kg
-      const grams = Math.round(value * weight);
-      const percentage = Math.round(((grams * (macroType === 'fat' ? 9 : 4)) / calories) * 100);
-      newMacros[macroType] = {
-        percentage: percentage,
-        grams: grams,
-        gramsPerKg: value
+      const grams = weight > 0 ? value * weight : 0;
+      targetPercentage = calories > 0 ? (grams * (macroType === 'fat' ? 9 : 4) / calories) * 100 : 0;
+    }
+    
+    // Update the target macro
+    const grams = Math.round((targetPercentage / 100) * calories / (macroType === 'fat' ? 9 : 4));
+    newMacros[macroType] = {
+      percentage: Math.round(targetPercentage * 100) / 100,
+      grams: grams,
+      gramsPerKg: weight > 0 ? Math.round((grams / weight) * 100) / 100 : 0
+    };
+    
+    // Simple proportional rebalancing: distribute remaining percentage among other unlocked macros
+    const otherMacros = ['protein', 'carbs', 'fat'].filter(key => key !== macroType);
+    const unlockedOtherMacros = otherMacros.filter(key => !lockedMacros[key]);
+    const lockedOtherMacros = otherMacros.filter(key => lockedMacros[key]);
+    
+    // Calculate locked percentage total
+    const lockedTotal = lockedOtherMacros.reduce((sum, key) => sum + (newMacros[key]?.percentage || 0), 0);
+    
+    // Calculate available percentage for unlocked macros
+    const availableForUnlocked = 100 - targetPercentage - lockedTotal;
+    
+    // Check if we have enough space
+    if (availableForUnlocked < 0) {
+      console.warn(`Cannot maintain 100% total. Locked: ${lockedTotal.toFixed(1)}%, Target: ${targetPercentage.toFixed(1)}%`);
+      return;
+    }
+    
+    // Distribute available percentage among unlocked macros proportionally
+    if (unlockedOtherMacros.length > 0) {
+      const currentUnlockedTotal = unlockedOtherMacros.reduce((sum, key) => sum + (newMacros[key]?.percentage || 0), 0);
+      
+      if (currentUnlockedTotal > 0) {
+        // Scale proportionally
+        const scaleFactor = availableForUnlocked / currentUnlockedTotal;
+        
+        unlockedOtherMacros.forEach(key => {
+          const newPercentage = Math.max(0, (newMacros[key]?.percentage || 0) * scaleFactor);
+          const newGrams = Math.round((newPercentage / 100) * calories / (key === 'fat' ? 9 : 4));
+          
+          newMacros[key] = {
+            percentage: Math.round(newPercentage * 100) / 100,
+            grams: newGrams,
+            gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 100) / 100 : 0
+          };
+        });
+      } else {
+        // All unlocked macros are at 0%, distribute equally
+        const percentagePerMacro = availableForUnlocked / unlockedOtherMacros.length;
+        
+        unlockedOtherMacros.forEach(key => {
+          const newGrams = Math.round((percentagePerMacro / 100) * calories / (key === 'fat' ? 9 : 4));
+          
+          newMacros[key] = {
+            percentage: Math.round(percentagePerMacro * 100) / 100,
+            grams: newGrams,
+            gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 100) / 100 : 0
+          };
+        });
+      }
+    }
+    
+    // Final adjustment to ensure total is exactly 100%
+    const currentTotal = newMacros.protein.percentage + newMacros.carbs.percentage + newMacros.fat.percentage;
+    const difference = 100 - currentTotal;
+    
+    if (Math.abs(difference) > 0.01 && unlockedOtherMacros.length > 0) {
+      // Adjust the largest unlocked macro to fix rounding
+      const largestUnlocked = unlockedOtherMacros.reduce((largest, current) => 
+        (newMacros[current]?.percentage || 0) > (newMacros[largest]?.percentage || 0) ? current : largest
+      );
+      
+      const adjustedPercentage = (newMacros[largestUnlocked]?.percentage || 0) + difference;
+      const adjustedGrams = Math.round((adjustedPercentage / 100) * calories / (largestUnlocked === 'fat' ? 9 : 4));
+      
+      newMacros[largestUnlocked] = {
+        percentage: Math.round(adjustedPercentage * 100) / 100,
+        grams: adjustedGrams,
+        gramsPerKg: weight > 0 ? Math.round((adjustedGrams / weight) * 100) / 100 : 0
       };
     }
 
@@ -400,9 +327,9 @@ export default function Clients() {
       fat: newMacros.fat.grams
     });
     
-    // Update previous distribution for smart rebalancing (only if total is close to 100%)
+    // Update previous distribution for smart rebalancing
     const totalPercentage = newMacros.protein.percentage + newMacros.carbs.percentage + newMacros.fat.percentage;
-    if (Math.abs(totalPercentage - 100) < 0.1) {
+    if (Math.abs(totalPercentage - 100) < 0.5) {
       setPreviousMacroDistribution({
         protein: newMacros.protein.percentage,
         carbs: newMacros.carbs.percentage,
