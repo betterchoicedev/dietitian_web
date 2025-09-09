@@ -29,15 +29,15 @@
 
 ### 6. Fix Olive Oil Instructions
 - **Issue**: When olive oil is in meal plan, say to put it in the meal, not drink it
-- **Status**: Pending
+- **Status**: Ask Roy
 
 ### 7. Remove Brand Requirements
 - **Issue**: Meat/fish and vegetables don't need brand of product (any kind of not ready food)
-- **Status**: Pending
+- **Status**: Fixed
 
 ### 8. Optional Household Measures
 - **Issue**: Don't have to put household measure when adding a product
-- **Status**: Pending
+- **Status**: Fixed
 
 ### 9. Edit AI Ingredient Amounts
 - **Issue**: Make it so you can edit the amount of ingredients that the AI has created

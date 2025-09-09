@@ -138,10 +138,15 @@ export default function Chat() {
       try {
         console.log('🔄 Simple auto-refresh: Checking for new messages...');
         const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
+        // Reverse to show oldest at top, newest at bottom
         const reversedMessages = latestMessages.reverse();
         
-        if (reversedMessages.length > messages.length) {
-          console.log(`🔄 Simple auto-refresh: New messages detected! Old: ${messages.length}, New: ${reversedMessages.length}`);
+        // Check for new messages by comparing IDs instead of just length
+        const currentMessageIds = new Set(messages.map(m => m.id));
+        const newMessages = reversedMessages.filter(msg => !currentMessageIds.has(msg.id));
+        
+        if (newMessages.length > 0) {
+          console.log(`🔄 Simple auto-refresh: New messages detected! Found ${newMessages.length} new messages`);
           
           // Capture user's scroll position before updating messages
           const scrollArea = scrollAreaRef.current;
@@ -155,8 +160,9 @@ export default function Chat() {
           const wasAtBottom = distanceFromBottom <= 50;
           
           setMessages(reversedMessages);
+          // Set firstMessageId to the oldest message (first in reversed array)
           setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
-          setHasMoreMessages(reversedMessages.length === 20);
+          setHasMoreMessages(latestMessages.length === 20);
           setLastRefreshTime(new Date());
           
           // Restore scroll position after DOM updates
@@ -197,70 +203,76 @@ export default function Chat() {
     };
   }, [selectedClient?.user_code, conversationId]); // Removed messages.length dependency
 
-  // Aggressive auto-refresh every 5 seconds for testing
-  useEffect(() => {
-    if (!selectedClient?.user_code || !conversationId) return;
+  // Aggressive auto-refresh every 5 seconds for testing - DISABLED to prevent conflicts
+  // useEffect(() => {
+  //   if (!selectedClient?.user_code || !conversationId) return;
 
-    console.log('🔄 Setting up aggressive 5-second auto-refresh for conversation:', conversationId);
+  //   console.log('🔄 Setting up aggressive 5-second auto-refresh for conversation:', conversationId);
 
-    const aggressiveInterval = setInterval(async () => {
-      try {
-        console.log('🔄 Aggressive auto-refresh: Checking for new messages...');
-        const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
-        const reversedMessages = latestMessages.reverse();
+  //   const aggressiveInterval = setInterval(async () => {
+  //     try {
+  //       console.log('🔄 Aggressive auto-refresh: Checking for new messages...');
+  //       const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
+  //       // Reverse to show oldest at top, newest at bottom
+  //       const reversedMessages = latestMessages.reverse();
         
-        if (reversedMessages.length > messages.length) {
-          console.log(`🔄 Aggressive auto-refresh: New messages detected! Old: ${messages.length}, New: ${reversedMessages.length}`);
+  //       // Check for new messages by comparing IDs instead of just length
+  //       const currentMessageIds = new Set(messages.map(m => m.id));
+  //       const newMessages = reversedMessages.filter(msg => !currentMessageIds.has(msg.id));
+        
+  //       if (newMessages.length > 0) {
+  //         console.log(`🔄 Aggressive auto-refresh: New messages detected! Found ${newMessages.length} new messages`);
           
-          // Capture user's scroll position before updating messages
-          const scrollArea = scrollAreaRef.current;
-          const viewport = scrollArea?.querySelector('[data-radix-scroll-area-viewport]');
-          const prevScrollTop = viewport ? viewport.scrollTop : 0;
-          const prevScrollHeight = viewport ? viewport.scrollHeight : 0;
-          const prevClientHeight = viewport ? viewport.clientHeight : 0;
+  //         // Capture user's scroll position before updating messages
+  //         const scrollArea = scrollAreaRef.current;
+  //         const viewport = scrollArea?.querySelector('[data-radix-scroll-area-viewport]');
+  //         const prevScrollTop = viewport ? viewport.scrollTop : 0;
+  //         const prevScrollHeight = viewport ? viewport.scrollHeight : 0;
+  //         const prevClientHeight = viewport ? viewport.clientHeight : 0;
           
-          // Check if user was at the bottom (within 50px)
-          const distanceFromBottom = prevScrollHeight - prevScrollTop - prevClientHeight;
-          const wasAtBottom = distanceFromBottom <= 50;
+  //         // Check if user was at the bottom (within 50px)
+  //         const distanceFromBottom = prevScrollHeight - prevScrollTop - prevClientHeight;
+  //         const wasAtBottom = distanceFromBottom <= 50;
           
-          setMessages(reversedMessages);
-          setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
-          setHasMoreMessages(reversedMessages.length === 20);
-          setLastRefreshTime(new Date());
+  //         setMessages(reversedMessages);
+  //         // Set firstMessageId to the oldest message (first in reversed array)
+  //         setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
+  //         setHasMoreMessages(latestMessages.length === 20);
+  //         setLastRefreshTime(new Date());
           
-          // Restore scroll position after DOM updates
-          setTimeout(() => {
-            if (wasAtBottom) {
-              // User was at bottom, scroll to new messages
-              console.log('🔄 Aggressive auto-refresh: Auto-scrolling to bottom for new messages');
-              chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
-              setHasNewMessages(false); // Clear flag since we're scrolling to new messages
-            } else {
-              // User was scrolling up, preserve their position
-              console.log('🔄 Aggressive auto-refresh: Preserving scroll position, user was not at bottom');
-              if (viewport) {
-                const newScrollHeight = viewport.scrollHeight;
-                const heightDifference = newScrollHeight - prevScrollHeight;
-                viewport.scrollTop = prevScrollTop + heightDifference;
-              }
-              setHasNewMessages(true); // Set flag to show new message indicator
-            }
-          }, 0);
-        } else {
-          console.log('Aggressive auto-refresh: No new messages found');
-          // No new messages, preserve scroll position
-          setLastRefreshTime(new Date());
-        }
-      } catch (error) {
-        console.warn('Aggressive auto-refresh failed:', error);
-      }
-    }, 5000); // 5 seconds
+  //         // Restore scroll position after DOM updates
+  //         setTimeout(() => {
+  //           if (wasAtBottom) {
+  //             // User was at bottom, scroll to new messages
+  //             console.log('🔄 Aggressive auto-refresh: Auto-scrolling to bottom for new messages');
+  //             chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
+  //             setHasNewMessages(false); // Clear flag since we're scrolling to new messages
+  //           } else {
+  //             // User was scrolling up, preserve their position
+  //             console.log('🔄 Aggressive auto-refresh: Preserving scroll position, user was not at bottom');
+  //             if (viewport) {
+  //               const newScrollHeight = viewport.scrollHeight;
+  //               const heightDifference = newScrollHeight - prevScrollHeight;
+  //               viewport.scrollTop = prevScrollTop + heightDifference;
+  //             }
+  //             setHasNewMessages(true); // Set flag to show new message indicator
+  //           }
+  //         }, 0);
+  //       } else {
+  //         console.log('Aggressive auto-refresh: No new messages found');
+  //         // No new messages, preserve scroll position
+  //         setLastRefreshTime(new Date());
+  //       }
+  //     } catch (error) {
+  //       console.warn('Aggressive auto-refresh failed:', error);
+  //     }
+  //   }, 5000); // 5 seconds
 
-    return () => {
-      console.log('🔄 Cleaning up aggressive auto-refresh interval');
-      clearInterval(aggressiveInterval);
-    };
-  }, [selectedClient?.user_code, conversationId, messages.length]);
+  //   return () => {
+  //     console.log('🔄 Cleaning up aggressive auto-refresh interval');
+  //     clearInterval(aggressiveInterval);
+  //   };
+  // }, [selectedClient?.user_code, conversationId]);
 
   // Initialize scroll position tracking - only on very first load
   useEffect(() => {
@@ -426,11 +438,13 @@ export default function Chat() {
       
       // Fetch latest messages
       const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
+      // Reverse to show oldest at top, newest at bottom
       const reversedMessages = latestMessages.reverse();
       
       setMessages(reversedMessages);
+      // Set firstMessageId to the oldest message (first in reversed array)
       setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
-      setHasMoreMessages(reversedMessages.length === 20);
+      setHasMoreMessages(latestMessages.length === 20);
       setLastRefreshTime(new Date());
       setHasNewMessages(false); // Clear new message indicator on manual refresh
       
@@ -467,13 +481,15 @@ export default function Chat() {
     try {
       console.log('🧪 Testing auto-refresh manually...');
       const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
+      // Reverse to show oldest at top, newest at bottom
       const reversedMessages = latestMessages.reverse();
       
       if (reversedMessages.length > messages.length) {
         console.log(`🧪 Test: New messages detected! Old: ${messages.length}, New: ${reversedMessages.length}`);
         setMessages(reversedMessages);
+        // Set firstMessageId to the oldest message (first in reversed array)
         setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
-        setHasMoreMessages(reversedMessages.length === 20);
+        setHasMoreMessages(latestMessages.length === 20);
         setLastRefreshTime(new Date());
       } else {
         console.log('🧪 Test: No new messages found');
@@ -522,10 +538,13 @@ export default function Chat() {
     try {
       const conversation = await ChatConversation.getByUserCode(userCode);
       setConversationId(conversation.id);
-      // Fetch latest 20 messages (descending order)
+      // Fetch latest 20 messages (descending order from API)
       const msgs = await ChatMessage.listByConversation(conversation.id, { limit: 20 });
-      setMessages(msgs.reverse()); // reverse to show oldest at top
-      setFirstMessageId(msgs.length > 0 ? msgs[0].id : null);
+      // Reverse to show oldest at top, newest at bottom
+      const reversedMsgs = msgs.reverse();
+      setMessages(reversedMsgs);
+      // Set firstMessageId to the oldest message (first in reversed array)
+      setFirstMessageId(reversedMsgs.length > 0 ? reversedMsgs[0].id : null);
       setHasMoreMessages(msgs.length === 20);
     } catch (err) {
       setError(translations.failedToLoadClientData);
@@ -537,29 +556,6 @@ export default function Chat() {
     }
   };
 
-  // Infinite scroll: load more messages when scrolled to top
-  const handleScroll = async (e) => {
-    // Track scroll position for auto-refresh logic
-    trackScrollPosition();
-    
-    if (e.target.scrollTop === 0 && hasMoreMessages && !isLoadingMore && conversationId && firstMessageId) {
-      setIsLoadingMore(true);
-      try {
-        const olderMsgs = await ChatMessage.listByConversation(conversationId, { limit: 20, beforeMessageId: firstMessageId });
-        if (olderMsgs.length > 0) {
-          setMessages(prev => [...olderMsgs.reverse(), ...prev]);
-          setFirstMessageId(olderMsgs[0].id);
-          setHasMoreMessages(olderMsgs.length === 20);
-        } else {
-          setHasMoreMessages(false);
-        }
-      } catch (err) {
-        setError(translations.failedToLoadClientData);
-      } finally {
-        setIsLoadingMore(false);
-      }
-    }
-  };
 
   const handleClientSelect = (userCode) => {
     // Client selection is now handled globally through ClientContext
@@ -1294,25 +1290,93 @@ Your task is to respond to the user's message below, taking into account their s
 
   const handleLoadMore = async () => {
     if (!conversationId || !firstMessageId || isLoadingMore) return;
+    
+    console.log('🔄 Loading more messages...', {
+      conversationId,
+      firstMessageId,
+      currentMessageCount: messages.length,
+      hasMoreMessages
+    });
+    
     const scrollArea = scrollAreaRef.current;
-    const prevScrollHeight = scrollArea ? scrollArea.scrollHeight : 0;
+    const viewport = scrollArea?.querySelector('[data-radix-scroll-area-viewport]');
+    const prevScrollHeight = viewport ? viewport.scrollHeight : 0;
     setIsLoadingMore(true);
     try {
-      const olderMsgs = await ChatMessage.listByConversation(conversationId, { limit: 20, beforeMessageId: firstMessageId });
-      if (olderMsgs.length > 0) {
-        setMessages(prev => [...olderMsgs, ...prev]);
-        setFirstMessageId(olderMsgs[0].id);
+      // Fetch older messages (before the current first message)
+      // We need to get messages with created_at before the first message's created_at
+      // Since the API uses lt('id', beforeMessageId) which gets newer messages, we need a different approach
+      const firstMessage = messages.find(m => m.id === firstMessageId);
+      if (!firstMessage) {
+        console.error('❌ Could not find first message with ID:', firstMessageId);
+        return;
+      }
+      
+      // Get messages with created_at before the first message's created_at
+      const { data: olderMsgs, error } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .lt('created_at', firstMessage.created_at)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      
+      if (error) {
+        console.error('❌ Error fetching older messages:', error);
+        throw error;
+      }
+      
+      console.log('📬 Fetched older messages:', {
+        count: olderMsgs?.length || 0,
+        firstMessageId: olderMsgs?.[0]?.id,
+        lastMessageId: olderMsgs?.[olderMsgs.length - 1]?.id,
+        messages: olderMsgs?.map(m => ({ id: m.id, content: m.content.substring(0, 50) + '...', created_at: m.created_at })) || []
+      });
+      
+      if (olderMsgs && olderMsgs.length > 0) {
+        // Reverse older messages to maintain chronological order (oldest first)
+        const reversedOlderMsgs = olderMsgs.reverse();
+        
+        console.log('🔄 Reversed older messages:', {
+          count: reversedOlderMsgs.length,
+          firstMessageId: reversedOlderMsgs[0]?.id,
+          lastMessageId: reversedOlderMsgs[reversedOlderMsgs.length - 1]?.id
+        });
+        
+        // Prepend older messages to the beginning of the array
+        setMessages(prev => {
+          const newMessages = [...reversedOlderMsgs, ...prev];
+          console.log('📝 Updated messages array:', {
+            oldCount: prev.length,
+            newCount: newMessages.length,
+            addedCount: reversedOlderMsgs.length
+          });
+          return newMessages;
+        });
+        
+        // Update firstMessageId to the oldest message in the new batch
+        // Since we reversed, the oldest message is now at index 0 of reversedOlderMsgs
+        setFirstMessageId(reversedOlderMsgs[0].id);
         setHasMoreMessages(olderMsgs.length === 20);
+        
+        console.log('✅ Load more completed:', {
+          newFirstMessageId: reversedOlderMsgs[0].id,
+          hasMoreMessages: olderMsgs.length === 20
+        });
       } else {
+        console.log('📭 No more messages to load');
         setHasMoreMessages(false);
       }
       // After messages update, restore scroll position
       setTimeout(() => {
-        if (scrollArea) {
-          scrollArea.scrollTop = scrollArea.scrollHeight - prevScrollHeight;
+        if (viewport) {
+          const newScrollHeight = viewport.scrollHeight;
+          const heightDifference = newScrollHeight - prevScrollHeight;
+          viewport.scrollTop = heightDifference;
         }
       }, 0);
     } catch (err) {
+      console.error('❌ Error loading more messages:', err);
       setError(translations.failedToLoadClientData);
     } finally {
       setIsLoadingMore(false);
