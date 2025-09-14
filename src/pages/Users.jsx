@@ -4506,21 +4506,23 @@ export default function Clients() {
 
                           <TableCell className="text-right">
 
-                            <div className="flex items-center justify-end gap-1">
+                            <div className="flex flex-col items-end gap-2">
 
                               <Button
 
-                                variant="ghost"
+                                variant="outline"
 
-                                size="icon"
+                                size="sm"
 
                                 onClick={() => handleEdit(client)}
 
-                                className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                                className="text-green-600 hover:text-green-700 hover:bg-green-50 border-green-200 hover:border-green-300 transition-colors duration-200"
 
                               >
 
-                                <Edit className="h-4 w-4" />
+                                <Edit className="h-4 w-4 mr-2" />
+
+                                {translations.editClient || 'Edit Client'}
 
                               </Button>
 
@@ -4528,13 +4530,13 @@ export default function Clients() {
 
                                 <Button
 
-                                  variant="ghost"
+                                  variant="outline"
 
-                                  size="icon"
+                                  size="sm"
 
                                   onClick={() => handleDelete(client)}
 
-                                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                  className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 hover:border-red-300 transition-colors duration-200"
 
                                   disabled={deleteLoading === (client.user_code || client.id)}
 
@@ -4542,13 +4544,15 @@ export default function Clients() {
 
                                   {deleteLoading === (client.user_code || client.id) ? (
 
-                                    <div className="animate-spin h-4 w-4" />
+                                    <div className="animate-spin h-4 w-4 mr-2" />
 
                                   ) : (
 
-                                    <Trash2 className="h-4 w-4" />
+                                    <Trash2 className="h-4 w-4 mr-2" />
 
                                   )}
+
+                                  {translations.deleteClient || 'Delete Client'}
 
                                 </Button>
 

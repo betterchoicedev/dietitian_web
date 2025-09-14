@@ -160,8 +160,11 @@ export default function Chat() {
           const wasAtBottom = distanceFromBottom <= 50;
           
           setMessages(reversedMessages);
-          // Set firstMessageId to the oldest message (first in reversed array)
-          setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
+          // Only update firstMessageId if we don't have one yet (initial load)
+          // or if we're loading more messages and need to update it
+          if (!firstMessageId) {
+            setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
+          }
           setHasMoreMessages(latestMessages.length === 20);
           setLastRefreshTime(new Date());
           
@@ -285,6 +288,18 @@ export default function Chat() {
       }, 100);
     }
   }, [messages.length, firstMessageId]);
+
+  // Additional effect to ensure scroll to bottom on initial conversation load
+  useEffect(() => {
+    if (messages.length > 0 && conversationId && !isFetchingData) {
+      // Small delay to ensure DOM is fully rendered
+      setTimeout(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
+        setUserScrollPosition('bottom');
+        setHasNewMessages(false);
+      }, 200);
+    }
+  }, [conversationId, isFetchingData]); // Trigger when conversation loads
 
   // Add scroll event listeners to ScrollArea viewport
   useEffect(() => {
@@ -442,8 +457,10 @@ export default function Chat() {
       const reversedMessages = latestMessages.reverse();
       
       setMessages(reversedMessages);
-      // Set firstMessageId to the oldest message (first in reversed array)
-      setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
+      // Only update firstMessageId if we don't have one yet (initial load)
+      if (!firstMessageId) {
+        setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
+      }
       setHasMoreMessages(latestMessages.length === 20);
       setLastRefreshTime(new Date());
       setHasNewMessages(false); // Clear new message indicator on manual refresh
@@ -487,8 +504,10 @@ export default function Chat() {
       if (reversedMessages.length > messages.length) {
         console.log(`🧪 Test: New messages detected! Old: ${messages.length}, New: ${reversedMessages.length}`);
         setMessages(reversedMessages);
-        // Set firstMessageId to the oldest message (first in reversed array)
-        setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
+        // Only update firstMessageId if we don't have one yet (initial load)
+        if (!firstMessageId) {
+          setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
+        }
         setHasMoreMessages(latestMessages.length === 20);
         setLastRefreshTime(new Date());
       } else {
@@ -546,6 +565,13 @@ export default function Chat() {
       // Set firstMessageId to the oldest message (first in reversed array)
       setFirstMessageId(reversedMsgs.length > 0 ? reversedMsgs[0].id : null);
       setHasMoreMessages(msgs.length === 20);
+      
+      // Ensure scroll to bottom after loading messages
+      setTimeout(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
+        setUserScrollPosition('bottom');
+        setHasNewMessages(false);
+      }, 300);
     } catch (err) {
       setError(translations.failedToLoadClientData);
       setMessages([]);

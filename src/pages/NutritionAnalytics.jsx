@@ -257,7 +257,12 @@ export default function NutritionAnalytics() {
     return acc;
   }, {});
 
-  const chartData = Object.values(dailyChartData);
+  const chartData = Object.values(dailyChartData).sort((a, b) => {
+    // Sort by date in ascending order (oldest first, newest last)
+    const dateA = new Date(a.date);
+    const dateB = new Date(b.date);
+    return dateA - dateB;
+  });
 
   // Calculate nutrition statistics - daily averages
   const calculateNutritionStats = () => {
