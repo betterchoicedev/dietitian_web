@@ -125,16 +125,28 @@ export default function Login() {
               >
                 {loading ? translations.signingIn : translations.signIn}
               </Button>
-              <div className="text-sm text-center text-muted-foreground">
-                {translations.dontHaveAccount}{' '}
-                <Button 
-                  variant="link" 
-                  className="p-0 text-primary hover:text-primary-lighter font-semibold" 
-                  onClick={() => navigate('/register')}
-                  disabled={loading}
-                >
-                  {translations.register}
-                </Button>
+              <div className="text-sm text-center text-muted-foreground space-y-2">
+                <div>
+                  {translations.dontHaveAccount}{' '}
+                  <Button 
+                    variant="link" 
+                    className="p-0 text-primary hover:text-primary-lighter font-semibold" 
+                    onClick={() => navigate('/register')}
+                    disabled={loading}
+                  >
+                    {translations.register}
+                  </Button>
+                </div>
+                <div>
+                  <Button 
+                    variant="link" 
+                    className="p-0 text-muted-foreground hover:text-primary font-semibold" 
+                    onClick={() => navigate('/reset-password')}
+                    disabled={loading}
+                  >
+                    {translations.forgotPassword}
+                  </Button>
+                </div>
               </div>
             </CardFooter>
           </form>

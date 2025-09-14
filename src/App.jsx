@@ -5,6 +5,8 @@ import { ClientProvider } from '@/contexts/ClientContext';
 import Layout from '@/pages/Layout';
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
+import ResetPassword from '@/pages/ResetPassword';
+import ResetPasswordConfirm from '@/pages/ResetPasswordConfirm';
 import Dashboard from '@/pages/Dashboard';
 import Users from '@/pages/Users';
 import Chat from '@/pages/Chat';
@@ -39,6 +41,11 @@ function PublicRoute({ children }) {
   return children;
 }
 
+// Password Reset Route component (allows logged-in users to reset password)
+function PasswordResetRoute({ children }) {
+  return children;
+}
+
 function App() {
   return (
     <Router>
@@ -56,6 +63,16 @@ function App() {
                 <PublicRoute>
                   <Register />
                 </PublicRoute>
+              } />
+              <Route path="/reset-password" element={
+                <PublicRoute>
+                  <ResetPassword />
+                </PublicRoute>
+              } />
+              <Route path="/reset-password-confirm" element={
+                <PasswordResetRoute>
+                  <ResetPasswordConfirm />
+                </PasswordResetRoute>
               } />
               
               {/* Root redirect to login */}

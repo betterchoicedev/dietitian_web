@@ -79,6 +79,43 @@ export function AuthProvider({ children }) {
         return { error };
       }
     },
+    resetPassword: async (email) => {
+      try {
+        const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/reset-password-confirm?reset=true`,
+        });
+        if (error) throw error;
+        return { data, error: null };
+      } catch (error) {
+        console.error('Error resetting password:', error);
+        return { data: null, error };
+      }
+    },
+    updatePassword: async (newPassword) => {
+      try {
+        // First, get the current session to ensure we're authenticated
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          throw sessionError;
+        }
+        
+        if (!session) {
+          throw new Error('No active session. Please use the password reset link from your email.');
+        }
+
+        // Update the password
+        const { data, error } = await supabase.auth.updateUser({
+          password: newPassword
+        });
+        
+        if (error) throw error;
+        return { data, error: null };
+      } catch (error) {
+        console.error('Error updating password:', error);
+        return { data: null, error };
+      }
+    },
     user,
     loading,
     error
