@@ -180,10 +180,13 @@ export default function Layout() {
     }
   };
 
-  // Filter clients based on search term
-  const filteredClients = clients.filter(client => 
-    client.full_name?.toLowerCase().includes(clientSearchTerm.toLowerCase())
-  );
+  // Filter clients based on search term (search both name and user_code)
+  const filteredClients = clients.filter(client => {
+    const searchTerm = clientSearchTerm.toLowerCase();
+    const name = client.full_name?.toLowerCase() || '';
+    const userCode = client.user_code?.toLowerCase() || '';
+    return name.includes(searchTerm) || userCode.includes(searchTerm);
+  });
 
   if (isLoading) {
     return (
@@ -269,7 +272,7 @@ export default function Layout() {
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
-                        placeholder="Search clients..."
+                        placeholder="Search by name or code..."
                         value={clientSearchTerm}
                         onChange={(e) => setClientSearchTerm(e.target.value)}
                         className="pl-10 h-9 bg-white/80 border-border/40 focus:border-primary/60"
@@ -292,7 +295,12 @@ export default function Layout() {
                               <User className="h-3 w-3 text-primary" />
                             </div>
                             <div className="flex-1 min-w-0 overflow-hidden">
-                              <div className="font-medium text-gray-800 truncate">{client.full_name}</div>
+                              <div className="font-medium text-gray-800 truncate">
+                                {client.full_name || 'No Name'}
+                              </div>
+                              <div className="text-xs text-gray-500 truncate">
+                                {translations.clientCode}: {client.user_code}
+                              </div>
                             </div>
                           </div>
                         </SelectItem>

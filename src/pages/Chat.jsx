@@ -46,6 +46,7 @@ export default function Chat() {
   const [showSuccessToast, setShowSuccessToast] = useState(false); // Success toast state
   const [toastMessage, setToastMessage] = useState(''); // Toast message content
   const [toastType, setToastType] = useState('success'); // Toast type (success, error, etc.)
+  const [messageType, setMessageType] = useState('dietitian'); // Message type: 'dietitian', 'system_reminder'
   
   // Scroll position tracking for auto-refresh
   const [userScrollPosition, setUserScrollPosition] = useState('bottom'); // 'bottom', 'middle', 'top'
@@ -369,8 +370,14 @@ export default function Chat() {
       if (queueData.role === 'user') {
         messageType = 'user_message';
       } else if (queueData.role === 'assistant') {
-        // If it has a dietitian_id, it's a dietitian message, otherwise it's AI
-        messageType = queueData.dietitian_id ? 'dietitian_message' : 'ai_response';
+        // Check if it's a system reminder or dietitian message
+        if (queueData.isSystemReminder) {
+          messageType = 'system_reminder';
+        } else if (queueData.dietitian_id) {
+          messageType = 'dietitian_message';
+        } else {
+          messageType = 'ai_response';
+        }
       } else {
         messageType = 'unknown';
       }
@@ -639,56 +646,81 @@ export default function Chat() {
         // Dietitian is sending a message - send directly to new queue
         console.log('👨‍⚕️ Dietitian sending message directly...');
         
-        // Add to new user_message_queue table
-        const getProfessionalDietitianName = (user) => {
-          if (!user) return 'Dietitian';
+        let queueData;
+        let tempMessage;
+        
+        if (messageType === 'system_reminder') {
+          // System reminder message - no dietitian name
+          queueData = {
+            conversation_id: conversationId,
+            client_id: clientId,
+            dietitian_id: currentDietitian.id,
+            user_code: selectedClient.user_code,
+            content: message,
+            role: 'assistant',
+            priority: 1,
+            isSystemReminder: true
+          };
+          
+          tempMessage = {
+            id: `temp-${Date.now()}`,
+            role: 'assistant',
+            content: message,
+            conversation_id: conversationId,
+            created_at: new Date().toISOString(),
+            isSystemReminder: true // Flag to identify system reminder messages
+          };
+        } else {
+          // Regular dietitian message with name
+          const getProfessionalDietitianName = (user) => {
+            if (!user) return 'Dietitian';
 
-          // Get full name from metadata
-          const fullName = user?.user_metadata?.full_name || user?.user_metadata?.name;
+            // Get full name from metadata
+            const fullName = user?.user_metadata?.full_name || user?.user_metadata?.name;
 
-          if (fullName) {
-            // Use first name only for more professional, personal feel
-            const firstName = fullName.split(' ')[0];
-            // Add professional title if available in metadata
-            const title = user?.user_metadata?.title || user?.user_metadata?.professional_title;
-            return title ? `${title} ${firstName}` : firstName;
-          }
+            if (fullName) {
+              // Use first name only for more professional, personal feel
+              const firstName = fullName.split(' ')[0];
+              // Add professional title if available in metadata
+              const title = user?.user_metadata?.title || user?.user_metadata?.professional_title;
+              return title ? `${title} ${firstName}` : firstName;
+            }
 
-          // Fallback to email username with professional formatting
-          const emailUsername = user?.email?.split('@')[0];
-          if (emailUsername) {
-            return emailUsername.charAt(0).toUpperCase() + emailUsername.slice(1);
-          }
+            // Fallback to email username with professional formatting
+            const emailUsername = user?.email?.split('@')[0];
+            if (emailUsername) {
+              return emailUsername.charAt(0).toUpperCase() + emailUsername.slice(1);
+            }
 
-          return 'Dietitian';
-        };
+            return 'Dietitian';
+          };
 
-        const dietitianName = getProfessionalDietitianName(currentDietitian);
-        const queueData = {
-          conversation_id: conversationId,
-          client_id: clientId,
-          dietitian_id: currentDietitian.id,
-          user_code: selectedClient.user_code,
-          content: `${dietitianName}: ${message}`,
-          role: 'assistant',
-          priority: 1
-        };
+          const dietitianName = getProfessionalDietitianName(currentDietitian);
+          queueData = {
+            conversation_id: conversationId,
+            client_id: clientId,
+            dietitian_id: currentDietitian.id,
+            user_code: selectedClient.user_code,
+            content: `${dietitianName}: ${message}`,
+            role: 'assistant',
+            priority: 1
+          };
+          
+          tempMessage = {
+            id: `temp-${Date.now()}`,
+            role: 'assistant',
+            content: `${dietitianName}: ${message}`,
+            conversation_id: conversationId,
+            created_at: new Date().toISOString(),
+            isDietitianMessage: true // Flag to identify dietitian messages for special styling
+          };
+        }
         
         await addToUserMessageQueue(queueData);
-        console.log('✅ Dietitian message added to new queue');
-        
-        // Create a temporary message object for local display
-        const tempDietitianMessage = {
-          id: `temp-${Date.now()}`,
-          role: 'assistant',
-          content: `${dietitianName}: ${message}`,
-          conversation_id: conversationId,
-          created_at: new Date().toISOString(),
-          isDietitianMessage: true // Flag to identify dietitian messages for special styling
-        };
+        console.log(`✅ ${messageType === 'system_reminder' ? 'System reminder' : 'Dietitian'} message added to new queue`);
         
         // Update local state with the temporary message
-        setMessages(prev => [tempDietitianMessage, ...prev]);
+        setMessages(prev => [tempMessage, ...prev]);
         
         // Clear form
         setMessage('');
@@ -703,9 +735,9 @@ export default function Chat() {
         }, 100);
         
         // Show success toast
-        showToast(`✅ Message sent to ${selectedClient.full_name}!`, 'success');
+        showToast(`✅ ${messageType === 'system_reminder' ? 'System reminder' : 'Message'} sent to ${selectedClient.full_name}!`, 'success');
         
-        console.log('✅ Dietitian message sent successfully');
+        console.log(`✅ ${messageType === 'system_reminder' ? 'System reminder' : 'Dietitian'} message sent successfully`);
         return;
       }
 
@@ -1228,6 +1260,7 @@ Your task is to respond to the user's message below, taking into account their s
            ));
   };
 
+
   // Function to render message content with images
   const renderMessageContent = (msg) => {
     const { text, imageUrl } = extractImageFromContent(msg.content);
@@ -1269,7 +1302,7 @@ Your task is to respond to the user's message below, taking into account their s
           </div>
         )}
 
-        {/* Show text content with professional formatting for dietitians */}
+        {/* Show text content with different formatting based on message type */}
         {isFromDietitian ? (
           <div className="space-y-1">
             {/* Extract dietitian name and message content */}
@@ -1289,19 +1322,19 @@ Your task is to respond to the user's message below, taking into account their s
                         {dietitianName}
                       </span>
                     </div>
-                    <div className="whitespace-pre-wrap text-slate-800 leading-relaxed pl-8 border-l-2 border-emerald-200">
+                    <div className="whitespace-pre-wrap text-slate-800 leading-tight pl-8 border-l-2 border-emerald-200 text-xs">
                       {messageContent}
                     </div>
                   </>
                 );
               } else {
                 // Fallback if no colon found
-                return <div className="whitespace-pre-wrap">{text}</div>;
+                return <div className="whitespace-pre-wrap text-xs leading-tight">{text}</div>;
               }
             })()}
           </div>
         ) : (
-          <div className="whitespace-pre-wrap">{text}</div>
+          <div className="whitespace-pre-wrap text-xs leading-tight">{text}</div>
         )}
       </>
     );
@@ -1433,7 +1466,7 @@ Your task is to respond to the user's message below, taking into account their s
   }
 
   return (
-    <div className="h-[calc(100vh-8rem)] bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/50">
+    <div className="h-[calc(100vh-6rem)] bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/50">
       <div className="flex flex-col h-full space-y-3 p-4">
         {/* Premium Merged Header Card */}
         {selectedClient && (
@@ -1469,14 +1502,34 @@ Your task is to respond to the user's message below, taking into account their s
                       </div>
                     </div>
                   )}
-                  <div className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl">
-                    <div className={`w-2 h-2 rounded-full ${isUserActive ? 'bg-yellow-500' : 'bg-green-500'} ${!isUserActive ? 'animate-pulse' : ''}`}></div>
-                    <span className="text-sm font-medium text-green-700">
-                      {isUserActive ? translations.userActive || 'User Active' : translations.autoRefresh || 'Auto-refresh'}
-                    </span>
-                  </div>
                   
-                 
+                  {/* Message Type Icons - only show for dietitians */}
+                  {currentDietitian?.id && clientId && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setMessageType('dietitian')}
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-200 ${
+                          messageType === 'dietitian'
+                            ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg'
+                            : 'bg-gradient-to-r from-slate-100 to-slate-200 text-slate-600 hover:from-slate-200 hover:to-slate-300'
+                        }`}
+                        title={translations.dietitianMessage}
+                      >
+                        <Users className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => setMessageType('system_reminder')}
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-200 ${
+                          messageType === 'system_reminder'
+                            ? 'bg-gradient-to-r from-orange-500 to-red-600 text-white shadow-lg'
+                            : 'bg-gradient-to-r from-slate-100 to-slate-200 text-slate-600 hover:from-slate-200 hover:to-slate-300'
+                        }`}
+                        title={translations.systemReminder}
+                      >
+                        <MessageSquare className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"
@@ -1495,16 +1548,6 @@ Your task is to respond to the user's message below, taking into account their s
                         {translations.refresh || 'Refresh'}
                       </>
                     )}
-                  </Button>
-                  
-                  {/* View Queue Button */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={viewMessageQueue}
-                    className="px-3 py-2 bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200 hover:from-orange-100 hover:to-red-100 text-orange-700 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300"
-                  >
-                    📬 View Queue
                   </Button>
                   
                   {lastRefreshTime && (
@@ -1578,7 +1621,7 @@ Your task is to respond to the user's message below, taking into account their s
                     messages.map((msg, index) => (
                       <div
                         key={msg.id || index}
-                        className={`mb-4 flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                        className={`mb-2 flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                       >
                         <div className="flex flex-col max-w-[85%]">
                           {shouldShowDateSeparator(msg, messages[index - 1]) && (
@@ -1593,17 +1636,17 @@ Your task is to respond to the user's message below, taking into account their s
                             </div>
                           )}
                           <div
-                            className={`rounded-xl px-4 py-3 pb-8 shadow-lg transition-all duration-300 hover:shadow-xl relative ${
+                            className={`rounded-lg px-3 py-2 pb-4 shadow-lg transition-all duration-300 hover:shadow-xl relative ${
                               msg.role === 'user'
                                 ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white'
                                 : 'bg-gradient-to-r from-slate-50 to-white border border-slate-200 text-slate-800'
                             }`}
                           >
-                            <div className="pr-16">
+                            <div className="pr-12">
                               {renderMessageContent(msg)}
                             </div>
                             {/* Message Timestamp - positioned inside message box on the right */}
-                            <div className={`absolute bottom-2.5 right-2.5 text-xs ${
+                            <div className={`absolute bottom-1.5 right-2.5 text-xs ${
                               msg.role === 'user' ? 'text-emerald-50' : 'text-slate-400'
                             }`}>
                               <span className={`px-1.5 py-0.5 rounded-md font-mono text-center ${
@@ -1635,12 +1678,13 @@ Your task is to respond to the user's message below, taking into account their s
             </div>
 
             {/* Premium Message Input Section */}
-            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-white/90 to-white/80 backdrop-blur-2xl border border-white/20 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.1)]">
+            <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-white/90 to-white/80 backdrop-blur-2xl border border-white/20 shadow-lg">
               {/* Animated background */}
               <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/5 via-teal-500/5 to-blue-500/5"></div>
-              <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-br from-emerald-400/10 to-teal-400/10 rounded-full blur-3xl"></div>
+              <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-emerald-400/10 to-teal-400/10 rounded-full blur-2xl"></div>
               
-              <div className="relative z-10 p-4">
+              <div className="relative z-10 p-3">
+                
                 <div className="flex gap-3">
                   <input
                     type="file"
@@ -1654,36 +1698,42 @@ Your task is to respond to the user's message below, taking into account their s
                     size="icon"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isLoading}
-                    className={`w-12 h-12 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 hover:from-blue-100 hover:to-indigo-100 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 ${
+                    className={`w-10 h-10 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 hover:from-blue-100 hover:to-indigo-100 rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 ${
                       imageFile ? 'bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-200 text-emerald-600' : 'text-blue-600'
                     }`}
                   >
-                    <ImageIcon className="h-5 w-5" />
+                    <ImageIcon className="h-4 w-4" />
                   </Button>
                   <Input
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     onKeyPress={handleKeyPress}
-                    placeholder={`${translations.messageClient} ${selectedClient.full_name}...`}
+                    placeholder={
+                      currentDietitian?.id && clientId 
+                        ? (messageType === 'system_reminder' 
+                            ? `${translations.sendSystemReminder} ${selectedClient.full_name}...` 
+                            : `${translations.messageClient} ${selectedClient.full_name}...`)
+                        : `${translations.messageClient} ${selectedClient.full_name}...`
+                    }
                     disabled={isLoading}
-                    className="flex-1 h-12 bg-white/60 backdrop-blur-sm border border-white/20 rounded-xl shadow-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500/40 transition-all duration-300"
+                    className="flex-1 h-10 bg-white/60 backdrop-blur-sm border border-white/20 rounded-lg shadow-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500/40 transition-all duration-300 text-sm"
                   />
                   <Button
                     onClick={handleSend}
                     disabled={(!message.trim() && !imageFile) || isLoading}
-                    className="w-12 h-12 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
+                    className="w-10 h-10 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
                   >
                     {isLoading ? (
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
                     ) : (
-                      <Send className="h-5 w-5" />
+                      <Send className="h-4 w-4" />
                     )}
                   </Button>
                 </div>
                 {imageFile && (
-                  <div className="mt-3 p-2 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl">
-                    <div className="flex items-center gap-2 text-emerald-700 text-sm">
-                      <div className="w-6 h-6 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg flex items-center justify-center">
+                  <div className="mt-2 p-2 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-lg">
+                    <div className="flex items-center gap-2 text-emerald-700 text-xs">
+                      <div className="w-5 h-5 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-md flex items-center justify-center">
                         <ImageIcon className="h-3 w-3 text-white" />
                       </div>
                       <span className="font-medium">{translations.imageSelected}: {imageFile.name}</span>

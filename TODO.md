@@ -61,14 +61,28 @@
 
 ### 12. Translation Fixes
 - **Issue**: Translation system needs fixes
-- **Status**: Pending
+- **Status**: Roy Fixed
+
+## Communication & Deployment
+
+### 13. Notify Emanuel About New Deployment
+- **Issue**: Tell Emanuel we are doing new deployment tomorrow
+- **Status**: Done
+
+### 14. Future Meal Plan Activation Notification
+- **Issue**: When the client has a future meal plan to activate, tell them 3 days before "you have a new meal plan in a couple of days"
+- **Status**: Done
+- **Implementation**:
+  - Add notification system to check for future meal plans
+  - Send notification 3 days before activation date
+  - Create automated message: "Hi! You have a new meal plan coming in a couple of days"
 
 ---
 
 ## Notes
 - Created: $(date)
 - Last Updated: $(date)
-- Total Tasks: 12
+- Total Tasks: 14
 - Completed: 4
 - In Progress: 0
-- Pending: 8
+- Pending: 10

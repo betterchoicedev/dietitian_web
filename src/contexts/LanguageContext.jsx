@@ -140,6 +140,11 @@ export const translations = {
     failedToSend: 'Failed to send message. Please try again.',
     failedToLoadClients: 'Failed to load clients. Please try again later.',
     failedToLoadClientData: 'Failed to load client data. Please try again later.',
+    dietitianMessage: 'Dietitian Message',
+    systemReminder: 'System Reminder',
+    messageType: 'Message Type',
+    systemReminderDescription: 'Send as a system reminder without dietitian name',
+    sendSystemReminder: 'Send system reminder to',
     
     // Login page
     enterCredentials: 'Enter your credentials to access your account',
@@ -756,7 +761,6 @@ export const translations = {
     deleteUser: 'Delete User',
     suspendUser: 'Suspend User',
     activateUser: 'Activate User',
-    resetPassword: 'Reset Password',
     sendMessage: 'Send Message',
     exportUserData: 'Export User Data',
     userSearchPlaceholder: 'Search by name, email, or ID...',
@@ -822,7 +826,6 @@ export const translations = {
     twoFactorAuth: 'Two-Factor Authentication',
     passwordChange: 'Change Password',
     currentPassword: 'Current Password',
-    newPassword: 'New Password',
     confirmPassword: 'Confirm Password',
 
     // Forms & Validation
@@ -912,6 +915,12 @@ export const translations = {
     unpublished: 'Unpublished',
     activated: 'Activated',
     deactivated: 'Deactivated',
+    draft: 'Draft',
+    active: 'Active',
+    scheduled: 'Scheduled',
+    expired: 'Expired',
+    manageDates: 'Manage Dates',
+    manageMenuDates: 'Manage Menu Dates',
     completed: 'Completed',
     failed: 'Failed',
     pending: 'Pending',
@@ -1125,6 +1134,11 @@ export const translations = {
     failedToSend: 'שליחת ההודעה נכשלה. אנא נסה שוב.',
     failedToLoadClients: 'טעינת הלקוחות נכשלה. אנא נסה שוב מאוחר יותר.',
     failedToLoadClientData: 'טעינת נתוני הלקוח נכשלה. אנא נסה שוב מאוחר יותר.',
+    dietitianMessage: 'הודעת דיאטנית',
+    systemReminder: 'תזכורת מערכת',
+    messageType: 'סוג הודעה',
+    systemReminderDescription: 'שלח כתזכורת מערכת ללא שם דיאטנית',
+    sendSystemReminder: 'שלח תזכורת מערכת ל',
     
     // Login page
     enterCredentials: 'הכנס את פרטי הגישה שלך כדי לגשת לחשבון שלך',
@@ -1798,6 +1812,12 @@ export const translations = {
     proTip1: 'התאם אחוז מאקרו אחד ומאקרו לא נעולים יאוזנו אוטומטית',
     proTip2: 'השתמש בכפתורי הנעילה (🔒/🔓) כדי למנוע שינוי מאקרו ספציפיים',
     proTip3: 'שאף ל-100% סה״כ כדי להבטיח שכל הקלוריות מחושבות',
+    draft: 'טיוטה',
+    active: 'פעיל',
+    scheduled: 'מתוזמן',
+    expired: 'פג תוקף',
+    manageDates: 'נהל תאריכים',
+    manageMenuDates: 'נהל תאריכי תפריט',
   }
 };
 

@@ -19,6 +19,239 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+// Helper function to get user language preference
+// Returns the actual language value from database, or 'en' as fallback
+// Only 'he' will trigger Hebrew notifications, everything else gets English
+const getUserLanguage = async (userCode) => {
+  try {
+    console.log('🔍 Fetching language for user_code:', userCode);
+    const { data: userData, error: userError } = await supabase
+      .from('chat_users')
+      .select('language')
+      .eq('user_code', userCode)
+      .single();
+    
+    console.log('📊 Language query result:', { userData, userError });
+    
+    if (!userError && userData?.language) {
+      console.log('📝 User language preference found:', userData.language);
+      return userData.language; // Return whatever is in the database
+    } else {
+      console.log('⚠️ No language found or error occurred, using default English');
+    }
+  } catch (langError) {
+    console.warn('Could not fetch user language preference, using default English:', langError);
+  }
+  
+  return 'en'; // Default to English if no language found
+};
+
+// Function to send meal plan activation notification
+const sendMealPlanActivationNotification = async (userCode, mealPlanName, clientId) => {
+  try {
+    console.log('📬 Sending meal plan activation notification...');
+    
+    // Get current user (dietitian) info
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      console.error('Error getting current user for notification:', authError);
+      return;
+    }
+
+    // Get user's language preference
+    const userLanguage = await getUserLanguage(userCode);
+    console.log('🌐 Detected language for notification:', userLanguage, '(type:', typeof userLanguage, ')');
+
+    // Set notification message based on user language (only Hebrew gets Hebrew, everything else gets English)
+    // This handles: 'he' = Hebrew, anything else (en, null, undefined, etc.) = English
+    const notificationMessage = userLanguage === 'he' 
+      ? `יש לך תפריט חדש! שאל את הצ'אט למידע נוסף.`
+      : `You have a new meal plan! ask the chat for more info.`;
+    
+    console.log('📝 Notification message to send:', notificationMessage);
+
+    // Add notification to user_message_queue table
+    const { data, error } = await supabase
+      .from('user_message_queue')
+      .insert({
+        user_id: clientId,
+        user_code: userCode,
+        message_type: 'system_reminder',
+        message_content: notificationMessage,
+        message_priority: 1, // High priority for meal plan notifications
+        scheduled_for: new Date().toISOString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        trigger_type: 'immediate',
+        context_data: {
+          notification_type: 'meal_plan_activation',
+          meal_plan_name: mealPlanName
+        },
+        status: 'pending'
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error adding meal plan notification to user_message_queue:', error);
+      throw error;
+    }
+
+    console.log('✅ Meal plan activation notification sent successfully:', data);
+    return data;
+  } catch (error) {
+    console.error('Failed to send meal plan activation notification:', error);
+    // Don't throw error to avoid breaking the main flow
+    console.warn('Meal plan activation notification failed, but status was updated successfully');
+  }
+};
+
+// Function to check for future meal plans and send 2-3 day advance notifications
+const checkAndSendFutureMealPlanNotifications = async () => {
+  try {
+    console.log('🔍 Checking for future meal plans that need 2-3 day advance notifications...');
+    
+    // Calculate dates 2 and 3 days from now
+    const twoDaysFromNow = new Date();
+    twoDaysFromNow.setDate(twoDaysFromNow.getDate() + 2);
+    const twoDayTarget = twoDaysFromNow.toISOString().split('T')[0];
+    
+    const threeDaysFromNow = new Date();
+    threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
+    const threeDayTarget = threeDaysFromNow.toISOString().split('T')[0];
+    
+    // Find meal plans scheduled to be active in 2-3 days
+    const { data: futureMealPlans, error } = await supabase
+      .from('meal_plans_and_schemas')
+      .select('id, user_code, meal_plan_name, active_from, status')
+      .eq('status', 'scheduled')
+      .in('active_from', [twoDayTarget, threeDayTarget]);
+    
+    if (error) {
+      console.error('Error fetching future meal plans:', error);
+      return;
+    }
+    
+    if (!futureMealPlans || futureMealPlans.length === 0) {
+      console.log('📅 No meal plans scheduled for activation in 2-3 days');
+      return;
+    }
+    
+    console.log(`📅 Found ${futureMealPlans.length} meal plan(s) scheduled for activation in 2-3 days`);
+    
+    // Send notifications for each future meal plan
+    for (const mealPlan of futureMealPlans) {
+      try {
+        // Check if we already sent a notification for this meal plan today
+        const today = new Date().toISOString().split('T')[0];
+        const { data: existingNotification, error: checkError } = await supabase
+          .from('user_message_queue')
+          .select('id')
+          .eq('user_code', mealPlan.user_code)
+          .eq('message_type', 'system_reminder')
+          .eq('context_data->notification_type', 'future_meal_plan_advance')
+          .eq('context_data->meal_plan_name', mealPlan.meal_plan_name || 'Untitled Meal Plan')
+          .gte('scheduled_for', `${today}T00:00:00.000Z`)
+          .lt('scheduled_for', `${today}T23:59:59.999Z`)
+          .limit(1);
+        
+        if (checkError) {
+          console.error('Error checking existing notifications:', checkError);
+          continue;
+        }
+        
+        if (existingNotification && existingNotification.length > 0) {
+          console.log(`📬 Notification already sent today for meal plan: ${mealPlan.meal_plan_name}`);
+          continue;
+        }
+        
+        // Get client ID for notification
+        const { data: clientData, error: clientError } = await supabase
+          .from('chat_users')
+          .select('id')
+          .eq('user_code', mealPlan.user_code)
+          .single();
+        
+        if (clientData && !clientError) {
+          // Send advance notification
+          await sendFutureMealPlanNotification(
+            mealPlan.user_code, 
+            mealPlan.meal_plan_name || 'Untitled Meal Plan', 
+            clientData.id,
+            mealPlan.active_from
+          );
+        } else {
+          console.warn(`Could not find client ID for user_code: ${mealPlan.user_code}`);
+        }
+      } catch (notificationError) {
+        console.error(`Error sending notification for meal plan ${mealPlan.id}:`, notificationError);
+      }
+    }
+    
+  } catch (error) {
+    console.error('Error checking future meal plan notifications:', error);
+  }
+};
+
+// Function to send 3-day advance notification
+const sendFutureMealPlanNotification = async (userCode, mealPlanName, clientId, activationDate) => {
+  try {
+    console.log('📬 Sending 3-day advance meal plan notification...');
+    
+    // Get current user (dietitian) info
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      console.error('Error getting current user for notification:', authError);
+      return;
+    }
+
+    // Get user's language preference
+    const userLanguage = await getUserLanguage(userCode);
+    console.log('🌐 Detected language for future notification:', userLanguage, '(type:', typeof userLanguage, ')');
+
+    // Set notification message based on user language (only Hebrew gets Hebrew, everything else gets English)
+    // This handles: 'he' = Hebrew, anything else (en, null, undefined, etc.) = English
+    const notificationMessage = userLanguage === 'he' 
+      ? `יש לך תפריט חדש שמגיע בעוד כמה ימים!`
+      : `You have a new meal plan coming in a couple of days!`;
+    
+    console.log('📝 Future notification message to send:', notificationMessage);
+
+    // Add notification to user_message_queue table
+    const { data, error } = await supabase
+      .from('user_message_queue')
+      .insert({
+        user_id: clientId,
+        user_code: userCode,
+        message_type: 'system_reminder',
+        message_content: notificationMessage,
+        message_priority: 2, // Medium priority for advance notifications
+        scheduled_for: new Date().toISOString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        trigger_type: 'immediate',
+        context_data: {
+          notification_type: 'future_meal_plan_advance',
+          meal_plan_name: mealPlanName,
+          activation_date: activationDate
+        },
+        status: 'pending'
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error adding future meal plan notification to user_message_queue:', error);
+      throw error;
+    }
+
+    console.log('✅ Future meal plan notification sent successfully:', data);
+    return data;
+  } catch (error) {
+    console.error('Failed to send future meal plan notification:', error);
+  }
+};
+
 const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
@@ -304,6 +537,8 @@ const MenuLoad = () => {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [checkingExpired, setCheckingExpired] = useState(false);
   const [expiredCheckResult, setExpiredCheckResult] = useState(null);
+  const [checkingFuture, setCheckingFuture] = useState(false);
+  const [futureCheckResult, setFutureCheckResult] = useState(null);
   const [generatingAlt, setGeneratingAlt] = useState({});
   const [loading, setLoading] = useState(false);
   const [userTargets, setUserTargets] = useState(null);
@@ -586,6 +821,8 @@ const MenuLoad = () => {
 
   useEffect(() => {
     loadMenus();
+    // Note: Future meal plan notifications are now only sent via manual check button
+    // to prevent duplicate notifications on page refresh
   }, []);
 
   const filteredMenus = menus.filter(menu => {
@@ -610,6 +847,8 @@ const MenuLoad = () => {
         return 'bg-green-100 text-green-800 border-green-200';
       case 'published':
         return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'scheduled':
+        return 'bg-purple-100 text-purple-800 border-purple-200';
       case 'draft':
         return 'bg-yellow-100 text-yellow-800 border-yellow-200';
       case 'expired':
@@ -960,6 +1199,12 @@ const MenuLoad = () => {
         updateData.active_from = null;
         updateData.active_until = null;
       }
+      
+      // If status is being set to scheduled, require active_from date
+      if (statusForm.status === 'scheduled' && !statusForm.active_from) {
+        setError('Scheduled status requires an activation date');
+        return;
+      }
 
       // Deactivation of other active menus (if needed) is handled in the API layer
 
@@ -995,6 +1240,29 @@ const MenuLoad = () => {
           console.error('Error adding to second table:', secondTableError);
           // Don't fail the entire operation, just log the error
           console.warn('Failed to add meal plan to second table, but status was updated successfully');
+        }
+      }
+      
+      // Send notification if meal plan was activated
+      if (statusForm.status === 'active') {
+        try {
+          const mealPlanName = selectedMenuForStatus.meal_plan_name || 'Untitled Meal Plan';
+          const userCode = selectedMenuForStatus.user_code;
+          
+          // Get client ID for notification
+          const { data: clientData, error: clientError } = await supabase
+            .from('chat_users')
+            .select('id')
+            .eq('user_code', userCode)
+            .single();
+          
+          if (clientData && !clientError) {
+            await sendMealPlanActivationNotification(userCode, mealPlanName, clientData.id);
+          } else {
+            console.warn('Could not find client ID for notification, but meal plan was activated successfully');
+          }
+        } catch (notificationError) {
+          console.error('Notification error (non-blocking):', notificationError);
         }
       }
       
@@ -1534,6 +1802,110 @@ const MenuLoad = () => {
       }
     };
   }, [editedMenu, loading]);
+
+  // Manual check for future meal plan notifications
+  const manualCheckFutureMealPlans = async () => {
+    try {
+      setCheckingFuture(true);
+      setFutureCheckResult(null);
+      setError(null);
+      
+      console.log('🔍 Manually checking for future meal plan notifications...');
+      
+      // Calculate dates 2 and 3 days from now
+      const twoDaysFromNow = new Date();
+      twoDaysFromNow.setDate(twoDaysFromNow.getDate() + 2);
+      const twoDayTarget = twoDaysFromNow.toISOString().split('T')[0];
+      
+      const threeDaysFromNow = new Date();
+      threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
+      const threeDayTarget = threeDaysFromNow.toISOString().split('T')[0];
+      
+      // Find meal plans scheduled to be active in 2-3 days
+      const { data: futureMealPlans, error } = await supabase
+        .from('meal_plans_and_schemas')
+        .select('id, user_code, meal_plan_name, active_from, status')
+        .eq('status', 'scheduled')
+        .in('active_from', [twoDayTarget, threeDayTarget]);
+      
+      if (error) {
+        throw error;
+      }
+      
+      let notificationsSent = 0;
+      let errors = 0;
+      
+      if (futureMealPlans && futureMealPlans.length > 0) {
+        console.log(`📅 Found ${futureMealPlans.length} meal plan(s) scheduled for activation in 2-3 days`);
+        
+        // Send notifications for each future meal plan
+        for (const mealPlan of futureMealPlans) {
+          try {
+            // Check if we already sent a notification for this meal plan today
+            const today = new Date().toISOString().split('T')[0];
+            const { data: existingNotification, error: checkError } = await supabase
+              .from('user_message_queue')
+              .select('id')
+              .eq('user_code', mealPlan.user_code)
+              .eq('message_type', 'system_reminder')
+              .eq('context_data->notification_type', 'future_meal_plan_advance')
+              .eq('context_data->meal_plan_name', mealPlan.meal_plan_name || 'Untitled Meal Plan')
+              .gte('scheduled_for', `${today}T00:00:00.000Z`)
+              .lt('scheduled_for', `${today}T23:59:59.999Z`)
+              .limit(1);
+            
+            if (checkError) {
+              console.error('Error checking existing notifications:', checkError);
+              errors++;
+              continue;
+            }
+            
+            if (existingNotification && existingNotification.length > 0) {
+              console.log(`📬 Notification already sent today for meal plan: ${mealPlan.meal_plan_name}`);
+              continue;
+            }
+            
+            // Get client ID for notification
+            const { data: clientData, error: clientError } = await supabase
+              .from('chat_users')
+              .select('id')
+              .eq('user_code', mealPlan.user_code)
+              .single();
+            
+            if (clientData && !clientError) {
+              // Send advance notification
+              await sendFutureMealPlanNotification(
+                mealPlan.user_code, 
+                mealPlan.meal_plan_name || 'Untitled Meal Plan', 
+                clientData.id,
+                mealPlan.active_from
+              );
+              notificationsSent++;
+            } else {
+              console.warn(`Could not find client ID for user_code: ${mealPlan.user_code}`);
+              errors++;
+            }
+          } catch (notificationError) {
+            console.error(`Error sending notification for meal plan ${mealPlan.id}:`, notificationError);
+            errors++;
+          }
+        }
+      }
+      
+      setFutureCheckResult({
+        found: futureMealPlans?.length || 0,
+        notificationsSent,
+        errors,
+        targetDate: `${twoDayTarget} or ${threeDayTarget}`
+      });
+      
+    } catch (error) {
+      console.error('Error in manualCheckFutureMealPlans:', error);
+      setError('Failed to check future meal plans: ' + error.message);
+    } finally {
+      setCheckingFuture(false);
+    }
+  };
 
   // Check and update expired menus
   const checkAndUpdateExpiredMenus = async () => {
@@ -2241,6 +2613,27 @@ const MenuLoad = () => {
         </Alert>
       )}
 
+      {futureCheckResult && (
+        <Alert variant={futureCheckResult.found > 0 ? "default" : "secondary"}>
+          <AlertTitle>
+            {futureCheckResult.found > 0 ? 'Future Meal Plan Notifications' : 'No Future Meal Plans'}
+          </AlertTitle>
+          <AlertDescription>
+            {futureCheckResult.found > 0 ? (
+              <div className="space-y-2">
+                <p>Found {futureCheckResult.found} meal plan(s) scheduled for activation on {futureCheckResult.targetDate}.</p>
+                <p>Successfully sent {futureCheckResult.notificationsSent} notification(s).</p>
+                {futureCheckResult.errors > 0 && (
+                  <p className="text-red-600">Failed to send {futureCheckResult.errors} notification(s).</p>
+                )}
+              </div>
+            ) : (
+              <p>No meal plans scheduled for activation on {futureCheckResult.targetDate}.</p>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-4">
         <div className="flex items-center space-x-2 w-full sm:w-auto">
           <Search className="w-5 h-5 text-gray-400" />
@@ -2301,6 +2694,20 @@ const MenuLoad = () => {
           )}
           {checkingExpired ? (translations.checking || 'Checking...') : (translations.checkExpiredMenus || 'Check Expired Menus')}
         </Button>
+
+        <Button
+          variant="outline"
+          onClick={manualCheckFutureMealPlans}
+          disabled={checkingFuture}
+          className="border-blue-300 text-blue-700 hover:bg-blue-50"
+        >
+          {checkingFuture ? (
+            <Loader className="animate-spin h-4 w-4 mr-2" />
+          ) : (
+            <span className="text-sm mr-2">📅</span>
+          )}
+          {checkingFuture ? (translations.checking || 'Checking...') : 'Check Future Notifications'}
+        </Button>
       </div>
 
       {loadingMenus ? (
@@ -2315,6 +2722,7 @@ const MenuLoad = () => {
               className={`cursor-pointer hover:shadow-md transition-all ${
                 menu.status === 'active' ? 'border-green-200' : 
                 menu.status === 'published' ? 'border-blue-200' :
+                menu.status === 'scheduled' ? 'border-purple-200' :
                 'border-yellow-200'
               }`}
               onClick={() => handleMenuSelect(menu)}
@@ -2334,6 +2742,7 @@ const MenuLoad = () => {
                 >
                   {menu.status === 'published' ? (translations.published || 'Published') : 
                    menu.status === 'active' ? (translations.active || 'Active') : 
+                   menu.status === 'scheduled' ? (translations.scheduled || 'Scheduled') :
                    menu.status === 'expired' ? (translations.expired || 'Expired') :
                    (translations.draft || 'Draft')}
                 </Badge>
@@ -2486,6 +2895,7 @@ const MenuLoad = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="draft">{translations.draft || 'Draft'}</SelectItem>
+                    <SelectItem value="scheduled">{translations.scheduled || 'Scheduled'}</SelectItem>
                     <SelectItem value="active">{translations.active || 'Active'}</SelectItem>
                     <SelectItem value="published">{translations.published || 'Published'}</SelectItem>
                     <SelectItem value="expired">{translations.expired || 'Expired'}</SelectItem>
@@ -2493,7 +2903,7 @@ const MenuLoad = () => {
                 </Select>
               </div>
 
-              {statusForm.status === 'active' && (
+              {(statusForm.status === 'active' || statusForm.status === 'scheduled') && (
                 <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
