@@ -683,10 +683,14 @@ export const entities = {
         const { data, error } = await supabase
           .from('weight_logs')
           .select(`
+            id,
+            user_id,
             user_code,
             measurement_date,
             weight_kg,
             body_fat_percentage,
+            height_cm,
+            neck_circumference_cm,
             general_measurements,
             body_composition,
             central_measurements,
@@ -694,7 +698,8 @@ export const entities = {
             limb_measurements,
             waist_circumference_cm,
             hip_circumference_cm,
-            arm_circumference_cm
+            arm_circumference_cm,
+            notes
           `)
           .eq('user_code', userCode)
           .order('measurement_date', { ascending: true });
@@ -722,10 +727,14 @@ export const entities = {
         const { data, error } = await supabase
           .from('weight_logs')
           .select(`
+            id,
+            user_id,
             user_code,
             measurement_date,
             weight_kg,
             body_fat_percentage,
+            height_cm,
+            neck_circumference_cm,
             general_measurements,
             body_composition,
             central_measurements,
@@ -733,7 +742,8 @@ export const entities = {
             limb_measurements,
             waist_circumference_cm,
             hip_circumference_cm,
-            arm_circumference_cm
+            arm_circumference_cm,
+            notes
           `)
           .order('measurement_date', { ascending: false });
         
@@ -798,6 +808,56 @@ export const entities = {
         
       } catch (err) {
         console.error('❌ Error in WeightLogs.create:', err);
+        throw err;
+      }
+    },
+    
+    // Update an existing weight log entry
+    update: async (id, data) => {
+      try {
+        console.log('✏️ Updating weight log entry:', id, JSON.stringify(data, null, 2));
+        
+        const { data: result, error } = await supabase
+          .from('weight_logs')
+          .update(data)
+          .eq('id', id)
+          .select()
+          .single();
+        
+        if (error) {
+          console.error('❌ Supabase weight log update error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        console.log('✅ Updated weight log entry in Supabase:', result);
+        return result;
+        
+      } catch (err) {
+        console.error('❌ Error in WeightLogs.update:', err);
+        throw err;
+      }
+    },
+    
+    // Delete a weight log entry
+    delete: async (id) => {
+      try {
+        console.log('🗑️ Deleting weight log entry:', id);
+        
+        const { error } = await supabase
+          .from('weight_logs')
+          .delete()
+          .eq('id', id);
+        
+        if (error) {
+          console.error('❌ Supabase weight log delete error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+        
+        console.log('✅ Deleted weight log entry from Supabase');
+        return true;
+        
+      } catch (err) {
+        console.error('❌ Error in WeightLogs.delete:', err);
         throw err;
       }
     }

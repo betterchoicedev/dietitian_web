@@ -14,6 +14,16 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import {
   Select,
   SelectContent,
@@ -70,7 +80,14 @@ import {
   Ruler,
   Weight,
   Heart,
-  Dumbbell
+  Dumbbell,
+  Plus,
+  Edit,
+  Trash2,
+  Save,
+  Calculator,
+  AlertCircle,
+  Info
 } from 'lucide-react';
 
 // Color palette for charts
@@ -102,8 +119,47 @@ export default function UserWeightLogs() {
   const [chartType, setChartType] = useState('line');
   const [displayedLogsCount, setDisplayedLogsCount] = useState(5); // Show top 5 newest entries
 
+  // Form state for adding/editing measurements
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [editingMeasurement, setEditingMeasurement] = useState(null);
+  const [formData, setFormData] = useState({
+    measurement_date: new Date().toISOString().split('T')[0],
+    weight_kg: '',
+    height_cm: '',
+    neck_circumference_cm: '',
+    waist_circumference_cm: '',
+    hip_circumference_cm: '',
+    arm_circumference_cm: '',
+    notes: ''
+  });
+  const [formErrors, setFormErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+
   // Check if current language is Hebrew (RTL)
   const isRTL = language === 'he';
+
+  // Body fat calculation formulas (Navy Method)
+  const calculateBodyFat = (height, waist, neck, gender) => {
+    if (!height || !waist || !neck) return null;
+    
+    const H = parseFloat(height);
+    const A = parseFloat(waist);
+    const N = parseFloat(neck);
+    
+    if (isNaN(H) || isNaN(A) || isNaN(N)) return null;
+    
+    let bodyFat;
+    if (gender?.toLowerCase() === 'male' || gender?.toLowerCase() === 'm') {
+      // Men: %BF = 10.1 - 0.239 × H + 0.808 × A - 0.518 × N
+      bodyFat = 10.1 - (0.239 * H) + (0.808 * A) - (0.518 * N);
+    } else {
+      // Women: %BF = 19.2 - 0.239 × H + 0.808 × A - 0.518 × N
+      bodyFat = 19.2 - (0.239 * H) + (0.808 * A) - (0.518 * N);
+    }
+    
+    // Ensure body fat percentage is within reasonable bounds (0-50%)
+    return Math.max(0, Math.min(50, bodyFat));
+  };
 
   // Add RTL-specific styles for charts
   useEffect(() => {
@@ -246,11 +302,13 @@ export default function UserWeightLogs() {
 
   // Available metrics for selection
   const availableMetrics = [
-    { key: 'weight_kg', label: translations.weightKg, icon: Weight, color: CHART_COLORS.primary },
-    { key: 'body_fat_percentage', label: translations.bodyFatPercentage, icon: Heart, color: CHART_COLORS.danger },
-    { key: 'waist_circumference_cm', label: translations.waistCm, icon: Ruler, color: CHART_COLORS.warning },
-    { key: 'hip_circumference_cm', label: translations.hipCm, icon: Ruler, color: CHART_COLORS.info },
-    { key: 'arm_circumference_cm', label: translations.armCm, icon: Ruler, color: CHART_COLORS.purple }
+    { key: 'weight_kg', label: translations.weightKg || 'Weight (kg)', icon: Weight, color: CHART_COLORS.primary },
+    { key: 'height_cm', label: translations.heightCm || 'Height (cm)', icon: Ruler, color: CHART_COLORS.emerald },
+    { key: 'calculated_body_fat', label: 'Body Fat %', icon: Calculator, color: CHART_COLORS.danger },
+    { key: 'neck_circumference_cm', label: translations.neckCircumference || 'Neck (cm)', icon: Ruler, color: CHART_COLORS.indigo },
+    { key: 'waist_circumference_cm', label: translations.waistCircumference || 'Waist (cm)', icon: Ruler, color: CHART_COLORS.warning },
+    { key: 'hip_circumference_cm', label: translations.hipCircumference || 'Hip (cm)', icon: Ruler, color: CHART_COLORS.info },
+    { key: 'arm_circumference_cm', label: translations.armCircumference || 'Arm (cm)', icon: Ruler, color: CHART_COLORS.purple }
   ];
 
   // Fetch weight logs when selectedClient changes
@@ -297,7 +355,9 @@ export default function UserWeightLogs() {
               'Unknown Date',
             // Ensure numeric values are valid numbers
             weight_kg: typeof log.weight_kg === 'number' && !isNaN(log.weight_kg) ? log.weight_kg : 0,
+            height_cm: typeof log.height_cm === 'number' && !isNaN(log.height_cm) ? log.height_cm : 0,
             body_fat_percentage: typeof log.body_fat_percentage === 'number' && !isNaN(log.body_fat_percentage) ? log.body_fat_percentage : 0,
+            neck_circumference_cm: typeof log.neck_circumference_cm === 'number' && !isNaN(log.neck_circumference_cm) ? log.neck_circumference_cm : 0,
             waist_circumference_cm: typeof log.waist_circumference_cm === 'number' && !isNaN(log.waist_circumference_cm) ? log.waist_circumference_cm : 0,
             hip_circumference_cm: typeof log.hip_circumference_cm === 'number' && !isNaN(log.hip_circumference_cm) ? log.hip_circumference_cm : 0,
             arm_circumference_cm: typeof log.arm_circumference_cm === 'number' && !isNaN(log.arm_circumference_cm) ? log.arm_circumference_cm : 0,
@@ -320,8 +380,25 @@ export default function UserWeightLogs() {
           };
         });
 
-        setWeightLogs(processedData);
-        setFilteredLogs(processedData);
+        // Calculate body fat for each measurement
+        const dataWithBodyFat = processedData.map(log => {
+          const height = log.height_cm || selectedClient?.height_cm;
+          const calculatedBodyFat = calculateBodyFat(
+            height,
+            log.waist_circumference_cm,
+            log.neck_circumference_cm,
+            selectedClient?.gender
+          );
+          
+          return {
+            ...log,
+            calculated_body_fat: calculatedBodyFat ? parseFloat(calculatedBodyFat.toFixed(1)) : null,
+            height_used: height // Track which height was used for calculation
+          };
+        });
+
+        setWeightLogs(dataWithBodyFat);
+        setFilteredLogs(dataWithBodyFat);
       } catch (err) {
         setError(`Failed to load weight logs: ${err.message}`);
       } finally {
@@ -415,7 +492,10 @@ export default function UserWeightLogs() {
   const chartData = filteredLogs.map(log => ({
     date: log.measurement_date,
     weight_kg: log.weight_kg,
+    height_cm: log.height_cm,
     body_fat_percentage: log.body_fat_percentage,
+    calculated_body_fat: log.calculated_body_fat,
+    neck_circumference_cm: log.neck_circumference_cm,
     waist_circumference_cm: log.waist_circumference_cm,
     hip_circumference_cm: log.hip_circumference_cm,
     arm_circumference_cm: log.arm_circumference_cm
@@ -448,7 +528,9 @@ export default function UserWeightLogs() {
 
   // Calculate domains for each metric
   const weightDomain = calculateCustomDomain(chartData, 'weight_kg');
-  const bodyFatDomain = calculateCustomDomain(chartData, 'body_fat_percentage');
+  const heightDomain = calculateCustomDomain(chartData, 'height_cm');
+  const calculatedBodyFatDomain = calculateCustomDomain(chartData, 'calculated_body_fat');
+  const neckDomain = calculateCustomDomain(chartData, 'neck_circumference_cm');
   const waistDomain = calculateCustomDomain(chartData, 'waist_circumference_cm');
   const hipDomain = calculateCustomDomain(chartData, 'hip_circumference_cm');
   const armDomain = calculateCustomDomain(chartData, 'arm_circumference_cm');
@@ -461,7 +543,9 @@ export default function UserWeightLogs() {
     if (selectedMetrics.length === 1) {
       const metric = selectedMetrics[0];
       if (metric === 'weight_kg') return weightDomain;
-      if (metric === 'body_fat_percentage') return bodyFatDomain;
+      if (metric === 'height_cm') return heightDomain;
+      if (metric === 'calculated_body_fat') return calculatedBodyFatDomain;
+      if (metric === 'neck_circumference_cm') return neckDomain;
       if (metric === 'waist_circumference_cm') return waistDomain;
       if (metric === 'hip_circumference_cm') return hipDomain;
       if (metric === 'arm_circumference_cm') return armDomain;
@@ -470,7 +554,9 @@ export default function UserWeightLogs() {
     // If multiple metrics, use a combined domain that accommodates all
     const allDomains = selectedMetrics.map(metric => {
       if (metric === 'weight_kg') return weightDomain;
-      if (metric === 'body_fat_percentage') return bodyFatDomain;
+      if (metric === 'height_cm') return heightDomain;
+      if (metric === 'calculated_body_fat') return calculatedBodyFatDomain;
+      if (metric === 'neck_circumference_cm') return neckDomain;
       if (metric === 'waist_circumference_cm') return waistDomain;
       if (metric === 'hip_circumference_cm') return hipDomain;
       if (metric === 'arm_circumference_cm') return armDomain;
@@ -530,16 +616,20 @@ export default function UserWeightLogs() {
     const headers = [
       translations.date || 'Date',
       translations.weightKg || 'Weight (kg)',
-      translations.bodyFatPercentage || 'Body Fat %',
-      translations.waistCm || 'Waist (cm)',
-      translations.hipCm || 'Hip (cm)',
-      translations.armCm || 'Arm (cm)'
+      translations.heightCm || 'Height (cm)',
+      'Body Fat %',
+      translations.neckCircumference || 'Neck (cm)',
+      translations.waistCircumference || 'Waist (cm)',
+      translations.hipCircumference || 'Hip (cm)',
+      translations.armCircumference || 'Arm (cm)'
     ];
 
     const csvData = filteredLogs.map(log => [
       log.measurement_date,
       log.weight_kg,
-      log.body_fat_percentage,
+      log.height_cm,
+      log.calculated_body_fat || log.body_fat_percentage || '',
+      log.neck_circumference_cm,
       log.waist_circumference_cm,
       log.hip_circumference_cm,
       log.arm_circumference_cm
@@ -561,6 +651,314 @@ export default function UserWeightLogs() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  // Form handling functions
+  const resetForm = () => {
+    setFormData({
+      measurement_date: new Date().toISOString().split('T')[0],
+      weight_kg: '',
+      height_cm: selectedClient?.height_cm?.toString() || '',
+      neck_circumference_cm: '',
+      waist_circumference_cm: '',
+      hip_circumference_cm: '',
+      arm_circumference_cm: '',
+      notes: ''
+    });
+    setFormErrors({});
+    setEditingMeasurement(null);
+  };
+
+  const validateForm = () => {
+    const errors = {};
+    
+    if (!formData.measurement_date) {
+      errors.measurement_date = 'Measurement date is required';
+    }
+    
+    if (!formData.weight_kg || parseFloat(formData.weight_kg) <= 0) {
+      errors.weight_kg = 'Valid weight is required';
+    }
+    
+    // Optional fields validation
+    if (formData.height_cm && parseFloat(formData.height_cm) <= 0) {
+      errors.height_cm = 'Height must be positive';
+    }
+    
+    if (formData.neck_circumference_cm && parseFloat(formData.neck_circumference_cm) <= 0) {
+      errors.neck_circumference_cm = 'Neck circumference must be positive';
+    }
+    
+    if (formData.waist_circumference_cm && parseFloat(formData.waist_circumference_cm) <= 0) {
+      errors.waist_circumference_cm = 'Waist circumference must be positive';
+    }
+    
+    if (formData.hip_circumference_cm && parseFloat(formData.hip_circumference_cm) <= 0) {
+      errors.hip_circumference_cm = 'Hip circumference must be positive';
+    }
+    
+    if (formData.arm_circumference_cm && parseFloat(formData.arm_circumference_cm) <= 0) {
+      errors.arm_circumference_cm = 'Arm circumference must be positive';
+    }
+    
+    
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleFormSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!selectedClient) {
+      setError('No client selected');
+      return;
+    }
+    
+    if (!selectedClient.id && !selectedClient.user_code) {
+      setError('Invalid client data: missing ID or user code');
+      return;
+    }
+    
+    if (!validateForm()) {
+      return;
+    }
+    
+    setSaving(true);
+    setError(null);
+    
+    try {
+      // Calculate body fat percentage if we have the required measurements
+      const height = formData.height_cm ? parseFloat(formData.height_cm) : selectedClient?.height_cm;
+      const waist = formData.waist_circumference_cm ? parseFloat(formData.waist_circumference_cm) : null;
+      const neck = formData.neck_circumference_cm ? parseFloat(formData.neck_circumference_cm) : null;
+      
+      let calculatedBodyFat = null;
+      if (height && waist && neck) {
+        calculatedBodyFat = calculateBodyFat(height, waist, neck, selectedClient?.gender);
+      }
+
+      // Prepare data for submission using dedicated database columns
+      const measurementData = {
+        user_code: selectedClient.user_code,
+        measurement_date: formData.measurement_date,
+        weight_kg: parseFloat(formData.weight_kg),
+        height_cm: formData.height_cm ? parseFloat(formData.height_cm) : null,
+        neck_circumference_cm: formData.neck_circumference_cm ? parseFloat(formData.neck_circumference_cm) : null,
+        waist_circumference_cm: formData.waist_circumference_cm ? parseFloat(formData.waist_circumference_cm) : null,
+        hip_circumference_cm: formData.hip_circumference_cm ? parseFloat(formData.hip_circumference_cm) : null,
+        arm_circumference_cm: formData.arm_circumference_cm ? parseFloat(formData.arm_circumference_cm) : null,
+        body_fat_percentage: calculatedBodyFat ? parseFloat(calculatedBodyFat.toFixed(1)) : null,
+        notes: formData.notes || null
+      };
+      
+      // Add user_id if available (for foreign key relationship)
+      if (selectedClient.id) {
+        measurementData.user_id = selectedClient.id;
+      }
+      
+      let result;
+      if (editingMeasurement) {
+        // Update existing measurement
+        result = await WeightLogs.update(editingMeasurement.id, measurementData);
+      } else {
+        // Create new measurement
+        result = await WeightLogs.create(measurementData);
+      }
+      
+      console.log('✅ Measurement saved successfully:', result);
+      
+      // Update client's height in chat_users table if it's different and height was provided
+      if (formData.height_cm) {
+        const newHeight = parseFloat(formData.height_cm);
+        if (selectedClient.height_cm !== newHeight) {
+          try {
+            console.log('🔄 Updating client height from', selectedClient.height_cm, 'to', newHeight);
+            await ChatUser.update(selectedClient.user_code, { height_cm: newHeight });
+            console.log('✅ Client height updated successfully');
+            
+            // Update the selectedClient context if available
+            if (typeof selectedClient.height_cm !== 'undefined') {
+              selectedClient.height_cm = newHeight;
+            }
+          } catch (heightError) {
+            console.warn('⚠️ Failed to update client height:', heightError);
+            // Don't fail the whole operation if height update fails
+          }
+        }
+      }
+      
+      // Refresh data
+      const data = await WeightLogs.getByUserCode(selectedClient.user_code);
+      if (data && data.length > 0) {
+        const processedData = data.map((log) => ({
+          ...log,
+          original_date: log.measurement_date,
+          measurement_date: log.measurement_date ? 
+            (() => {
+              const date = new Date(log.measurement_date);
+              if (isNaN(date.getTime())) return 'Invalid Date';
+              const day = date.getDate().toString().padStart(2, '0');
+              const month = (date.getMonth() + 1).toString().padStart(2, '0');
+              const year = date.getFullYear();
+              return `${day}/${month}/${year}`;
+            })() : 'Unknown Date',
+          weight_kg: typeof log.weight_kg === 'number' && !isNaN(log.weight_kg) ? log.weight_kg : 0,
+          height_cm: typeof log.height_cm === 'number' && !isNaN(log.height_cm) ? log.height_cm : 0,
+          neck_circumference_cm: typeof log.neck_circumference_cm === 'number' && !isNaN(log.neck_circumference_cm) ? log.neck_circumference_cm : 0,
+          body_fat_percentage: typeof log.body_fat_percentage === 'number' && !isNaN(log.body_fat_percentage) ? log.body_fat_percentage : 0,
+          waist_circumference_cm: typeof log.waist_circumference_cm === 'number' && !isNaN(log.waist_circumference_cm) ? log.waist_circumference_cm : 0,
+          hip_circumference_cm: typeof log.hip_circumference_cm === 'number' && !isNaN(log.hip_circumference_cm) ? log.hip_circumference_cm : 0,
+          arm_circumference_cm: typeof log.arm_circumference_cm === 'number' && !isNaN(log.arm_circumference_cm) ? log.arm_circumference_cm : 0,
+          // Parse JSON fields if they're strings
+          general_measurements: typeof log.general_measurements === 'string' 
+            ? JSON.parse(log.general_measurements) 
+            : log.general_measurements,
+          body_composition: typeof log.body_composition === 'string' 
+            ? JSON.parse(log.body_composition) 
+            : log.body_composition,
+          central_measurements: typeof log.central_measurements === 'string' 
+            ? JSON.parse(log.central_measurements) 
+            : log.central_measurements,
+          hip_measurements: typeof log.hip_measurements === 'string' 
+            ? JSON.parse(log.hip_measurements) 
+            : log.hip_measurements,
+          limb_measurements: typeof log.limb_measurements === 'string' 
+            ? JSON.parse(log.limb_measurements) 
+            : log.limb_measurements
+        }));
+
+        // Calculate body fat for each measurement
+        const dataWithBodyFat = processedData.map(log => {
+          const height = log.height_cm || selectedClient?.height_cm;
+          const calculatedBodyFat = calculateBodyFat(
+            height,
+            log.waist_circumference_cm,
+            log.neck_circumference_cm,
+            selectedClient?.gender
+          );
+          
+          return {
+            ...log,
+            calculated_body_fat: calculatedBodyFat ? parseFloat(calculatedBodyFat.toFixed(1)) : null,
+            height_used: height
+          };
+        });
+
+        setWeightLogs(dataWithBodyFat);
+        setFilteredLogs(dataWithBodyFat);
+      }
+      
+      // Close dialog and reset form
+      setShowAddDialog(false);
+      resetForm();
+      
+    } catch (err) {
+      console.error('❌ Error saving measurement:', err);
+      setError(`Failed to save measurement: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEdit = (measurement) => {
+    setFormData({
+      measurement_date: measurement.original_date ? new Date(measurement.original_date).toISOString().split('T')[0] : '',
+      weight_kg: measurement.weight_kg?.toString() || '',
+      height_cm: measurement.height_cm?.toString() || selectedClient?.height_cm?.toString() || '',
+      neck_circumference_cm: measurement.neck_circumference_cm?.toString() || '',
+      waist_circumference_cm: measurement.waist_circumference_cm?.toString() || '',
+      hip_circumference_cm: measurement.hip_circumference_cm?.toString() || '',
+      arm_circumference_cm: measurement.arm_circumference_cm?.toString() || '',
+      notes: measurement.notes || ''
+    });
+    setEditingMeasurement(measurement);
+    setShowAddDialog(true);
+  };
+
+  const handleDelete = async (measurement) => {
+    if (!confirm('Are you sure you want to delete this measurement? This action cannot be undone.')) {
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      await WeightLogs.delete(measurement.id);
+      
+      // Refresh data
+      const data = await WeightLogs.getByUserCode(selectedClient.user_code);
+      if (data && data.length > 0) {
+        const processedData = data.map((log) => ({
+          ...log,
+          original_date: log.measurement_date,
+          measurement_date: log.measurement_date ? 
+            (() => {
+              const date = new Date(log.measurement_date);
+              if (isNaN(date.getTime())) return 'Invalid Date';
+              const day = date.getDate().toString().padStart(2, '0');
+              const month = (date.getMonth() + 1).toString().padStart(2, '0');
+              const year = date.getFullYear();
+              return `${day}/${month}/${year}`;
+            })() : 'Unknown Date',
+          weight_kg: typeof log.weight_kg === 'number' && !isNaN(log.weight_kg) ? log.weight_kg : 0,
+          height_cm: typeof log.height_cm === 'number' && !isNaN(log.height_cm) ? log.height_cm : 0,
+          neck_circumference_cm: typeof log.neck_circumference_cm === 'number' && !isNaN(log.neck_circumference_cm) ? log.neck_circumference_cm : 0,
+          body_fat_percentage: typeof log.body_fat_percentage === 'number' && !isNaN(log.body_fat_percentage) ? log.body_fat_percentage : 0,
+          waist_circumference_cm: typeof log.waist_circumference_cm === 'number' && !isNaN(log.waist_circumference_cm) ? log.waist_circumference_cm : 0,
+          hip_circumference_cm: typeof log.hip_circumference_cm === 'number' && !isNaN(log.hip_circumference_cm) ? log.hip_circumference_cm : 0,
+          arm_circumference_cm: typeof log.arm_circumference_cm === 'number' && !isNaN(log.arm_circumference_cm) ? log.arm_circumference_cm : 0,
+          // Parse JSON fields if they're strings
+          general_measurements: typeof log.general_measurements === 'string' 
+            ? JSON.parse(log.general_measurements) 
+            : log.general_measurements,
+          body_composition: typeof log.body_composition === 'string' 
+            ? JSON.parse(log.body_composition) 
+            : log.body_composition,
+          central_measurements: typeof log.central_measurements === 'string' 
+            ? JSON.parse(log.central_measurements) 
+            : log.central_measurements,
+          hip_measurements: typeof log.hip_measurements === 'string' 
+            ? JSON.parse(log.hip_measurements) 
+            : log.hip_measurements,
+          limb_measurements: typeof log.limb_measurements === 'string' 
+            ? JSON.parse(log.limb_measurements) 
+            : log.limb_measurements
+        }));
+
+        // Calculate body fat for each measurement
+        const dataWithBodyFat = processedData.map(log => {
+          const height = log.height_cm || selectedClient?.height_cm;
+          const calculatedBodyFat = calculateBodyFat(
+            height,
+            log.waist_circumference_cm,
+            log.neck_circumference_cm,
+            selectedClient?.gender
+          );
+          
+          return {
+            ...log,
+            calculated_body_fat: calculatedBodyFat ? parseFloat(calculatedBodyFat.toFixed(1)) : null,
+            height_used: height
+          };
+        });
+
+        setWeightLogs(dataWithBodyFat);
+        setFilteredLogs(dataWithBodyFat);
+      } else {
+        setWeightLogs([]);
+        setFilteredLogs([]);
+      }
+      
+    } catch (err) {
+      console.error('❌ Error deleting measurement:', err);
+      setError(`Failed to delete measurement: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDialogClose = () => {
+    setShowAddDialog(false);
+    resetForm();
   };
 
   // Render chart based on type with RTL support
@@ -811,6 +1209,27 @@ export default function UserWeightLogs() {
           <p className="text-xl text-muted-foreground/80 max-w-3xl mx-auto animate-slide-up text-center" style={{ animationDelay: '0.1s' }}>
             {translations.weightLogsDescription}
           </p>
+          
+          {/* Add Measurement CTA */}
+          {selectedClient && (
+            <div className="flex justify-center mt-8 animate-slide-up" style={{ animationDelay: '0.2s' }}>
+              <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+                <DialogTrigger asChild>
+                  <Button
+                    onClick={() => {
+                      resetForm();
+                      setShowAddDialog(true);
+                    }}
+                    size="lg"
+                    className="gap-3 bg-gradient-to-r from-primary to-primary-dark hover:from-primary/90 hover:to-primary-dark/90 text-white shadow-lg hover:shadow-xl transition-all duration-300 px-8 py-4 text-lg font-semibold"
+                  >
+                    <Plus className="h-6 w-6" />
+                    {translations.addMeasurement || 'Add New Measurement'}
+                  </Button>
+                </DialogTrigger>
+              </Dialog>
+            </div>
+          )}
         </div>
       </section>
 
@@ -1131,11 +1550,14 @@ export default function UserWeightLogs() {
                   <thead>
                     <tr className="border-b border-border/30">
                       <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.date || 'Date'}</th>
-                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.weightKg}</th>
-                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.bodyFatPercentage}</th>
-                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.waistCm}</th>
-                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.hipCm}</th>
-                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.armCm}</th>
+                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.weightKg || 'Weight (kg)'}</th>
+                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.heightCm || 'Height (cm)'}</th>
+                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>Body Fat %</th>
+                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.neckCircumference || 'Neck (cm)'}</th>
+                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.waistCircumference || 'Waist (cm)'}</th>
+                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.hipCircumference || 'Hip (cm)'}</th>
+                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>{translations.armCircumference || 'Arm (cm)'}</th>
+                      <th className={`p-4 font-semibold text-foreground/80 ${isRTL ? 'text-right' : 'text-left'}`}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1143,10 +1565,40 @@ export default function UserWeightLogs() {
                       <tr key={index} className="border-b border-border/20 hover:bg-muted/20 transition-colors duration-200">
                         <td className={`p-4 text-sm ${isRTL ? 'text-right' : 'text-left'} text-foreground/80`}>{log.measurement_date}</td>
                         <td className={`p-4 text-sm font-medium ${isRTL ? 'text-right' : 'text-left'}`}>{log.weight_kg}</td>
-                        <td className={`p-4 text-sm font-medium ${isRTL ? 'text-right' : 'text-left'}`}>{log.body_fat_percentage}%</td>
+                        <td className={`p-4 text-sm font-medium ${isRTL ? 'text-right' : 'text-left'}`}>{log.height_cm}</td>
+                        <td className={`p-4 text-sm font-medium ${isRTL ? 'text-right' : 'text-left'}`}>
+                          {log.calculated_body_fat !== null ? (
+                            <Badge variant="default" className="bg-primary/10 text-primary border-primary/20">
+                              {log.calculated_body_fat}%
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </td>
+                        <td className={`p-4 text-sm font-medium ${isRTL ? 'text-right' : 'text-left'}`}>{log.neck_circumference_cm}</td>
                         <td className={`p-4 text-sm font-medium ${isRTL ? 'text-right' : 'text-left'}`}>{log.waist_circumference_cm}</td>
                         <td className={`p-4 text-sm font-medium ${isRTL ? 'text-right' : 'text-left'}`}>{log.hip_circumference_cm}</td>
                         <td className={`p-4 text-sm font-medium ${isRTL ? 'text-right' : 'text-left'}`}>{log.arm_circumference_cm}</td>
+                        <td className={`p-4 text-sm ${isRTL ? 'text-right' : 'text-left'}`}>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              onClick={() => handleEdit(log)}
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 hover:bg-primary/10 hover:text-primary"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              onClick={() => handleDelete(log)}
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1176,6 +1628,232 @@ export default function UserWeightLogs() {
           </Card>
         </section>
       )}
+  
+      {/* Add/Edit Measurement Dialog */}
+      <Dialog open={showAddDialog} onOpenChange={handleDialogClose}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {editingMeasurement ? <Edit className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
+              {editingMeasurement ? (translations.editMeasurement || 'Edit Measurement') : (translations.addMeasurement || 'Add New Measurement')}
+            </DialogTitle>
+            <DialogDescription>
+              {editingMeasurement 
+                ? 'Update the body measurement data for this client.'
+                : 'Enter body measurement data for the selected client. Weight is required, other measurements are optional.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleFormSubmit} className="space-y-6">
+            {/* Date */}
+            <div className="space-y-2">
+              <Label htmlFor="measurement_date">
+                {translations.measurementDate || 'Measurement Date'} <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="measurement_date"
+                type="date"
+                value={formData.measurement_date}
+                onChange={(e) => setFormData(prev => ({ ...prev, measurement_date: e.target.value }))}
+                className={formErrors.measurement_date ? 'border-destructive' : ''}
+              />
+              {formErrors.measurement_date && (
+                <p className="text-sm text-destructive">{formErrors.measurement_date}</p>
+              )}
+            </div>
+
+            {/* Weight and Height */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="weight_kg">
+                  {translations.weightKg || 'Weight (kg)'} <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="weight_kg"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  placeholder="70.5"
+                  value={formData.weight_kg}
+                  onChange={(e) => setFormData(prev => ({ ...prev, weight_kg: e.target.value }))}
+                  className={formErrors.weight_kg ? 'border-destructive' : ''}
+                />
+                {formErrors.weight_kg && (
+                  <p className="text-sm text-destructive">{formErrors.weight_kg}</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="height_cm">
+                  {translations.heightCm || 'Height (cm)'}
+                </Label>
+                <Input
+                  id="height_cm"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  placeholder="175.0"
+                  value={formData.height_cm}
+                  onChange={(e) => setFormData(prev => ({ ...prev, height_cm: e.target.value }))}
+                  className={formErrors.height_cm ? 'border-destructive' : ''}
+                />
+                {formErrors.height_cm && (
+                  <p className="text-sm text-destructive">{formErrors.height_cm}</p>
+                )}
+                <p className="text-sm text-muted-foreground">
+                  Optional: Updates client profile if changed
+                </p>
+              </div>
+            </div>
+
+            {/* Circumference measurements */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="neck_circumference_cm">
+                  {translations.neckCircumference || 'Neck Circumference (cm)'}
+                </Label>
+                <Input
+                  id="neck_circumference_cm"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  placeholder="38.0"
+                  value={formData.neck_circumference_cm}
+                  onChange={(e) => setFormData(prev => ({ ...prev, neck_circumference_cm: e.target.value }))}
+                  className={formErrors.neck_circumference_cm ? 'border-destructive' : ''}
+                />
+                {formErrors.neck_circumference_cm && (
+                  <p className="text-sm text-destructive">{formErrors.neck_circumference_cm}</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="waist_circumference_cm">
+                  {translations.waistCircumference || 'Waist Circumference (cm)'}
+                </Label>
+                <Input
+                  id="waist_circumference_cm"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  placeholder="85.0"
+                  value={formData.waist_circumference_cm}
+                  onChange={(e) => setFormData(prev => ({ ...prev, waist_circumference_cm: e.target.value }))}
+                  className={formErrors.waist_circumference_cm ? 'border-destructive' : ''}
+                />
+                {formErrors.waist_circumference_cm && (
+                  <p className="text-sm text-destructive">{formErrors.waist_circumference_cm}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="hip_circumference_cm">
+                  {translations.hipCircumference || 'Hip Circumference (cm)'}
+                </Label>
+                <Input
+                  id="hip_circumference_cm"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  placeholder="95.0"
+                  value={formData.hip_circumference_cm}
+                  onChange={(e) => setFormData(prev => ({ ...prev, hip_circumference_cm: e.target.value }))}
+                  className={formErrors.hip_circumference_cm ? 'border-destructive' : ''}
+                />
+                {formErrors.hip_circumference_cm && (
+                  <p className="text-sm text-destructive">{formErrors.hip_circumference_cm}</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="arm_circumference_cm">
+                  {translations.armCircumference || 'Arm Circumference (cm)'}
+                </Label>
+                <Input
+                  id="arm_circumference_cm"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  placeholder="32.0"
+                  value={formData.arm_circumference_cm}
+                  onChange={(e) => setFormData(prev => ({ ...prev, arm_circumference_cm: e.target.value }))}
+                  className={formErrors.arm_circumference_cm ? 'border-destructive' : ''}
+                />
+                {formErrors.arm_circumference_cm && (
+                  <p className="text-sm text-destructive">{formErrors.arm_circumference_cm}</p>
+                )}
+              </div>
+            </div>
+
+
+            {/* Notes */}
+            <div className="space-y-2">
+              <Label htmlFor="notes">Notes</Label>
+              <Textarea
+                id="notes"
+                placeholder="Additional notes about this measurement..."
+                rows={3}
+                value={formData.notes}
+                onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+              />
+            </div>
+
+            {/* Body fat calculation preview */}
+            {selectedClient && formData.height_cm && formData.waist_circumference_cm && formData.neck_circumference_cm && (
+              <div className="p-4 bg-gradient-to-r from-primary/5 to-success/5 rounded-lg border border-primary/20">
+                <h4 className="font-medium mb-2 flex items-center gap-2">
+                  <Calculator className="h-4 w-4 text-primary" />
+                  Body Fat Auto-Calculation
+                </h4>
+                <p className="text-sm font-medium text-primary">
+                  Will be calculated and stored: {calculateBodyFat(
+                    parseFloat(formData.height_cm) || 0,
+                    parseFloat(formData.waist_circumference_cm) || 0,
+                    parseFloat(formData.neck_circumference_cm) || 0,
+                    selectedClient.gender
+                  )?.toFixed(1) || 'N/A'}%
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Navy Method Formula - Height: {formData.height_cm}cm, Waist: {formData.waist_circumference_cm}cm, Neck: {formData.neck_circumference_cm}cm
+                </p>
+                <p className="text-xs text-success mt-1 font-medium">
+                  ✓ This will be automatically saved to the database
+                </p>
+              </div>
+            )}
+
+            <DialogFooter className="gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleDialogClose}
+                disabled={saving}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={saving}
+                className="gap-2"
+              >
+                {saving ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4" />
+                    {editingMeasurement ? (translations.updateMeasurement || 'Update') : (translations.saveMeasurement || 'Save')} Measurement
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 } 
