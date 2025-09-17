@@ -7,6 +7,8 @@ import { useNavigate } from 'react-router-dom';
 import { Menu } from '@/api/entities';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { supabase, secondSupabase } from '@/lib/supabase';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useClient } from '@/contexts/ClientContext';
@@ -516,6 +518,16 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
   );
 };
 
+// Function to filter out generic brand names
+const shouldShowBrand = (brand) => {
+  if (!brand || typeof brand !== 'string') return false;
+  
+  const normalizedBrand = brand.trim().toLowerCase();
+  const genericBrands = ['fresh', 'none', 'generic', 'store brand', 'private label', 'no brand', 'unbranded'];
+  
+  return !genericBrands.includes(normalizedBrand) && normalizedBrand.length > 0;
+};
+
 const MenuLoad = () => {
   const [menus, setMenus] = useState([]);
   const [selectedMenu, setSelectedMenu] = useState(null);
@@ -544,6 +556,15 @@ const MenuLoad = () => {
   const [userTargets, setUserTargets] = useState(null);
   const [loadingUserTargets, setLoadingUserTargets] = useState(false);
   const [deletingMenu, setDeletingMenu] = useState(null);
+  const [showShoppingList, setShowShoppingList] = useState(false);
+  const [shoppingList, setShoppingList] = useState([]);
+  const [recommendations, setRecommendations] = useState([]);
+  const [clientRecommendations, setClientRecommendations] = useState([]);
+  const [editingRecommendation, setEditingRecommendation] = useState(null);
+  const [showRecommendationDialog, setShowRecommendationDialog] = useState(false);
+  const [originalMenu, setOriginalMenu] = useState(null); // Store original English menu
+  const [translatedMenus, setTranslatedMenus] = useState({}); // Cache translations by language
+  const [removeBrandsFromPdf, setRemoveBrandsFromPdf] = useState(false);
   const navigate = useNavigate();
   const { language, translations } = useLanguage();
   const { selectedClient } = useClient();
@@ -786,6 +807,275 @@ const MenuLoad = () => {
     };
   };
 
+  // Generate shopping list from menu
+  function generateShoppingList(menu) {
+    if (!menu || !menu.meals) return [];
+    const itemsMap = {};
+
+    // Helper functions for ingredient processing
+    function extractBaseIngredient(item) {
+      if (!item) return '';
+      // Remove brand names in parentheses and other descriptive text
+      return item
+        .replace(/\s*\([^)]*\)$/, '') // Remove text in parentheses at the end
+        .replace(/\s*-.*$/, '') // Remove text after dash
+        .replace(/\s*,.*$/, '') // Remove text after comma
+        .trim();
+    }
+
+    function normalizeIngredientName(name) {
+      if (!name) return '';
+      return name
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    // Process each meal
+    menu.meals.forEach((meal, mealIndex) => {
+      // Process main option
+      if (meal.main && meal.main.ingredients) {
+        meal.main.ingredients.forEach(ingredient => {
+          if (!ingredient.item) return;
+          
+          const baseItem = extractBaseIngredient(ingredient.item);
+          const normalizedName = normalizeIngredientName(baseItem);
+          
+          if (!itemsMap[normalizedName]) {
+            itemsMap[normalizedName] = {
+              name: baseItem,
+              originalName: ingredient.item,
+              measures: new Set(),
+              meals: new Set(),
+              brands: new Set()
+            };
+          }
+          
+          if (ingredient.household_measure) {
+            itemsMap[normalizedName].measures.add(ingredient.household_measure);
+          }
+          if (ingredient['brand of pruduct']) {
+            itemsMap[normalizedName].brands.add(ingredient['brand of pruduct']);
+          }
+          itemsMap[normalizedName].meals.add(meal.meal || `Meal ${mealIndex + 1}`);
+        });
+      }
+
+      // Process alternative option
+      if (meal.alternative && meal.alternative.ingredients) {
+        meal.alternative.ingredients.forEach(ingredient => {
+          if (!ingredient.item) return;
+          
+          const baseItem = extractBaseIngredient(ingredient.item);
+          const normalizedName = normalizeIngredientName(baseItem);
+          
+          if (!itemsMap[normalizedName]) {
+            itemsMap[normalizedName] = {
+              name: baseItem,
+              originalName: ingredient.item,
+              measures: new Set(),
+              meals: new Set(),
+              brands: new Set()
+            };
+          }
+          
+          if (ingredient.household_measure) {
+            itemsMap[normalizedName].measures.add(ingredient.household_measure);
+          }
+          if (ingredient['brand of pruduct']) {
+            itemsMap[normalizedName].brands.add(ingredient['brand of pruduct']);
+          }
+          itemsMap[normalizedName].meals.add(meal.meal || `Meal ${mealIndex + 1}`);
+        });
+      }
+
+      // Process additional alternatives
+      if (meal.alternatives && Array.isArray(meal.alternatives)) {
+        meal.alternatives.forEach(alt => {
+          if (alt.ingredients) {
+            alt.ingredients.forEach(ingredient => {
+              if (!ingredient.item) return;
+              
+              const baseItem = extractBaseIngredient(ingredient.item);
+              const normalizedName = normalizeIngredientName(baseItem);
+              
+              if (!itemsMap[normalizedName]) {
+                itemsMap[normalizedName] = {
+                  name: baseItem,
+                  originalName: ingredient.item,
+                  measures: new Set(),
+                  meals: new Set(),
+                  brands: new Set()
+                };
+              }
+              
+              if (ingredient.household_measure) {
+                itemsMap[normalizedName].measures.add(ingredient.household_measure);
+              }
+              if (ingredient['brand of pruduct']) {
+                itemsMap[normalizedName].brands.add(ingredient['brand of pruduct']);
+              }
+              itemsMap[normalizedName].meals.add(meal.meal || `Meal ${mealIndex + 1}`);
+            });
+          }
+        });
+      }
+    });
+
+    // Convert to array and sort
+    return Object.values(itemsMap)
+      .map(item => ({
+        name: item.name,
+        originalName: item.originalName,
+        measures: Array.from(item.measures).join(', '),
+        meals: Array.from(item.meals).join(', '),
+        brands: Array.from(item.brands).filter(Boolean).join(', ')
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  // Load client recommendations from chat_users table
+  const fetchClientRecommendations = async (userCode) => {
+    if (!userCode) {
+      console.log('⚠️ No user code provided for client recommendations');
+      setClientRecommendations([]);
+      return [];
+    }
+
+    try {
+      console.log('📋 Fetching client recommendations for user:', userCode);
+
+      const { data: userData, error } = await supabase
+        .from('chat_users')
+        .select('recommendations')
+        .eq('user_code', userCode)
+        .single();
+
+      if (error) {
+        console.error('❌ Error fetching client recommendations:', error);
+        setClientRecommendations([]);
+        return [];
+      }
+
+      if (userData && userData.recommendations) {
+        let recommendations = userData.recommendations;
+
+        // Parse recommendations if they're stored as a string
+        if (typeof recommendations === 'string') {
+          try {
+            recommendations = JSON.parse(recommendations);
+          } catch (e) {
+            console.warn('Failed to parse recommendations as JSON:', e);
+            recommendations = {};
+          }
+        }
+
+        console.log('📋 Parsed recommendations:', recommendations);
+        console.log('📋 Recommendations type:', typeof recommendations);
+        console.log('📋 Is array:', Array.isArray(recommendations));
+        console.log('📋 Recommendations keys:', typeof recommendations === 'object' ? Object.keys(recommendations) : 'N/A');
+
+        let clientRecs = [];
+
+        if (Array.isArray(recommendations)) {
+          clientRecs = recommendations.map((rec, index) => {
+            if (typeof rec === 'object' && rec !== null) {
+              // Handle object recommendations with better content extraction
+              let content = '';
+              if (rec.content) {
+                content = rec.content;
+              } else if (rec.text) {
+                content = rec.text;
+              } else if (rec.recommendation) {
+                content = rec.recommendation;
+              } else if (rec.description) {
+                content = rec.description;
+              } else if (rec.message) {
+                content = rec.message;
+              } else {
+                // If no recognizable text field, format the object nicely
+                const keys = Object.keys(rec).filter(key => key !== 'id' && key !== 'category' && key !== 'title' && key !== 'priority');
+                if (keys.length > 0) {
+                  content = keys.map(key => `• ${key.charAt(0).toUpperCase() + key.slice(1)}: ${rec[key]}`).join('\n');
+                } else {
+                  content = JSON.stringify(rec, null, 2);
+                }
+              }
+
+              return {
+                id: rec.id || `client-${index}`,
+                category: rec.category || 'general',
+                title: rec.title || `Recommendation ${index + 1}`,
+                content: content,
+                priority: rec.priority || 'medium',
+                isClientRecommendation: true
+              };
+            } else {
+              return {
+                id: `client-${index}`,
+                category: 'general',
+                title: `Recommendation ${index + 1}`,
+                content: String(rec),
+                priority: 'medium',
+                isClientRecommendation: true
+              };
+            }
+          });
+        } else if (typeof recommendations === 'object' && recommendations !== null) {
+          clientRecs = Object.entries(recommendations).map(([category, content], index) => {
+            // Handle different content types
+            let processedContent = '';
+            if (typeof content === 'string') {
+              processedContent = content;
+            } else if (typeof content === 'object' && content !== null) {
+              // If content is an object, try to extract meaningful text
+              if (content.text) {
+                processedContent = content.text;
+              } else if (content.content) {
+                processedContent = content.content;
+              } else if (content.recommendation) {
+                processedContent = content.recommendation;
+              } else if (content.description) {
+                processedContent = content.description;
+              } else {
+                // If it's an object with no recognizable text fields, format it nicely
+                const keys = Object.keys(content);
+                if (keys.length > 0) {
+                  processedContent = keys.map(key => `• ${key.charAt(0).toUpperCase() + key.slice(1)}: ${content[key]}`).join('\n');
+                } else {
+                  processedContent = JSON.stringify(content, null, 2);
+                }
+              }
+            } else {
+              processedContent = String(content);
+            }
+
+            return {
+              id: `client-${category}-${index}`,
+              category: category,
+              title: category.charAt(0).toUpperCase() + category.slice(1),
+              content: processedContent,
+              priority: 'medium',
+              isClientRecommendation: true
+            };
+          });
+        }
+
+        console.log('✅ Loaded client recommendations:', clientRecs);
+        setClientRecommendations(clientRecs);
+        return clientRecs;
+      } else {
+        console.log('ℹ️ No recommendations found for user:', userCode);
+        setClientRecommendations([]);
+        return [];
+      }
+    } catch (err) {
+      console.error('❌ Error fetching client recommendations:', err);
+      setClientRecommendations([]);
+      return [];
+    }
+  };
+
   // Load saved menus
   const loadMenus = async () => {
     setLoadingMenus(true);
@@ -824,6 +1114,20 @@ const MenuLoad = () => {
     // Note: Future meal plan notifications are now only sent via manual check button
     // to prevent duplicate notifications on page refresh
   }, []);
+
+  // Generate shopping list when editedMenu changes
+  useEffect(() => {
+    if (editedMenu) {
+      setShoppingList(generateShoppingList(editedMenu));
+    }
+  }, [editedMenu]);
+
+  // Fetch client recommendations when a menu is selected
+  useEffect(() => {
+    if (selectedMenu && selectedMenu.user_code) {
+      fetchClientRecommendations(selectedMenu.user_code);
+    }
+  }, [selectedMenu]);
 
   const filteredMenus = menus.filter(menu => {
     // If a client is selected globally, filter by that client
@@ -864,6 +1168,11 @@ const MenuLoad = () => {
     
     const convertedMenu = convertToEditFormat(menu);
     if (convertedMenu) {
+      // Store original menu for English mode restoration
+      setOriginalMenu(convertedMenu);
+      // Clear previous translations cache
+      setTranslatedMenus({});
+      
       setEditedMenu(convertedMenu);
       setIsEditing(true);
       
@@ -1346,28 +1655,10 @@ const MenuLoad = () => {
   }
 
   // PDF download function
-  async function downloadPdf(menu) {
+  async function downloadPdf(menu, version = 'portrait') {
     try {
-      // Get user's full name if we have a user code
-      let userName = 'Client';
-      if (selectedMenu?.user_code) {
-        try {
-          const { data: userData, error: userError } = await supabase
-            .from('chat_users')
-            .select('full_name')
-            .eq('user_code', selectedMenu.user_code)
-            .single();
-          
-          if (!userError && userData?.full_name) {
-            userName = userData.full_name;
-          }
-        } catch (error) {
-          console.warn('Could not fetch user name for PDF:', error);
-        }
-      }
-      
-      // Create HTML content for the PDF
-      const htmlContent = generateMenuHtml(menu, userName);
+      // Create HTML content for the PDF with specified version
+      const htmlContent = generateMenuHtml(menu, version, removeBrandsFromPdf);
       
       // Create a blob from the HTML content
       const blob = new Blob([htmlContent], { type: 'text/html' });
@@ -1394,7 +1685,7 @@ const MenuLoad = () => {
     }
   }
 
-  function generateMenuHtml(menu, userName = 'Client') {
+  function generateMenuHtml(menu, version = 'portrait', removeBrands = false) {
     // Get current date in Hebrew
     const today = new Date();
     const hebrewDate = today.toLocaleDateString('he-IL', { 
@@ -1404,6 +1695,7 @@ const MenuLoad = () => {
     });
     
     const totals = menu.totals || calculateMainTotals(menu);
+    const userName = selectedClient?.full_name || 'Client';
     
     // Detect if menu contains Hebrew text
     const containsHebrew = (text) => {
@@ -1527,19 +1819,43 @@ const MenuLoad = () => {
         }
         
         .meal-option {
-            margin-bottom: 6px;
+            margin-bottom: 8px;
             font-size: 14px;
             line-height: 1.4;
+            padding-left: 15px;
+            padding-right: 15px;
+            position: relative;
         }
         
-        .option-number {
-            font-weight: 600;
+        .meal-option::before {
+            content: '•';
             color: #4CAF50;
-            margin-left: 8px;
+            font-weight: bold;
+            position: absolute;
+            left: 0;
+            top: 0;
+            font-size: 16px;
+        }
+        
+        [dir="rtl"] .meal-option {
+            padding-left: 0;
+            padding-right: 15px;
+        }
+        
+        [dir="rtl"] .meal-option::before {
+            left: auto;
+            right: 0;
         }
         
         .option-text {
             color: #333;
+        }
+        
+        .meal-dish-title {
+            font-weight: 600;
+            color: #2d5016;
+            margin-bottom: 4px;
+            font-size: 14px;
         }
         
         .highlighted {
@@ -1570,10 +1886,10 @@ const MenuLoad = () => {
         }
         
         @media print {
-            /* Disable browser headers and footers */
+            /* ${version === 'landscape' ? 'Set to A4 landscape with 10mm margins' : 'Disable browser headers and footers'} */
             @page {
-                margin: 0;
-                size: A4;
+                margin: ${version === 'landscape' ? '10mm' : '0'};
+                size: A4${version === 'landscape' ? ' landscape' : ''};
             }
             
             body {
@@ -1581,6 +1897,28 @@ const MenuLoad = () => {
                 margin: 0;
                 padding: 0;
             }
+            
+            ${version === 'portrait' ? `
+            /* Portrait-specific: Footer at bottom of last page */
+            .page {
+                display: block !important;
+                min-height: auto !important;
+            }
+            
+            .content {
+                display: block !important;
+                page-break-after: auto;
+            }
+            
+            .footer {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                width: 100%;
+                z-index: 1000;
+            }
+            ` : ''}
             
             .header {
                 padding: 20px;
@@ -1609,7 +1947,8 @@ const MenuLoad = () => {
             }
             
             .content {
-                padding: 20px;
+                padding: ${version === 'landscape' ? '6px 15px' : '20px'};
+                ${version === 'landscape' ? 'display: flex; flex-wrap: wrap; gap: 12px;' : ''}
             }
             
             .meal-title {
@@ -1638,7 +1977,102 @@ const MenuLoad = () => {
             /* Keep meal sections together but allow natural flow */
             .meal-section {
                 page-break-inside: avoid;
+                break-inside: avoid;
+                ${version === 'landscape' ? 'flex: 1 1 calc(50% - 6px); min-width: 280px; margin-bottom: 12px;' : ''}
             }
+            
+            ${version === 'landscape' ? `
+            /* Landscape-specific styles */
+            body {
+                font-size: 11px !important;
+            }
+            
+            .header {
+                padding: 3px 15px !important;
+            }
+            
+            .logo {
+                width: 24px !important;
+                height: 24px !important;
+                font-size: 12px !important;
+                margin-bottom: 2px !important;
+            }
+            
+            .main-title {
+                font-size: 14px !important;
+                margin-bottom: 1px !important;
+            }
+            
+            .user-name {
+                font-size: 13px !important;
+                margin-bottom: 1px !important;
+            }
+            
+            .date {
+                font-size: 10px !important;
+                margin-bottom: 1px !important;
+            }
+            
+            .meal-title {
+                font-size: 16px !important;
+                margin-bottom: 6px !important;
+                padding: 4px 8px !important;
+            }
+            
+            .meal-subtitle {
+                font-size: 12px !important;
+                margin-bottom: 4px !important;
+            }
+            
+            .meal-option {
+                font-size: 11px !important;
+                margin-bottom: 4px !important;
+                padding-left: 12px !important;
+                padding-right: 12px !important;
+            }
+            
+            [dir="rtl"] .meal-option {
+                padding-left: 0 !important;
+                padding-right: 12px !important;
+            }
+            
+            [dir="rtl"] .meal-option::before {
+                left: auto !important;
+                right: 0 !important;
+            }
+            
+            .meal-dish-title {
+                font-size: 12px !important;
+                margin-bottom: 2px !important;
+            }
+            
+            .footer {
+                padding: 2px 15px !important;
+                font-size: 8px !important;
+            }
+            
+            .contact-info {
+                font-size: 8px !important;
+                line-height: 1.1 !important;
+            }
+            
+            .contact-info div {
+                margin-bottom: 1px !important;
+            }
+            
+            /* Fallback to three columns if needed for many meals */
+            @supports (display: grid) {
+                .content {
+                    display: grid !important;
+                    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)) !important;
+                    gap: 15px !important;
+                }
+                
+                .meal-section {
+                    flex: none !important;
+                }
+            }
+            ` : ''}
         }
         
         /* RTL Support */
@@ -1649,11 +2083,6 @@ const MenuLoad = () => {
         [dir="rtl"] .meal-options {
             margin-right: 0;
             margin-left: 20px;
-        }
-        
-        [dir="rtl"] .option-number {
-            margin-left: 0;
-            margin-right: 8px;
         }
     </style>
 </head>
@@ -1679,13 +2108,22 @@ const MenuLoad = () => {
                         
                         <div class="meal-options">
                             ${(() => {
-                                let optionNumber = 1;
                                 let options = [];
                                 
                                 // Add main meal
                                 if (meal.main && meal.main.ingredients && meal.main.ingredients.length > 0) {
                                     const mainIngredients = meal.main.ingredients.map(ing => {
                                         let text = ing.item || 'Ingredient';
+                                        // Conditionally remove brand information in parentheses from PDF display
+                                        if (removeBrands) {
+                                            text = text.replace(/\s*\([^)]*\)$/, '');
+                                        } else {
+                                            // Remove generic brand names even when not removing all brands
+                                            const brandMatch = text.match(/\s*\(([^)]*)\)$/);
+                                            if (brandMatch && !shouldShowBrand(brandMatch[1])) {
+                                                text = text.replace(/\s*\([^)]*\)$/, '');
+                                            }
+                                        }
                                         // Highlight specific words (brands, types, etc.)
                                         text = text.replace(/\b(וגן|קוביה|בישבת|טורטיות|סולוג|מולך|אלשבע|בולים)\b/g, '<span class="highlighted">$1</span>');
                                         
@@ -1696,14 +2134,27 @@ const MenuLoad = () => {
                                         
                                         return text;
                                     }).join(', ');
-                                    options.push(`<div class="meal-option"><span class="option-number">${optionNumber}.</span><span class="option-text">${mainIngredients}</span></div>`);
-                                    optionNumber++;
+                                    
+                                    // Include meal title if available
+                                    const mainMealTitle = meal.main.meal_title || '';
+                                    const mealTitleText = mainMealTitle ? `<div class="meal-dish-title">${mainMealTitle}</div>` : '';
+                                    options.push(`<div class="meal-option"><span class="option-text">${mealTitleText}${mainIngredients}</span></div>`);
                                 }
                                 
                                 // Add alternative meal
                                 if (meal.alternative && meal.alternative.ingredients && meal.alternative.ingredients.length > 0) {
                                     const altIngredients = meal.alternative.ingredients.map(ing => {
                                         let text = ing.item || 'Ingredient';
+                                        // Conditionally remove brand information in parentheses from PDF display
+                                        if (removeBrands) {
+                                            text = text.replace(/\s*\([^)]*\)$/, '');
+                                        } else {
+                                            // Remove generic brand names even when not removing all brands
+                                            const brandMatch = text.match(/\s*\(([^)]*)\)$/);
+                                            if (brandMatch && !shouldShowBrand(brandMatch[1])) {
+                                                text = text.replace(/\s*\([^)]*\)$/, '');
+                                            }
+                                        }
                                         text = text.replace(/\b(וגן|קוביה|בישבת|טורטיות|סולוג|מולך|אלשבע|בולים)\b/g, '<span class="highlighted">$1</span>');
                                         
                                         // Add household measure if available
@@ -1713,8 +2164,11 @@ const MenuLoad = () => {
                                         
                                         return text;
                                     }).join(', ');
-                                    options.push(`<div class="meal-option"><span class="option-number">${optionNumber}.</span><span class="option-text">${altIngredients}</span></div>`);
-                                    optionNumber++;
+                                    
+                                    // Include meal title if available
+                                    const altMealTitle = meal.alternative.meal_title || '';
+                                    const altMealTitleText = altMealTitle ? `<div class="meal-dish-title">${altMealTitle}</div>` : '';
+                                    options.push(`<div class="meal-option"><span class="option-text">${altMealTitleText}${altIngredients}</span></div>`);
                                 }
                                 
                                 // Add additional alternatives
@@ -1723,6 +2177,16 @@ const MenuLoad = () => {
                                         if (alt.ingredients && alt.ingredients.length > 0) {
                                             const altIngredients = alt.ingredients.map(ing => {
                                                 let text = ing.item || 'Ingredient';
+                                                // Conditionally remove brand information in parentheses from PDF display
+                                                if (removeBrands) {
+                                                    text = text.replace(/\s*\([^)]*\)$/, '');
+                                                } else {
+                                                    // Remove generic brand names even when not removing all brands
+                                                    const brandMatch = text.match(/\s*\(([^)]*)\)$/);
+                                                    if (brandMatch && !shouldShowBrand(brandMatch[1])) {
+                                                        text = text.replace(/\s*\([^)]*\)$/, '');
+                                                    }
+                                                }
                                                 text = text.replace(/\b(וגן|קוביה|בישבת|טורטיות|סולוג|מולך|אלשבע|בולים)\b/g, '<span class="highlighted">$1</span>');
                                                 
                                                 // Add household measure if available
@@ -1732,8 +2196,7 @@ const MenuLoad = () => {
                                                 
                                                 return text;
                                             }).join(', ');
-                                            options.push(`<div class="meal-option"><span class="option-number">${optionNumber}.</span><span class="option-text">${altIngredients}</span></div>`);
-                                            optionNumber++;
+                                            options.push(`<div class="meal-option"><span class="option-text">${altIngredients}</span></div>`);
                                         }
                                     });
                                 }
@@ -1765,17 +2228,19 @@ const MenuLoad = () => {
 
   // Handle language changes
   const handleLanguageChange = async (lang) => {
-    if (!editedMenu || loading) return;
+    if (!editedMenu || loading || !originalMenu) return;
 
     if (lang === 'en') {
-      // Load the original menu data (English)
-      const originalMenu = menus.find(m => m.id === editedMenu.id);
-      if (originalMenu) {
-        const converted = convertToEditFormat(originalMenu);
-        if (converted) {
-          setEditedMenu(converted);
-        }
-      }
+      // Restore original English menu
+      console.log('🔄 Switching to English - restoring original menu');
+      setEditedMenu(originalMenu);
+      return;
+    }
+
+    // Check if we have cached translation for this language
+    if (translatedMenus[lang]) {
+      console.log('🔄 Using cached translation for:', lang);
+      setEditedMenu(translatedMenus[lang]);
       return;
     }
 
@@ -1783,8 +2248,17 @@ const MenuLoad = () => {
     setError(null);
     
     try {
-      const translated = await translateMenu(editedMenu, lang);
+      console.log('🔄 Translating menu to:', lang);
+      const translated = await translateMenu(originalMenu, lang);
+      
+      // Cache the translation
+      setTranslatedMenus(prev => ({
+        ...prev,
+        [lang]: translated
+      }));
+      
       setEditedMenu(translated);
+      console.log('✅ Translation completed and cached for:', lang);
     } catch (err) {
       console.error('Translation failed:', err);
       setError('Failed to translate menu.');
@@ -2051,13 +2525,19 @@ const MenuLoad = () => {
                       <span className="text-gray-600">
                         {ingredient.household_measure}
                       </span>
-                      {(ingredient.calories || ingredient.protein) && (
+                      {(ingredient.calories || ingredient.protein || ingredient.fat || ingredient.carbs) && (
                         <>
                           <span className="text-orange-600 font-medium">
                             {Math.round(ingredient.calories || 0)} {translations.calories || 'cal'}
                           </span>
                           <span className="text-blue-600 font-medium">
                             {Math.round(ingredient.protein || 0)}g {translations.protein || 'protein'}
+                          </span>
+                          <span className="text-amber-600 font-medium">
+                            {Math.round(ingredient.fat || 0)}g {translations.fat || 'fat'}
+                          </span>
+                          <span className="text-green-600 font-medium">
+                            {Math.round(ingredient.carbs || 0)}g {translations.carbs || 'carbs'}
                           </span>
                         </>
                       )}
@@ -2472,6 +2952,342 @@ const MenuLoad = () => {
           </Card>
         )}
 
+        {/* Meal Plan Structure Display */}
+        {editedMenu && editedMenu.meals && editedMenu.totals && (
+          <Card className="mb-6 border-blue-200 bg-blue-50/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-blue-800">
+                <span>📋</span>
+                {translations.mealPlanStructure || 'Meal Plan Structure'}
+              </CardTitle>
+              <CardDescription className="text-blue-600">
+                {translations.mealBreakdownDescription || 'Breakdown of calories and nutrition across meals'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* Meal Breakdown Table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="border-b-2 border-blue-200">
+                        <th className="text-left p-3 font-bold text-blue-800 bg-blue-50">
+                          {translations.meal || 'Meal'}
+                        </th>
+                        <th className="text-center p-3 font-bold text-blue-800 bg-blue-50">
+                          {translations.calories || 'Calories'}
+                        </th>
+                        <th className="text-center p-3 font-bold text-blue-800 bg-blue-50">
+                          {translations.percentage || '% of Total'}
+                        </th>
+                        <th className="text-center p-3 font-bold text-blue-800 bg-blue-50">
+                          {translations.protein || 'Protein (g)'}
+                        </th>
+                        <th className="text-center p-3 font-bold text-blue-800 bg-blue-50">
+                          {translations.fat || 'Fat (g)'}
+                        </th>
+                        <th className="text-center p-3 font-bold text-blue-800 bg-blue-50">
+                          {translations.carbs || 'Carbs (g)'}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {editedMenu.meals.map((meal, index) => {
+                        const mealCalories = meal.main?.nutrition?.calories || 0;
+                        const mealProtein = meal.main?.nutrition?.protein || 0;
+                        const mealFat = meal.main?.nutrition?.fat || 0;
+                        const mealCarbs = meal.main?.nutrition?.carbs || 0;
+                        const percentage = editedMenu.totals.calories > 0 ? 
+                          ((mealCalories / editedMenu.totals.calories) * 100) : 0;
+
+                        return (
+                          <tr
+                            key={index}
+                            className={`border-b border-blue-100 hover:bg-blue-50 transition-colors ${
+                              index % 2 === 0 ? 'bg-white' : 'bg-blue-25'
+                            }`}
+                          >
+                            <td className="p-3">
+                              <div className="font-semibold text-gray-800">{meal.meal}</div>
+                              {meal.main?.meal_title && meal.main.meal_title !== meal.meal && (
+                                <div className="text-xs text-gray-500 mt-1">{meal.main.meal_title}</div>
+                              )}
+                            </td>
+                            <td className="p-3 text-center">
+                              <div className="font-medium text-blue-700">{Math.round(mealCalories)}</div>
+                            </td>
+                            <td className="p-3 text-center">
+                              <div className="flex items-center justify-center">
+                                <div className="font-medium text-blue-700">{percentage.toFixed(1)}%</div>
+                                <div className="ml-2 w-16 bg-gray-200 rounded-full h-2">
+                                  <div
+                                    className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                                    style={{ width: `${Math.min(percentage, 100)}%` }}
+                                  ></div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-3 text-center">
+                              <div className="font-medium text-gray-700">{Math.round(mealProtein)}</div>
+                            </td>
+                            <td className="p-3 text-center">
+                              <div className="font-medium text-gray-700">{Math.round(mealFat)}</div>
+                            </td>
+                            <td className="p-3 text-center">
+                              <div className="font-medium text-gray-700">{Math.round(mealCarbs)}</div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {/* Total Row */}
+                      <tr className="border-t-2 border-blue-300 bg-blue-100 font-bold">
+                        <td className="p-3 text-blue-800">{translations.total || 'Total'}</td>
+                        <td className="p-3 text-center text-blue-800">{Math.round(editedMenu.totals.calories)}</td>
+                        <td className="p-3 text-center text-blue-800">100.0%</td>
+                        <td className="p-3 text-center text-blue-800">{Math.round(editedMenu.totals.protein)}</td>
+                        <td className="p-3 text-center text-blue-800">{Math.round(editedMenu.totals.fat)}</td>
+                        <td className="p-3 text-center text-blue-800">{Math.round(editedMenu.totals.carbs)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Summary Stats */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                  <div className="p-4 bg-white rounded-lg border border-blue-200">
+                    <div className="text-sm text-blue-600 font-medium mb-1">
+                      {translations.totalMeals || 'Total Meals'}
+                    </div>
+                    <div className="text-2xl font-bold text-blue-700">
+                      {editedMenu.meals.length}
+                    </div>
+                  </div>
+                  
+                  <div className="p-4 bg-white rounded-lg border border-blue-200">
+                    <div className="text-sm text-blue-600 font-medium mb-1">
+                      {translations.averageCaloriesPerMeal || 'Avg Calories/Meal'}
+                    </div>
+                    <div className="text-2xl font-bold text-blue-700">
+                      {Math.round(editedMenu.totals.calories / editedMenu.meals.length)}
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-white rounded-lg border border-blue-200">
+                    <div className="text-sm text-blue-600 font-medium mb-1">
+                      {translations.mealsWithAlternatives || 'Meals w/ Alternatives'}
+                    </div>
+                    <div className="text-2xl font-bold text-blue-700">
+                      {editedMenu.meals.filter(meal => meal.alternative || (meal.alternatives && meal.alternatives.length > 0)).length}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Recommendations Section */}
+        {selectedMenu && selectedMenu.user_code && (clientRecommendations.length > 0 || recommendations.length > 0) && (
+          <Card className="mb-6 border-purple-200 bg-gradient-to-br from-purple-50 via-pink-50 to-indigo-50 shadow-lg hover:shadow-xl transition-shadow">
+            <CardHeader className="relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-r from-purple-100/50 to-pink-100/50 -skew-y-1 transform"></div>
+              <div className="relative">
+                <CardTitle className="text-purple-800 flex items-center gap-3 text-xl font-bold">
+                  <div className="p-2 bg-purple-200 rounded-full">
+                    <span role="img" aria-label="lightbulb" className="text-lg">💡</span>
+                  </div>
+                  {translations.recommendations || 'Recommendations'}
+                </CardTitle>
+                <CardDescription className="text-purple-700 font-medium mt-2">
+                  {translations.personalizedRecommendations || 'Personalized recommendations'} for{' '}
+                  <span className="font-bold text-purple-800">{selectedMenu.user_code}</span>
+                </CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* Client Recommendations */}
+                {clientRecommendations.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-3 mb-4 p-3 bg-gradient-to-r from-purple-100 to-pink-100 rounded-lg border border-purple-200">
+                      <div className="p-2 bg-purple-200 rounded-full">
+                        <span role="img" aria-label="user" className="text-lg">👤</span>
+                      </div>
+                      <h4 className="font-bold text-purple-800 text-lg">
+                        {translations.clientRecommendations || 'Client Recommendations'}
+                      </h4>
+                    </div>
+                    <div className="grid gap-3">
+                      {clientRecommendations.map((rec, idx) => (
+                        <div key={rec.id || idx} className="p-4 bg-white rounded-lg border border-purple-200 shadow-sm hover:shadow-md transition-shadow">
+                          <div className="flex items-start gap-3">
+                            <div className="flex-shrink-0">
+                              <Badge variant="outline" className="bg-purple-100 border-purple-300 text-purple-700">
+                                {rec.category || 'general'}
+                              </Badge>
+                            </div>
+                            <div className="flex-1">
+                              <h5 className="font-medium text-gray-900 mb-3">{rec.title}</h5>
+                              <div className="text-sm leading-relaxed">
+                                {typeof rec.content === 'string' && rec.content.includes('\n') ? (
+                                  <div className="space-y-2">
+                                    {rec.content.split('\n').map((line, lineIdx) => {
+                                      if (line.trim().startsWith('•')) {
+                                        const cleanLine = line.replace('• ', '').trim();
+                                        if (cleanLine.includes(':')) {
+                                          const [key, ...valueParts] = cleanLine.split(':');
+                                          const value = valueParts.join(':').trim();
+                                          return (
+                                            <div key={lineIdx} className="flex items-start gap-3 p-3 bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg border-l-4 border-purple-300">
+                                              <div className="flex items-center gap-2">
+                                                <div className="w-2 h-2 bg-purple-500 rounded-full flex-shrink-0 mt-2"></div>
+                                                <span className="font-semibold text-purple-800 capitalize text-sm">
+                                                  {key.trim()}
+                                                </span>
+                                              </div>
+                                              <div className="flex-1">
+                                                <p className="text-gray-700 text-sm">{value}</p>
+                                              </div>
+                                            </div>
+                                          );
+                                        } else {
+                                          return (
+                                            <div key={lineIdx} className="flex items-start gap-3 p-3 bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg border-l-4 border-purple-300">
+                                              <div className="w-2 h-2 bg-purple-500 rounded-full flex-shrink-0 mt-2"></div>
+                                              <p className="flex-1 text-gray-700 text-sm">{cleanLine}</p>
+                                            </div>
+                                          );
+                                        }
+                                      } else if (line.includes(':')) {
+                                        const [key, ...valueParts] = line.split(':');
+                                        const value = valueParts.join(':').trim();
+                                        return (
+                                          <div key={lineIdx} className="flex items-start gap-3 p-3 bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg border-l-4 border-purple-300">
+                                            <span className="font-semibold text-purple-800 capitalize text-sm min-w-0 flex-shrink-0">
+                                              {key.trim()}
+                                            </span>
+                                            <div className="flex-1">
+                                              <p className="text-gray-700 text-sm">{value}</p>
+                                            </div>
+                                          </div>
+                                        );
+                                      } else if (line.trim()) {
+                                        return (
+                                          <div key={lineIdx} className="p-3 bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg border-l-4 border-purple-300">
+                                            <p className="text-gray-700 text-sm">{line}</p>
+                                          </div>
+                                        );
+                                      }
+                                      return null;
+                                    })}
+                                  </div>
+                                ) : (
+                                  <div className="p-3 bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg border-l-4 border-purple-300">
+                                    <p className="text-gray-700 text-sm">{rec.content || 'No content available'}</p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Meal Plan Recommendations */}
+                {recommendations.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-3 mb-4 p-3 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-lg border border-blue-200">
+                      <div className="p-2 bg-blue-200 rounded-full">
+                        <span role="img" aria-label="menu" className="text-lg">📋</span>
+                      </div>
+                      <h4 className="font-bold text-blue-800 text-lg">
+                        {translations.mealPlanRecommendations || 'Meal Plan Recommendations'}
+                      </h4>
+                    </div>
+                    <div className="grid gap-3">
+                      {recommendations.map((rec, idx) => (
+                        <div key={rec.id || idx} className="p-4 bg-white rounded-lg border border-blue-200 shadow-sm hover:shadow-md transition-shadow">
+                          <div className="flex items-start gap-3">
+                            <div className="flex-shrink-0">
+                              <Badge variant="outline" className="bg-blue-100 border-blue-300 text-blue-700">
+                                {rec.category || 'general'}
+                              </Badge>
+                            </div>
+                            <div className="flex-1">
+                              <h5 className="font-medium text-gray-900 mb-3">{rec.title}</h5>
+                              <div className="text-sm leading-relaxed">
+                                {typeof rec.content === 'string' && rec.content.includes('\n') ? (
+                                  <div className="space-y-2">
+                                    {rec.content.split('\n').map((line, lineIdx) => {
+                                      if (line.trim().startsWith('•')) {
+                                        const cleanLine = line.replace('• ', '').trim();
+                                        if (cleanLine.includes(':')) {
+                                          const [key, ...valueParts] = cleanLine.split(':');
+                                          const value = valueParts.join(':').trim();
+                                          return (
+                                            <div key={lineIdx} className="flex items-start gap-3 p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border-l-4 border-blue-300">
+                                              <div className="flex items-center gap-2">
+                                                <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 mt-2"></div>
+                                                <span className="font-semibold text-blue-800 capitalize text-sm">
+                                                  {key.trim()}
+                                                </span>
+                                              </div>
+                                              <div className="flex-1">
+                                                <p className="text-gray-700 text-sm">{value}</p>
+                                              </div>
+                                            </div>
+                                          );
+                                        } else {
+                                          return (
+                                            <div key={lineIdx} className="flex items-start gap-3 p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border-l-4 border-blue-300">
+                                              <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 mt-2"></div>
+                                              <p className="flex-1 text-gray-700 text-sm">{cleanLine}</p>
+                                            </div>
+                                          );
+                                        }
+                                      } else if (line.includes(':')) {
+                                        const [key, ...valueParts] = line.split(':');
+                                        const value = valueParts.join(':').trim();
+                                        return (
+                                          <div key={lineIdx} className="flex items-start gap-3 p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border-l-4 border-blue-300">
+                                            <span className="font-semibold text-blue-800 capitalize text-sm min-w-0 flex-shrink-0">
+                                              {key.trim()}
+                                            </span>
+                                            <div className="flex-1">
+                                              <p className="text-gray-700 text-sm">{value}</p>
+                                            </div>
+                                          </div>
+                                        );
+                                      } else if (line.trim()) {
+                                        return (
+                                          <div key={lineIdx} className="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border-l-4 border-blue-300">
+                                            <p className="text-gray-700 text-sm">{line}</p>
+                                          </div>
+                                        );
+                                      }
+                                      return null;
+                                    })}
+                                  </div>
+                                ) : (
+                                  <div className="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border-l-4 border-blue-300">
+                                    <p className="text-gray-700 text-sm">{rec.content || 'No content available'}</p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         <div className="space-y-6">
           {editedMenu.meals.map((meal, mealIdx) => (
             <Card key={mealIdx} className="overflow-hidden">
@@ -2540,15 +3356,39 @@ const MenuLoad = () => {
           ))}
         </div>
 
-        <div className="flex justify-end gap-3">
-          <Button
-            onClick={() => downloadPdf(editedMenu)}
-            variant="outline"
-            className="border-blue-300 text-blue-700 hover:bg-blue-50"
-          >
-            <Download className="h-4 w-4 mr-2" />
-            {translations.downloadAsPdf || 'Download as PDF'}
-          </Button>
+        <div className="flex flex-col items-end gap-3">
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="removeBrands"
+              checked={removeBrandsFromPdf}
+              onCheckedChange={setRemoveBrandsFromPdf}
+            />
+            <Label htmlFor="removeBrands" className="text-sm font-medium text-gray-700">
+              {translations.removeBrandsFromPdf || 'Remove brand names from PDF'}
+            </Label>
+          </div>
+          
+          <div className="flex gap-3">
+            <Button
+              onClick={() => downloadPdf(editedMenu, 'portrait')}
+              variant="outline"
+              className="border-blue-300 text-blue-700 hover:bg-blue-50"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              {translations.downloadPortraitPdf || 'Download PDF (Portrait)'}
+            </Button>
+            <Button
+              onClick={() => downloadPdf(editedMenu, 'landscape')}
+              variant="outline"
+              className="border-green-300 text-green-700 hover:bg-green-50"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              {translations.downloadLandscapePdf || 'Download PDF (Landscape)'}
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex justify-end">
           <Button
             onClick={handleSave}
             disabled={saving}
@@ -2562,6 +3402,86 @@ const MenuLoad = () => {
             {saving ? (translations.saving || 'Saving...') : (translations.saveChanges || 'Save Changes')}
           </Button>
         </div>
+
+        {/* Shopping List Section - Moved to bottom */}
+        {editedMenu && editedMenu.meals && editedMenu.meals.length > 0 && (
+          <div className="mt-8">
+            <div className="flex justify-center mb-4">
+              <Button
+                variant="outline"
+                onClick={() => setShowShoppingList((prev) => !prev)}
+                className="border-yellow-400 text-yellow-700 hover:bg-yellow-50"
+              >
+                {showShoppingList ? (translations.hideShoppingList || 'Hide Shopping List') : `🛒 ${translations.showShoppingList || 'Show Shopping List'}`}
+              </Button>
+            </div>
+
+            {showShoppingList && shoppingList.length > 0 && (
+              <Card className="border-yellow-400 bg-gradient-to-br from-yellow-50 to-orange-100 shadow-xl">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <div>
+                    <CardTitle className="text-orange-700 flex items-center gap-2 text-2xl font-extrabold tracking-tight">
+                      <span role="img" aria-label="cart">🛒</span> {translations.shoppingList || 'Shopping List'}
+                    </CardTitle>
+                    <CardDescription className="text-orange-600 font-medium">
+                      {translations.shoppingListDescription || 'All ingredients needed for this menu, beautifully organized'}
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr className="border-b-2 border-orange-200">
+                          <th className="text-left p-3 font-bold text-orange-800 bg-orange-50">
+                            {translations.ingredient || 'Ingredient'}
+                          </th>
+                          <th className="text-left p-3 font-bold text-orange-800 bg-orange-50">
+                            {translations.measures || 'Measures'}
+                          </th>
+                          <th className="text-left p-3 font-bold text-orange-800 bg-orange-50">
+                            {translations.usedInMeals || 'Used in Meals'}
+                          </th>
+                          <th className="text-left p-3 font-bold text-orange-800 bg-orange-50">
+                            {translations.brands || 'Brands'}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {shoppingList.map((item, idx) => (
+                          <tr
+                            key={idx}
+                            className={`border-b border-orange-100 hover:bg-orange-50 transition-colors ${
+                              idx % 2 === 0 ? 'bg-white' : 'bg-orange-25'
+                            }`}
+                          >
+                            <td className="p-3">
+                              <div className="font-semibold text-gray-800">{item.name}</div>
+                              {item.originalName !== item.name && (
+                                <div className="text-xs text-gray-500 mt-1">
+                                  {translations.original || 'Original'}: {item.originalName}
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-3 text-gray-700">
+                              {item.measures || (translations.noMeasure || 'No measure specified')}
+                            </td>
+                            <td className="p-3 text-gray-700">
+                              {item.meals}
+                            </td>
+                            <td className="p-3 text-gray-700">
+                              {item.brands || (translations.noBrand || 'No brand specified')}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
       </div>
     );
   }

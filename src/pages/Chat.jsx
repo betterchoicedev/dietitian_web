@@ -580,7 +580,9 @@ export default function Chat() {
         setHasNewMessages(false);
       }, 300);
     } catch (err) {
-      setError(translations.failedToLoadClientData);
+      console.error("Error loading conversation and messages:", err);
+      // Don't show error in chat UI - just log it
+      // The empty messages state will show "client hasn't started a chat yet"
       setMessages([]);
       setConversationId(null);
       setHasMoreMessages(false);
@@ -627,7 +629,8 @@ export default function Chat() {
       console.log("Created temporary chat for user:", userCode);
     } catch (error) {
       console.error("Error loading client data:", error);
-      setError(translations.failedToLoadClientData);
+      // Don't show error in chat UI - just log it
+      // The empty messages state will show "client hasn't started a chat yet"
     } finally {
       setIsFetchingData(false);
     }
@@ -1436,7 +1439,7 @@ Your task is to respond to the user's message below, taking into account their s
       }, 0);
     } catch (err) {
       console.error('❌ Error loading more messages:', err);
-      setError(translations.failedToLoadClientData);
+      // Don't show error in chat UI - just log it
     } finally {
       setIsLoadingMore(false);
     }
@@ -1646,10 +1649,10 @@ Your task is to respond to the user's message below, taking into account their s
                               {renderMessageContent(msg)}
                             </div>
                             {/* Message Timestamp - positioned inside message box on the right */}
-                            <div className={`absolute bottom-1.5 right-2.5 text-xs ${
+                            <div className={`absolute bottom-1.5 right-2.5 text-[10px] ${
                               msg.role === 'user' ? 'text-emerald-50' : 'text-slate-400'
                             }`}>
-                              <span className={`px-1.5 py-0.5 rounded-md font-mono text-center ${
+                              <span className={`px-1 py-0.5 rounded-md font-mono text-center ${
                                 msg.role === 'user' 
                                   ? 'bg-emerald-600/20' 
                                   : 'bg-slate-100/80'
@@ -1666,9 +1669,11 @@ Your task is to respond to the user's message below, taking into account their s
                       <div className="w-16 h-16 bg-gradient-to-br from-slate-200 to-slate-300 rounded-2xl flex items-center justify-center mb-4 shadow-lg">
                         <MessageSquare className="h-8 w-8 text-slate-400" />
                       </div>
-                      <h3 className="text-xl font-bold text-slate-700 mb-2">{translations.startConversation}</h3>
+                      <h3 className="text-xl font-bold text-slate-700 mb-2">
+                        {translations.noMessagesYet || 'No messages yet'}
+                      </h3>
                       <p className="text-slate-600 max-w-md">
-                        {translations.chatWith} {selectedClient.full_name} {translations.chatAboutNutrition}
+                        {selectedClient.full_name} {translations.hasNotStartedChat || 'hasn\'t started a chat yet'}
                       </p>
                     </div>
                   )}
@@ -1684,6 +1689,19 @@ Your task is to respond to the user's message below, taking into account their s
               <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-emerald-400/10 to-teal-400/10 rounded-full blur-2xl"></div>
               
               <div className="relative z-10 p-3">
+                {/* Show message when no messages exist */}
+                {messages.length === 0 && (
+                  <div className="mb-3 p-3 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-lg">
+                    <div className="flex items-center gap-2 text-amber-700 text-sm">
+                      <div className="w-5 h-5 bg-gradient-to-br from-amber-500 to-orange-600 rounded-full flex items-center justify-center">
+                        <MessageSquare className="h-3 w-3 text-white" />
+                      </div>
+                      <span className="font-medium">
+                        {translations.clientMustMessageFirst || 'The client needs to send the first message to start the conversation'}
+                      </span>
+                    </div>
+                  </div>
+                )}
                 
                 <div className="flex gap-3">
                   <input
@@ -1697,10 +1715,10 @@ Your task is to respond to the user's message below, taking into account their s
                     variant="outline"
                     size="icon"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={isLoading}
+                    disabled={isLoading || messages.length === 0}
                     className={`w-10 h-10 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 hover:from-blue-100 hover:to-indigo-100 rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 ${
                       imageFile ? 'bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-200 text-emerald-600' : 'text-blue-600'
-                    }`}
+                    } ${messages.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <ImageIcon className="h-4 w-4" />
                   </Button>
@@ -1709,19 +1727,25 @@ Your task is to respond to the user's message below, taking into account their s
                     onChange={(e) => setMessage(e.target.value)}
                     onKeyPress={handleKeyPress}
                     placeholder={
-                      currentDietitian?.id && clientId 
-                        ? (messageType === 'system_reminder' 
-                            ? `${translations.sendSystemReminder} ${selectedClient.full_name}...` 
+                      messages.length === 0
+                        ? (translations.waitingForClientMessage || 'Waiting for client to start conversation...')
+                        : (currentDietitian?.id && clientId 
+                            ? (messageType === 'system_reminder' 
+                                ? `${translations.sendSystemReminder} ${selectedClient.full_name}...` 
+                                : `${translations.messageClient} ${selectedClient.full_name}...`)
                             : `${translations.messageClient} ${selectedClient.full_name}...`)
-                        : `${translations.messageClient} ${selectedClient.full_name}...`
                     }
-                    disabled={isLoading}
-                    className="flex-1 h-10 bg-white/60 backdrop-blur-sm border border-white/20 rounded-lg shadow-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500/40 transition-all duration-300 text-sm"
+                    disabled={isLoading || messages.length === 0}
+                    className={`flex-1 h-10 bg-white/60 backdrop-blur-sm border border-white/20 rounded-lg shadow-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500/40 transition-all duration-300 text-sm ${
+                      messages.length === 0 ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
                   />
                   <Button
                     onClick={handleSend}
-                    disabled={(!message.trim() && !imageFile) || isLoading}
-                    className="w-10 h-10 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
+                    disabled={(!message.trim() && !imageFile) || isLoading || messages.length === 0}
+                    className={`w-10 h-10 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 ${
+                      messages.length === 0 ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
                   >
                     {isLoading ? (
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
@@ -1730,7 +1754,7 @@ Your task is to respond to the user's message below, taking into account their s
                     )}
                   </Button>
                 </div>
-                {imageFile && (
+                {imageFile && messages.length > 0 && (
                   <div className="mt-2 p-2 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-lg">
                     <div className="flex items-center gap-2 text-emerald-700 text-xs">
                       <div className="w-5 h-5 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-md flex items-center justify-center">

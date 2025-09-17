@@ -339,6 +339,8 @@ export default function Clients() {
   const [translatingPreferences, setTranslatingPreferences] = useState(false);
 
   const [analyzingFoodDiary, setAnalyzingFoodDiary] = useState(false);
+  const [foodLimitationsFromOnboarding, setFoodLimitationsFromOnboarding] = useState(false);
+  const [clientPreferencesFromOnboarding, setClientPreferencesFromOnboarding] = useState(false);
 
 
 
@@ -492,11 +494,11 @@ export default function Clients() {
 
     newMacros[macroType] = {
 
-      percentage: Math.round(targetPercentage * 100) / 100,
+      percentage: Math.round(targetPercentage * 1000) / 1000, // Allow 3 decimal places
 
       grams: grams,
 
-      gramsPerKg: weight > 0 ? Math.round((grams / weight) * 100) / 100 : 0
+      gramsPerKg: weight > 0 ? Math.round((grams / weight) * 1000) / 1000 : 0 // Allow 3 decimal places
 
     };
 
@@ -562,11 +564,11 @@ export default function Clients() {
 
           newMacros[key] = {
 
-            percentage: Math.round(newPercentage * 100) / 100,
+            percentage: Math.round(newPercentage * 1000) / 1000, // Allow 3 decimal places
 
             grams: newGrams,
 
-            gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 100) / 100 : 0
+            gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 1000) / 1000 : 0 // Allow 3 decimal places
 
           };
 
@@ -588,11 +590,11 @@ export default function Clients() {
 
           newMacros[key] = {
 
-            percentage: Math.round(percentagePerMacro * 100) / 100,
+            percentage: Math.round(percentagePerMacro * 1000) / 1000, // Allow 3 decimal places
 
             grams: newGrams,
 
-            gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 100) / 100 : 0
+            gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 1000) / 1000 : 0 // Allow 3 decimal places
 
           };
 
@@ -632,11 +634,11 @@ export default function Clients() {
 
       newMacros[largestUnlocked] = {
 
-        percentage: Math.round(adjustedPercentage * 100) / 100,
+        percentage: Math.round(adjustedPercentage * 1000) / 1000, // Allow 3 decimal places
 
         grams: adjustedGrams,
 
-        gramsPerKg: weight > 0 ? Math.round((adjustedGrams / weight) * 100) / 100 : 0
+        gramsPerKg: weight > 0 ? Math.round((adjustedGrams / weight) * 1000) / 1000 : 0 // Allow 3 decimal places
 
       };
 
@@ -790,11 +792,11 @@ export default function Clients() {
 
       if (weight > 0) {
 
-        defaultMacros.protein.gramsPerKg = Math.round((defaultMacros.protein.grams / weight) * 10) / 10;
+        defaultMacros.protein.gramsPerKg = Math.round((defaultMacros.protein.grams / weight) * 1000) / 1000;
 
-        defaultMacros.carbs.gramsPerKg = Math.round((defaultMacros.carbs.grams / weight) * 10) / 10;
+        defaultMacros.carbs.gramsPerKg = Math.round((defaultMacros.carbs.grams / weight) * 1000) / 1000;
 
-        defaultMacros.fat.gramsPerKg = Math.round((defaultMacros.fat.grams / weight) * 10) / 10;
+        defaultMacros.fat.gramsPerKg = Math.round((defaultMacros.fat.grams / weight) * 1000) / 1000;
 
       }
 
@@ -846,7 +848,7 @@ export default function Clients() {
 
         if (updatedMacros[macro].grams > 0) {
 
-          updatedMacros[macro].gramsPerKg = Math.round((updatedMacros[macro].grams / weight) * 10) / 10;
+          updatedMacros[macro].gramsPerKg = Math.round((updatedMacros[macro].grams / weight) * 1000) / 1000;
 
         }
 
@@ -1004,7 +1006,7 @@ export default function Clients() {
 
             grams: Math.round(((currentPercentages.protein / 100) * calculatedCalories) / 4),
 
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.protein / 100) * calculatedCalories) / 4) / weight * 10) / 10 : 0
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.protein / 100) * calculatedCalories) / 4) / weight * 1000) / 1000 : 0
 
           },
 
@@ -1014,7 +1016,7 @@ export default function Clients() {
 
             grams: Math.round(((currentPercentages.carbs / 100) * calculatedCalories) / 4),
 
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.carbs / 100) * calculatedCalories) / 4) / weight * 10) / 10 : 0
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.carbs / 100) * calculatedCalories) / 4) / weight * 1000) / 1000 : 0
 
           },
 
@@ -1024,7 +1026,7 @@ export default function Clients() {
 
             grams: Math.round(((currentPercentages.fat / 100) * calculatedCalories) / 9),
 
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.fat / 100) * calculatedCalories) / 9) / weight * 10) / 10 : 0
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.fat / 100) * calculatedCalories) / 9) / weight * 1000) / 1000 : 0
 
           }
 
@@ -1094,7 +1096,7 @@ export default function Clients() {
 
             grams: Math.round(((currentPercentages.protein / 100) * calories) / 4),
 
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.protein / 100) * calories) / 4) / weight * 10) / 10 : 0
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.protein / 100) * calories) / 4) / weight * 1000) / 1000 : 0
 
           },
 
@@ -1104,7 +1106,7 @@ export default function Clients() {
 
             grams: Math.round(((currentPercentages.carbs / 100) * calories) / 4),
 
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.carbs / 100) * calories) / 4) / weight * 10) / 10 : 0
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.carbs / 100) * calories) / 4) / weight * 1000) / 1000 : 0
 
           },
 
@@ -1114,7 +1116,7 @@ export default function Clients() {
 
             grams: Math.round(((currentPercentages.fat / 100) * calories) / 9),
 
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.fat / 100) * calories) / 9) / weight * 10) / 10 : 0
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.fat / 100) * calories) / 9) / weight * 1000) / 1000 : 0
 
           }
 
@@ -1897,6 +1899,10 @@ export default function Clients() {
     setFoodLogsAnalysis(null);
 
     setAnalyzingFoodLogs(false);
+    
+    setFoodLimitationsFromOnboarding(false);
+    
+    setClientPreferencesFromOnboarding(false);
 
     if (userCodeTimeout) {
 
@@ -1986,11 +1992,51 @@ export default function Clients() {
 
       dailyTotalCalories: client.dailyTotalCalories?.toString() || '',
 
-      food_limitations: Array.isArray(client.food_limitations) ? client.food_limitations.join(', ') : 
-
-                       typeof client.food_limitations === 'object' ? JSON.stringify(client.food_limitations, null, 2) : 
-
-                       client.food_limitations || '',
+      food_limitations: (() => {
+        // First check if food_limitations exists and has content
+        if (client.food_limitations) {
+          if (Array.isArray(client.food_limitations)) {
+            return client.food_limitations.join(', ');
+          } else if (typeof client.food_limitations === 'object') {
+            return JSON.stringify(client.food_limitations, null, 2);
+          } else {
+            return client.food_limitations;
+          }
+        }
+        
+        // If food_limitations is null/empty, try to get from onboarding_data
+        try {
+          if (client.onboarding_data && typeof client.onboarding_data === 'object') {
+            const onboardingData = client.onboarding_data;
+            if (onboardingData.food_restrictions) {
+              console.log('📋 Found food_restrictions in onboarding_data:', onboardingData.food_restrictions);
+              setFoodLimitationsFromOnboarding(true);
+              return onboardingData.food_restrictions;
+            } else if (onboardingData.dietary_preferences) {
+              console.log('📋 Found dietary_preferences in onboarding_data as fallback:', onboardingData.dietary_preferences);
+              setFoodLimitationsFromOnboarding(true);
+              return onboardingData.dietary_preferences;
+            }
+          } else if (client.onboarding_data && typeof client.onboarding_data === 'string') {
+            // Parse JSON string if needed
+            const parsedOnboarding = JSON.parse(client.onboarding_data);
+            if (parsedOnboarding.food_restrictions) {
+              console.log('📋 Found food_restrictions in parsed onboarding_data:', parsedOnboarding.food_restrictions);
+              setFoodLimitationsFromOnboarding(true);
+              return parsedOnboarding.food_restrictions;
+            } else if (parsedOnboarding.dietary_preferences) {
+              console.log('📋 Found dietary_preferences in parsed onboarding_data as fallback:', parsedOnboarding.dietary_preferences);
+              setFoodLimitationsFromOnboarding(true);
+              return parsedOnboarding.dietary_preferences;
+            }
+          }
+        } catch (error) {
+          console.warn('Error parsing onboarding_data for food_restrictions:', error);
+        }
+        
+        setFoodLimitationsFromOnboarding(false);
+        return '';
+      })(),
 
       Activity_level: client.Activity_level || '',
 
@@ -1998,7 +2044,41 @@ export default function Clients() {
 
               number_of_meals: client.number_of_meals?.toString() || '4',
 
-      client_preference: typeof client.client_preference === 'object' ? JSON.stringify(client.client_preference, null, 2) : client.client_preference || '',
+      client_preference: (() => {
+        // First check if client_preference exists and has content
+        if (client.client_preference) {
+          if (typeof client.client_preference === 'object') {
+            return JSON.stringify(client.client_preference, null, 2);
+          } else {
+            return client.client_preference;
+          }
+        }
+        
+        // If client_preference is null/empty, try to get from onboarding_data
+        try {
+          if (client.onboarding_data && typeof client.onboarding_data === 'object') {
+            const onboardingData = client.onboarding_data;
+            if (onboardingData.food_likes) {
+              console.log('📋 Found food_likes in onboarding_data:', onboardingData.food_likes);
+              setClientPreferencesFromOnboarding(true);
+              return onboardingData.food_likes;
+            }
+          } else if (client.onboarding_data && typeof client.onboarding_data === 'string') {
+            // Parse JSON string if needed
+            const parsedOnboarding = JSON.parse(client.onboarding_data);
+            if (parsedOnboarding.food_likes) {
+              console.log('📋 Found food_likes in parsed onboarding_data:', parsedOnboarding.food_likes);
+              setClientPreferencesFromOnboarding(true);
+              return parsedOnboarding.food_likes;
+            }
+          }
+        } catch (error) {
+          console.warn('Error parsing onboarding_data for food_likes:', error);
+        }
+        
+        setClientPreferencesFromOnboarding(false);
+        return '';
+      })(),
 
       food_diary: client.food_diary || '',
 
@@ -2032,7 +2112,7 @@ export default function Clients() {
 
         grams: proteinValue,
 
-        gramsPerKg: weight > 0 ? Math.round((proteinValue / weight) * 10) / 10 : 0
+        gramsPerKg: weight > 0 ? Math.round((proteinValue / weight) * 1000) / 1000 : 0
 
       },
 
@@ -2042,7 +2122,7 @@ export default function Clients() {
 
         grams: carbsValue,
 
-        gramsPerKg: weight > 0 ? Math.round((carbsValue / weight) * 10) / 10 : 0
+        gramsPerKg: weight > 0 ? Math.round((carbsValue / weight) * 1000) / 1000 : 0
 
       },
 
@@ -2052,7 +2132,7 @@ export default function Clients() {
 
         grams: fatValue,
 
-        gramsPerKg: weight > 0 ? Math.round((fatValue / weight) * 10) / 10 : 0
+        gramsPerKg: weight > 0 ? Math.round((fatValue / weight) * 1000) / 1000 : 0
 
       }
 
@@ -2124,7 +2204,7 @@ export default function Clients() {
 
             grams: Math.round(((currentPercentages.protein / 100) * calculatedCalories) / 4),
 
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.protein / 100) * calculatedCalories) / 4) / weight * 10) / 10 : 0
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.protein / 100) * calculatedCalories) / 4) / weight * 1000) / 1000 : 0
 
           },
 
@@ -2134,7 +2214,7 @@ export default function Clients() {
 
             grams: Math.round(((currentPercentages.carbs / 100) * calculatedCalories) / 4),
 
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.carbs / 100) * calculatedCalories) / 4) / weight * 10) / 10 : 0
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.carbs / 100) * calculatedCalories) / 4) / weight * 1000) / 1000 : 0
 
           },
 
@@ -2144,7 +2224,7 @@ export default function Clients() {
 
             grams: Math.round(((currentPercentages.fat / 100) * calculatedCalories) / 9),
 
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.fat / 100) * calculatedCalories) / 9) / weight * 10) / 10 : 0
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.fat / 100) * calculatedCalories) / 9) / weight * 1000) / 1000 : 0
 
           }
 
@@ -2822,7 +2902,7 @@ export default function Clients() {
 
             ...meal,
 
-            calories_pct: total > 0 ? Math.round(((meal.calories || 0) / total) * 100 * 10) / 10 : 0
+            calories_pct: total > 0 ? Math.round(((meal.calories || 0) / total) * 100 * 1000) / 1000 : 0
 
           };
 
@@ -2834,7 +2914,7 @@ export default function Clients() {
 
             ...meal,
 
-            calories_pct: total > 0 ? Math.round(((meal.calories || 0) / total) * 100 * 10) / 10 : 0
+            calories_pct: total > 0 ? Math.round(((meal.calories || 0) / total) * 100 * 1000) / 1000 : 0
 
           };
 
@@ -2850,7 +2930,7 @@ export default function Clients() {
 
             calories: Math.max(0, scaledCalories),
 
-            calories_pct: total > 0 ? Math.round((scaledCalories / total) * 100 * 10) / 10 : 0
+            calories_pct: total > 0 ? Math.round((scaledCalories / total) * 100 * 1000) / 1000 : 0
 
           };
 
@@ -2868,7 +2948,7 @@ export default function Clients() {
 
       ...meal,
 
-      calories_pct: total > 0 ? Math.round(((meal.calories || 0) / total) * 100 * 10) / 10 : 0
+      calories_pct: total > 0 ? Math.round(((meal.calories || 0) / total) * 100 * 1000) / 1000 : 0
 
     }));
 
@@ -2984,7 +3064,7 @@ export default function Clients() {
 
             ...meal,
 
-            calories_pct: totalCalories > 0 ? Math.round(((meal.calories || 0) / totalCalories) * 100 * 10) / 10 : 0
+            calories_pct: totalCalories > 0 ? Math.round(((meal.calories || 0) / totalCalories) * 100 * 1000) / 1000 : 0
 
           };
 
@@ -3044,7 +3124,7 @@ export default function Clients() {
 
           ...meal,
 
-          calories_pct: totalCalories > 0 ? Math.round(((meal.calories || 0) / totalCalories) * 100 * 10) / 10 : 0
+          calories_pct: totalCalories > 0 ? Math.round(((meal.calories || 0) / totalCalories) * 100 * 1000) / 1000 : 0
 
         };
 
@@ -3060,7 +3140,7 @@ export default function Clients() {
 
           calories: scaledCalories,
 
-          calories_pct: totalCalories > 0 ? Math.round((scaledCalories / totalCalories) * 100 * 10) / 10 : 0
+          calories_pct: totalCalories > 0 ? Math.round((scaledCalories / totalCalories) * 100 * 1000) / 1000 : 0
 
         };
 
@@ -3102,7 +3182,7 @@ export default function Clients() {
 
           calories: Math.max(0, (rebalancedStructure[largestUnlockedIndex].calories || 0) + difference),
 
-          calories_pct: totalCalories > 0 ? Math.round((((rebalancedStructure[largestUnlockedIndex].calories || 0) + difference) / totalCalories) * 100 * 10) / 10 : 0
+          calories_pct: totalCalories > 0 ? Math.round((((rebalancedStructure[largestUnlockedIndex].calories || 0) + difference) / totalCalories) * 100 * 1000) / 1000 : 0
 
         };
 
@@ -5625,7 +5705,7 @@ export default function Clients() {
 
                                 grams: Math.round((0.30 * calories) / 4), 
 
-                                gramsPerKg: weight > 0 ? Math.round((Math.round((0.30 * calories) / 4) / weight) * 10) / 10 : 0
+                                gramsPerKg: weight > 0 ? Math.round((Math.round((0.30 * calories) / 4) / weight) * 1000) / 1000 : 0
 
                               },
 
@@ -5635,7 +5715,7 @@ export default function Clients() {
 
                                 grams: Math.round((0.40 * calories) / 4), 
 
-                                gramsPerKg: weight > 0 ? Math.round((Math.round((0.40 * calories) / 4) / weight) * 10) / 10 : 0
+                                gramsPerKg: weight > 0 ? Math.round((Math.round((0.40 * calories) / 4) / weight) * 1000) / 1000 : 0
 
                               },
 
@@ -5645,7 +5725,7 @@ export default function Clients() {
 
                                 grams: Math.round((0.30 * calories) / 9), 
 
-                                gramsPerKg: weight > 0 ? Math.round((Math.round((0.30 * calories) / 9) / weight) * 10) / 10 : 0
+                                gramsPerKg: weight > 0 ? Math.round((Math.round((0.30 * calories) / 9) / weight) * 1000) / 1000 : 0
 
                               }
 
@@ -5837,7 +5917,7 @@ export default function Clients() {
 
                               max="100"
 
-                              step="0.1"
+                              step="0.001"
 
                               placeholder="0"
 
@@ -5905,7 +5985,7 @@ export default function Clients() {
 
                               min="0"
 
-                              step="0.1"
+                              step="0.001"
 
                             />
 
@@ -6295,17 +6375,36 @@ export default function Clients() {
 
                       value={formData.food_limitations}
 
-                      onChange={(e) => setFormData({...formData, food_limitations: e.target.value})}
+                      onChange={(e) => {
+                        setFormData({...formData, food_limitations: e.target.value});
+                        // Clear the onboarding flag when user manually edits
+                        if (foodLimitationsFromOnboarding) {
+                          setFoodLimitationsFromOnboarding(false);
+                        }
+                      }}
 
                       placeholder={translations.foodLimitationsPlaceholder}
 
                       rows={3}
 
-                      className="border-gray-300 focus:border-orange-500 focus:ring-orange-500 resize-none"
+                      className={`resize-none transition-all duration-200 ${
+                        foodLimitationsFromOnboarding 
+                          ? 'border-blue-500 bg-blue-50 text-blue-900 font-medium shadow-sm ring-1 ring-blue-300' 
+                          : 'border-gray-300 focus:border-orange-500 focus:ring-orange-500'
+                      }`}
 
                     />
 
-                    {formData.food_limitations && (
+                    {foodLimitationsFromOnboarding && (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        {translations.autoPopulatedFromOnboarding || 'Auto-populated from onboarding data'} - You can edit this as needed.
+                      </div>
+                    )}
+
+                    {formData.food_limitations && !foodLimitationsFromOnboarding && (
 
                       <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
 
@@ -6451,21 +6550,33 @@ export default function Clients() {
 
                         value={formData.client_preference}
 
-                        onChange={(e) => setFormData({...formData, client_preference: e.target.value})}
+                        onChange={(e) => {
+                          setFormData({...formData, client_preference: e.target.value});
+                          // Clear the onboarding flag when user manually edits
+                          if (clientPreferencesFromOnboarding) {
+                            setClientPreferencesFromOnboarding(false);
+                          }
+                        }}
 
                         placeholder={translations.clientPreferencesPlaceholder}
 
                         rows={3}
 
-                        className={`flex-1 transition-all duration-200 resize-none ${foodLogsAnalysis ? 'border-green-500 bg-green-50 text-green-900 font-medium shadow-sm ring-1 ring-green-300' : 'border-gray-300 focus:border-green-500 focus:ring-green-500'}`}
+                        className={`flex-1 transition-all duration-200 resize-none ${
+                          foodLogsAnalysis 
+                            ? 'border-green-500 bg-green-50 text-green-900 font-medium shadow-sm ring-1 ring-green-300' 
+                            : clientPreferencesFromOnboarding
+                              ? 'border-blue-500 bg-blue-50 text-blue-900 font-medium shadow-sm ring-1 ring-blue-300'
+                              : 'border-gray-300 focus:border-green-500 focus:ring-green-500'
+                        }`}
 
                         style={{ 
 
-                          borderColor: foodLogsAnalysis ? '#10b981' : undefined,
+                          borderColor: foodLogsAnalysis ? '#10b981' : clientPreferencesFromOnboarding ? '#3b82f6' : undefined,
 
-                          backgroundColor: foodLogsAnalysis ? '#f0fdf4' : undefined,
+                          backgroundColor: foodLogsAnalysis ? '#f0fdf4' : clientPreferencesFromOnboarding ? '#eff6ff' : undefined,
 
-                          color: foodLogsAnalysis ? '#064e3b' : undefined
+                          color: foodLogsAnalysis ? '#064e3b' : clientPreferencesFromOnboarding ? '#1e3a8a' : undefined
 
                         }}
 
@@ -6543,6 +6654,15 @@ export default function Clients() {
 
                       </div>
 
+                    )}
+
+                    {clientPreferencesFromOnboarding && !foodLogsAnalysis && (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        {translations.autoPopulatedFromOnboarding || 'Auto-populated from onboarding data'} - You can edit this as needed.
+                      </div>
                     )}
 
                   </div>
@@ -7098,6 +7218,10 @@ export default function Clients() {
                   setFoodLogsAnalysis(null);
 
                   setAnalyzingFoodLogs(false);
+                  
+                  setFoodLimitationsFromOnboarding(false);
+                  
+                  setClientPreferencesFromOnboarding(false);
 
                   if (userCodeTimeout) {
 
