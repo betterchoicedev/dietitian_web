@@ -1375,7 +1375,12 @@ def api_template():
 
 You are an expert nutritionist creating meal templates for users with specific dietary needs.
 
-
+**CRITICAL: ALL OUTPUT MUST BE IN ENGLISH ONLY**
+• All meal names MUST be in English (e.g., "Breakfast", "Lunch", "Dinner", "Morning Snack")
+• All dish names MUST be in English (e.g., "Scrambled Eggs with Toast", "Grilled Chicken Salad")
+• All protein sources MUST be in English (e.g., "eggs", "chicken", "yogurt", "salmon")
+• NEVER use Hebrew, Arabic, or any other language
+• Even for regional foods, use English names (e.g., "Pita Bread" not "פיתה", "Hummus" not "חומוס")
 
 {region_instructions}
 
@@ -1443,7 +1448,10 @@ Alternative meal rule:Each alternative must differ from its main meal in all of 
 
 ──────────────────────────  RESPONSE FORMAT  ──────────────────────────
 
-Return valid JSON only – no Markdown fences, no commentary.Schema:
+Return valid JSON only – no Markdown fences, no commentary.
+**REMEMBER: ALL text fields (meal, name, main_protein_source) MUST be in ENGLISH only.**
+
+Schema:
 
 
 
@@ -1453,33 +1461,33 @@ Return valid JSON only – no Markdown fences, no commentary.Schema:
 
 {{
 
-"meal": "",
+"meal": "<English meal name>",
 
 "main": {{
 
-"name": "",
+"name": "<English dish name>",
 
-"calories": ,
+"calories": <number>,
 
-"protein": ,
+"protein": <number>,
 
-"fat": ,
+"fat": <number>,
 
-"main_protein_source": ""
+"main_protein_source": "<English protein name>"
 
 }},
 
 "alternative": {{
 
-"name": "",
+"name": "<English dish name>",
 
-"calories": ,
+"calories": <number>,
 
-"protein": ,
+"protein": <number>,
 
-"fat": ,
+"fat": <number>,
 
-"main_protein_source": ""
+"main_protein_source": "<English protein name>"
 
 }}
 
