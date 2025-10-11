@@ -371,7 +371,34 @@ export default function Dashboard() {
             </div>
 
             {/* Dietary Restrictions */}
-            {(selectedClient.food_allergies || selectedClient.food_limitations) && (
+            {(() => {
+              // Helper functions to check if allergies/limitations have meaningful content
+              const hasValidAllergies = () => {
+                if (!selectedClient.food_allergies) return false;
+                
+                if (Array.isArray(selectedClient.food_allergies)) {
+                  return selectedClient.food_allergies.length > 0 && 
+                         selectedClient.food_allergies.some(allergy => allergy && allergy.trim() !== '');
+                }
+                
+                const str = selectedClient.food_allergies.toString().trim();
+                return str !== '' && str !== '[]' && str !== 'null' && str !== 'undefined';
+              };
+              
+              const hasValidLimitations = () => {
+                if (!selectedClient.food_limitations) return false;
+                
+                if (Array.isArray(selectedClient.food_limitations)) {
+                  return selectedClient.food_limitations.length > 0 && 
+                         selectedClient.food_limitations.some(limitation => limitation && limitation.trim() !== '');
+                }
+                
+                const str = selectedClient.food_limitations.toString().trim();
+                return str !== '' && str !== '[]' && str !== 'null' && str !== 'undefined';
+              };
+              
+              return hasValidAllergies() || hasValidLimitations();
+            })() && (
               <div className="mt-6 p-4 bg-gradient-to-r from-red-50/80 to-orange-50/80 backdrop-blur-sm rounded-xl border border-red-200/50 shadow-lg">
                 <h4 className="font-bold text-base text-slate-800 flex items-center gap-2 mb-3">
                   <div className="w-6 h-6 bg-gradient-to-br from-red-500 to-orange-600 rounded-lg flex items-center justify-center">
@@ -380,16 +407,54 @@ export default function Dashboard() {
                   {translations.dietaryRestrictions || 'Dietary Restrictions'}
                 </h4>
                 <div className="flex flex-wrap gap-2">
-                  {selectedClient.food_allergies && (
-                    <div className="px-3 py-1 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-lg font-semibold text-sm shadow-lg">
-                      {translations.foodAllergies || 'Allergies'}: {Array.isArray(selectedClient.food_allergies) ? selectedClient.food_allergies.join(', ') : selectedClient.food_allergies}
-                    </div>
-                  )}
-                  {selectedClient.food_limitations && (
-                    <div className="px-3 py-1 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg font-semibold text-sm shadow-lg">
-                      {translations.foodLimitations || 'Limitations'}: {Array.isArray(selectedClient.food_limitations) ? selectedClient.food_limitations.join(', ') : selectedClient.food_limitations}
-                    </div>
-                  )}
+                  {(() => {
+                    // Helper function to check if allergies have meaningful content
+                    const hasValidAllergies = () => {
+                      if (!selectedClient.food_allergies) return false;
+                      
+                      // Debug logging
+                      console.log('🔍 Debug food_allergies:', {
+                        value: selectedClient.food_allergies,
+                        type: typeof selectedClient.food_allergies,
+                        isArray: Array.isArray(selectedClient.food_allergies),
+                        length: Array.isArray(selectedClient.food_allergies) ? selectedClient.food_allergies.length : 'N/A'
+                      });
+                      
+                      if (Array.isArray(selectedClient.food_allergies)) {
+                        return selectedClient.food_allergies.length > 0 && 
+                               selectedClient.food_allergies.some(allergy => allergy && allergy.trim() !== '');
+                      }
+                      
+                      const str = selectedClient.food_allergies.toString().trim();
+                      return str !== '' && str !== '[]' && str !== 'null' && str !== 'undefined';
+                    };
+                    
+                    return hasValidAllergies() && (
+                      <div className="px-3 py-1 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-lg font-semibold text-sm shadow-lg">
+                        {translations.foodAllergies || 'Allergies'}: {Array.isArray(selectedClient.food_allergies) ? selectedClient.food_allergies.filter(a => a && a.trim() !== '').join(', ') : selectedClient.food_allergies}
+                      </div>
+                    );
+                  })()}
+                  {(() => {
+                    // Helper function to check if limitations have meaningful content
+                    const hasValidLimitations = () => {
+                      if (!selectedClient.food_limitations) return false;
+                      
+                      if (Array.isArray(selectedClient.food_limitations)) {
+                        return selectedClient.food_limitations.length > 0 && 
+                               selectedClient.food_limitations.some(limitation => limitation && limitation.trim() !== '');
+                      }
+                      
+                      const str = selectedClient.food_limitations.toString().trim();
+                      return str !== '' && str !== '[]' && str !== 'null' && str !== 'undefined';
+                    };
+                    
+                    return hasValidLimitations() && (
+                      <div className="px-3 py-1 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg font-semibold text-sm shadow-lg">
+                        {translations.foodLimitations || 'Limitations'}: {Array.isArray(selectedClient.food_limitations) ? selectedClient.food_limitations.filter(l => l && l.trim() !== '').join(', ') : selectedClient.food_limitations}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}

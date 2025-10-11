@@ -386,7 +386,7 @@ cleanExpiredCache();
 
 
 
-const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
+const EditableTitle = ({ value, onChange, mealIndex, optionIndex, alternativeIndex }) => {
 
   const [isEditing, setIsEditing] = useState(false);
 
@@ -428,7 +428,7 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
 
   const handleSubmit = () => {
 
-    onChange(editValue, mealIndex, optionIndex);
+    onChange(editValue, mealIndex, optionIndex, alternativeIndex);
 
     setIsEditing(false);
 
@@ -512,7 +512,7 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
 
 
 
-const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, translations, currentIngredient, onPortionDialog, autoFocus }) => {
+const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, translations, currentIngredient, onPortionDialog, autoFocus, forceShowAbove = false }) => {
 
   const [isEditing, setIsEditing] = useState(false);
 
@@ -546,7 +546,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
   const searchTimeoutRef = React.useRef(null);
 
-
+  const [showAbove, setShowAbove] = useState(false);
 
   useEffect(() => {
 
@@ -572,6 +572,28 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
 
 
+  const checkDropdownPosition = () => {
+
+    if (inputRef.current) {
+
+      const rect = inputRef.current.getBoundingClientRect();
+
+      const spaceBelow = window.innerHeight - rect.bottom;
+
+      const spaceAbove = rect.top;
+
+      console.log('🔍 Position check:', { spaceBelow, spaceAbove, rect, forceShowAbove });
+
+      // If forced to show above OR there's less than 400px below, show above
+
+      setShowAbove(forceShowAbove || spaceBelow < 400);
+
+    }
+
+  };
+
+
+
   useEffect(() => {
 
     return () => {
@@ -585,6 +607,42 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
     };
 
   }, []);
+
+
+
+  useEffect(() => {
+
+    if (showSuggestions) {
+
+      checkDropdownPosition();
+
+    }
+
+  }, [showSuggestions]);
+
+
+
+  useEffect(() => {
+
+    if (showSuggestions) {
+
+      const handleScroll = () => {
+
+        setTimeout(() => checkDropdownPosition(), 10);
+
+      };
+
+      window.addEventListener('scroll', handleScroll);
+
+      return () => {
+
+        window.removeEventListener('scroll', handleScroll);
+
+      };
+
+    }
+
+  }, [showSuggestions]);
 
 
 
@@ -670,29 +728,85 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
         else if (fullName.startsWith(queryLower)) {
           score += 800;
         }
+        
+        // Check if first word matches the search term (highest priority for single word searches)
+        const firstWord = fullName.split(' ')[0];
+        if (queryWordsLower.length === 1 && firstWord === queryWordsLower[0]) {
+          score += 900; // Higher than "contains" but lower than "starts with"
+        }
+        
+        // For multi-word searches, check if all words appear together as a phrase
+        if (queryWordsLower.length > 1) {
+          const queryPhrase = queryWordsLower.join(' ');
+          
+          // Check if the phrase appears at the beginning
+          if (fullName.startsWith(queryPhrase)) {
+            score += 950; // Higher than single first word match
+          }
+          // Check if the phrase appears anywhere in the name
+          else if (fullName.includes(queryPhrase)) {
+            score += 700; // Higher than individual word matches
+          }
+          
+          // Check if first two words match (for better Hebrew support)
+          const words = fullName.split(' ');
+          if (words.length >= 2 && 
+              words[0] === queryWordsLower[0] && 
+              words[1] === queryWordsLower[1]) {
+            score += 920; // Very high score for first two words matching
+          }
+        }
+        
         // Contains exact query gets medium-high score
         else if (fullName.includes(queryLower)) {
           score += 600;
         }
         
-        // Multi-word matching: check if all query words are present
+        // Multi-word matching: check if all query words are present (anywhere in the name)
         const allWordsPresent = queryWordsLower.every(word => fullName.includes(word));
         if (allWordsPresent) {
-          score += 400;
+          score += 500; // Higher base score for having all words
           
           // Bonus for words being close together (consecutive)
           const queryPhrase = queryWordsLower.join(' ');
           if (fullName.includes(queryPhrase)) {
-            score += 200;
+            score += 300; // Higher bonus for consecutive words
+          }
+          
+          // Bonus for words appearing in order (even if not consecutive)
+          let wordsInOrder = true;
+          let lastIndex = -1;
+          for (const word of queryWordsLower) {
+            const currentIndex = fullName.indexOf(word);
+            if (currentIndex <= lastIndex) {
+              wordsInOrder = false;
+              break;
+            }
+            lastIndex = currentIndex;
+          }
+          if (wordsInOrder) {
+            score += 200; // Bonus for words appearing in search order
           }
         }
         
-        // Individual word matches
-        queryWordsLower.forEach(word => {
-          if (fullName.startsWith(word)) {
-            score += 100;
+        // Individual word matches (adjusted for multi-word searches)
+        queryWordsLower.forEach((word, index) => {
+          const words = fullName.split(' ');
+          const wordIndex = words.indexOf(word);
+          
+          if (wordIndex === 0) {
+            // First word match gets high score
+            score += 150;
+          } else if (wordIndex > 0) {
+            // Later word match gets lower score, but higher for multi-word searches
+            if (queryWordsLower.length > 1) {
+              score += 80; // Higher score for multi-word searches
+            } else {
+              score += 30; // Lower score for single word searches
+            }
           } else if (fullName.includes(word)) {
-            score += 50;
+            // Partial word match gets lowest score
+            score += 10;
           }
         });
         
@@ -1375,6 +1489,10 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
           setShowSuggestions(true);
 
+          // Check position when focusing
+
+          setTimeout(() => checkDropdownPosition(), 10);
+
         }}
 
         className="w-full px-2 py-1 border border-gray-300 rounded text-right"
@@ -1419,7 +1537,10 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
       {showSuggestions && (
 
-        <div className="absolute z-50 mt-1 bg-white border border-gray-300 rounded-xl shadow-2xl overflow-hidden animate-fade-in min-w-max max-w-[420px] w-auto" style={{minWidth: 220}}>
+        <div 
+          className={`absolute z-50 bg-white border border-gray-300 rounded-xl shadow-2xl overflow-hidden animate-fade-in min-w-max max-w-[420px] w-auto ${showAbove ? 'bottom-full mb-1' : 'top-full mt-1'}`} 
+          style={{minWidth: 220}}
+        >
 
           {isLoading ? (
 
@@ -4645,7 +4766,7 @@ const MenuCreate = () => {
 
 
 
-  const handleTitleChange = (newTitle, mealIndex, optionIndex) => {
+  const handleTitleChange = (newTitle, mealIndex, optionIndex, alternativeIndex = null) => {
 
     setMenu(prevMenu => {
 
@@ -4659,7 +4780,21 @@ const MenuCreate = () => {
 
       const meal = updatedMenu.meals[mealIndex];
 
-      const option = optionIndex === 'main' ? meal.main : meal.alternative;
+      let option;
+
+      if (alternativeIndex !== null) {
+
+        // Handle additional alternatives array
+
+        option = meal.alternatives[alternativeIndex];
+
+      } else {
+
+        // Handle main and alternative sections
+
+        option = optionIndex === 'main' ? meal.main : meal.alternative;
+
+      }
 
 
 
@@ -4685,7 +4820,21 @@ const MenuCreate = () => {
 
       const meal = updatedOriginal.meals[mealIndex];
 
-      const option = optionIndex === 'main' ? meal.main : meal.alternative;
+      let option;
+
+      if (alternativeIndex !== null) {
+
+        // Handle additional alternatives array
+
+        option = meal.alternatives[alternativeIndex];
+
+      } else {
+
+        // Handle main and alternative sections
+
+        option = optionIndex === 'main' ? meal.main : meal.alternative;
+
+      }
 
 
 
@@ -8523,6 +8672,8 @@ const MenuCreate = () => {
 
             optionIndex={isAlternative ? 'alternative' : 'main'}
 
+            alternativeIndex={option.alternativeIndex}
+
           />
 
           <div className="flex gap-2">
@@ -8632,6 +8783,8 @@ const MenuCreate = () => {
                         onPortionDialog={handleOpenPortionDialog}
 
                         autoFocus={idx === option.ingredients.length - 1 && ingredient.item === ''}
+
+                        forceShowAbove={option.mealIndex === menu.meals.length - 1 && idx === option.ingredients.length - 1}
 
                       />
 
@@ -12237,7 +12390,7 @@ const MenuCreate = () => {
 
             {menu.meals.map((meal, mealIdx) => (
 
-              <Card key={mealIdx} className="overflow-hidden">
+              <Card key={mealIdx} className="overflow-visible">
 
                 <CardHeader className="border-b bg-gray-50">
 
@@ -12397,7 +12550,15 @@ const MenuCreate = () => {
 
                           {meal.alternatives.map((alt, altIdx) => (
 
-                            <div key={altIdx} className="bg-blue-50 rounded-lg p-3 relative">
+                            <div key={altIdx} className="bg-blue-50 rounded-lg p-3">
+
+                              <div className="flex justify-between items-start mb-3">
+
+                                <div className="flex-1">
+
+                                  {renderMealOption({ ...alt, mealIndex: mealIdx, alternativeIndex: altIdx }, true)}
+
+                                </div>
 
                               <Button
 
@@ -12405,7 +12566,7 @@ const MenuCreate = () => {
 
                                 size="sm"
 
-                                className="text-red-600 hover:bg-red-50 border-red-300 absolute top-2 right-2"
+                                  className="text-red-600 hover:bg-red-50 border-red-300 ml-3 flex-shrink-0"
 
                                 onClick={() => {
 
@@ -12465,7 +12626,7 @@ const MenuCreate = () => {
 
                               </Button>
 
-                              {renderMealOption({ ...alt, mealIndex: mealIdx, alternativeIndex: altIdx }, true)}
+                              </div>
 
                             </div>
 

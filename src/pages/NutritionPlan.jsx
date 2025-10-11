@@ -283,7 +283,7 @@ const NutritionPlan = () => {
 
   useEffect(() => {
     // Load data from public/data.json
-    fetch('/data.json')
+    fetch('/data/data.json')
       .then(response => response.json())
       .then(setData)
       .catch(console.error);

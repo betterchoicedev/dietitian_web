@@ -233,7 +233,7 @@ export default function Layout() {
           <div className="hidden md:flex items-center mr-6 flex-shrink-0">
             <div className="flex items-center gap-3">
               <div className="relative">
-                <img src="/logo-placeholder.png" alt="BetterChoice Logo" className="w-10 h-10 drop-shadow-md" />
+                <img src="/images/logos/logo-placeholder.png" alt="BetterChoice Logo" className="w-10 h-10 drop-shadow-md" />
                 <div className="absolute inset-0 rounded-full bg-gradient-to-br from-primary/20 to-transparent"></div>
               </div>
               <div className="flex flex-col">
@@ -247,7 +247,7 @@ export default function Layout() {
           <div className="md:hidden flex items-center mr-2 flex-shrink-0">
             <div className="flex items-center gap-2">
               <div className="relative">
-                <img src="/logo-placeholder.png" alt="BetterChoice Logo" className="w-8 h-8 drop-shadow-md" />
+                <img src="/images/logos/logo-placeholder.png" alt="BetterChoice Logo" className="w-8 h-8 drop-shadow-md" />
                 <div className="absolute inset-0 rounded-full bg-gradient-to-br from-primary/20 to-transparent"></div>
               </div>
               <h1 className="text-base font-bold text-gradient-primary">BetterChoice</h1>
@@ -373,7 +373,7 @@ export default function Layout() {
           {/* Sidebar Logo */}
           <div className="flex items-center gap-3">
             <div className="relative">
-              <img src="/logo-placeholder.png" alt="BetterChoice Logo" className="w-8 h-8 drop-shadow-sm" />
+              <img src="/images/logos/logo-placeholder.png" alt="BetterChoice Logo" className="w-8 h-8 drop-shadow-sm" />
               <div className="absolute inset-0 rounded-full bg-gradient-to-br from-primary/20 to-transparent"></div>
             </div>
             <div className="flex flex-col">

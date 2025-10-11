@@ -200,7 +200,7 @@ const groupedRecipes = [
           'Whisk dressing ingredients and toss with salad.'
         ],
         tips: 'Add fresh herbs for extra flavor.',
-        image: '/images/quinoa-salad.jpg',
+        image: '/images/recipes/Quinoa-ChickpeaSalad.png',
         ingredients: [
           '1 cup cooked quinoa',
           '½ cup canned chickpeas (drained)',
@@ -228,7 +228,7 @@ const groupedRecipes = [
           'Drizzle with olive oil, lemon juice, and oregano. Toss gently.'
         ],
         tips: 'Use Kalamata olives for authentic flavor.',
-        image: '/images/greek-salad.jpg',
+        image: '/images/recipes/Greek FetaSalad.png',
         ingredients: [
           '1 cup chopped romaine',
           '½ cup cherry tomatoes',
@@ -257,7 +257,7 @@ const groupedRecipes = [
           'Mix all ingredients and toss with vinaigrette.'
         ],
         tips: 'Great for meal prep!',
-        image: '/images/lentil-apple-salad.jpg',
+        image: '/images/recipes/Lentil-AppleSalad.png',
         ingredients: [
           '1 cup cooked lentils',
           '1 small apple, diced',
@@ -292,7 +292,7 @@ const groupedRecipes = [
           'Assemble bowl and drizzle with tahini.'
         ],
         tips: 'Swap salmon for tofu for a vegan version.',
-        image: '/images/salmon-bowl.jpg',
+        image: '/images/recipes/Salmon&VeggiePowerBowl.png',
         ingredients: [
           '150 g grilled salmon filet',
           '1 cup steamed broccoli',
@@ -319,7 +319,7 @@ const groupedRecipes = [
           'Simmer for 30 minutes.'
         ],
         tips: 'Serve with brown rice or quinoa.',
-        image: '/images/veggie-chili.jpg',
+        image: '/images/recipes/VegetarianChili.png',
         ingredients: [
           '1 cup cooked beans',
           '½ cup corn',
@@ -347,7 +347,7 @@ const groupedRecipes = [
           'Sprinkle with cheese and bake 5 more minutes.'
         ],
         tips: 'Add jalapeños for a spicy kick.',
-        image: '/images/sweetpotato-bake.jpg',
+        image: '/images/recipes/SweetPotato&BlackBeanBake.png',
         ingredients: [
           '1 medium sweet potato, sliced',
           '½ cup black beans',
@@ -381,7 +381,7 @@ const groupedRecipes = [
           'Top with poached eggs and seasonings.'
         ],
         tips: 'Add microgreens for extra nutrition.',
-        image: '/images/avocado-toast.jpg',
+        image: '/images/recipes/Avocado-EggToast.png',
         ingredients: [
           '2 slices whole-grain sourdough',
           '1 ripe avocado',
@@ -408,7 +408,7 @@ const groupedRecipes = [
           'Season and serve.'
         ],
         tips: 'Serve warm or cold.',
-        image: '/images/eggplant-rolls.jpg',
+        image: '/images/recipes/EggplantRolls.png',
         ingredients: [
           '2 slices grilled eggplant',
           '2 tbsp ricotta cheese',
@@ -435,7 +435,7 @@ const groupedRecipes = [
           'Bake at 180°C for 10 minutes.'
         ],
         tips: 'Try with goat cheese for a twist.',
-        image: '/images/stuffed-peppers.jpg',
+        image: '/images/recipes/StuffedMiniPeppers.png',
         ingredients: [
           '4 mini sweet peppers',
           '¼ cup cottage cheese',
@@ -469,7 +469,7 @@ const groupedRecipes = [
           'Serve with fruit or yogurt.'
         ],
         tips: 'Add cinnamon for extra flavor.',
-        image: '/images/protein-pancakes.jpg',
+        image: '/images/recipes/ProteinPancakes.png',
         ingredients: [
           '2 eggs',
           '½ cup rolled oats',
@@ -497,7 +497,7 @@ const groupedRecipes = [
           'Pour into muffin tin and bake at 180°C for 18-20 min.'
         ],
         tips: 'Great for breakfast on the go.',
-        image: '/images/mini-frittatas.jpg',
+        image: '/images/recipes/Mini VeggieFrittatas.png',
         ingredients: [
           '2 eggs',
           '¼ cup diced bell pepper',
@@ -524,7 +524,7 @@ const groupedRecipes = [
           'Repeat layers and serve immediately.'
         ],
         tips: 'Use Greek yogurt for more protein.',
-        image: '/images/berry-parfait.jpg',
+        image: '/images/recipes/BerryYogurtParfait.png',
         ingredients: [
           '1 cup Greek yogurt',
           '½ cup mixed berries',
@@ -541,7 +541,7 @@ const groupedRecipes = [
   }
 ];
 
-const fallbackImage = '/logo-placeholder.png';
+const fallbackImage = '/images/logos/logo-placeholder.png';
 
 // Translation function for recipes using backend API
 const translateRecipes = async (recipes, targetLang = 'he') => {

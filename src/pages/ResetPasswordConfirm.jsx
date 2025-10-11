@@ -156,7 +156,7 @@ export default function ResetPasswordConfirm() {
               <div className="flex items-center justify-center mb-4">
                 <div className="flex items-center gap-3">
                   <div className="relative">
-                    <img src="/logo-placeholder.png" alt="BetterChoice Logo" className="w-12 h-12 drop-shadow-md" />
+                    <img src="/images/logos/logo-placeholder.png" alt="BetterChoice Logo" className="w-12 h-12 drop-shadow-md" />
                     <div className="absolute inset-0 rounded-full bg-gradient-to-br from-primary/30 to-transparent"></div>
                   </div>
                   <div className="flex flex-col">
@@ -200,7 +200,7 @@ export default function ResetPasswordConfirm() {
               <div className="flex items-center justify-center mb-4">
                 <div className="flex items-center gap-3">
                   <div className="relative">
-                    <img src="/logo-placeholder.png" alt="BetterChoice Logo" className="w-12 h-12 drop-shadow-md" />
+                    <img src="/images/logos/logo-placeholder.png" alt="BetterChoice Logo" className="w-12 h-12 drop-shadow-md" />
                     <div className="absolute inset-0 rounded-full bg-gradient-to-br from-primary/30 to-transparent"></div>
                   </div>
                   <div className="flex flex-col">
@@ -255,7 +255,7 @@ export default function ResetPasswordConfirm() {
             <div className="flex items-center justify-center mb-4">
               <div className="flex items-center gap-3">
                 <div className="relative">
-                  <img src="/logo-placeholder.png" alt="BetterChoice Logo" className="w-12 h-12 drop-shadow-md" />
+                  <img src="/images/logos/logo-placeholder.png" alt="BetterChoice Logo" className="w-12 h-12 drop-shadow-md" />
                   <div className="absolute inset-0 rounded-full bg-gradient-to-br from-primary/30 to-transparent"></div>
                 </div>
                 <div className="flex flex-col">

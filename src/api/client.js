@@ -868,7 +868,7 @@ export const entities = {
     },
     get: async (id) => {
       try {
-        const res = await fetch('/client.json');
+        const res = await fetch('/data/client.json');
         if (!res.ok) {
           throw new Error('Failed to fetch client data');
         }
@@ -881,7 +881,7 @@ export const entities = {
     },
     list: async () => {
       try {
-        const res = await fetch('/client.json');
+        const res = await fetch('/data/client.json');
         if (!res.ok) {
           throw new Error('Failed to fetch client data');
         }
