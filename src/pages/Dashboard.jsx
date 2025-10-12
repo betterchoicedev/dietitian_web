@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Menu } from '@/api/entities';
+import { Menu, ChatMessage, ChatConversation } from '@/api/entities';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useClient } from '@/contexts/ClientContext';
 import { Button } from '@/components/ui/button';
@@ -56,6 +56,7 @@ export default function Dashboard() {
   const [recentActivity, setRecentActivity] = useState([]);
   const [recentMenus, setRecentMenus] = useState([]);
   const [recentChats, setRecentChats] = useState([]);
+  const [recentMessages, setRecentMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -72,6 +73,7 @@ export default function Dashboard() {
       setRecentActivity([]);
       setRecentMenus([]);
       setRecentChats([]);
+      setRecentMessages([]);
     }
   }, [selectedUserCode]);
 
@@ -104,9 +106,38 @@ export default function Dashboard() {
 
       // Get recent menus for this user
       setRecentMenus(userMenus.slice(0, 5).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
-      setRecentChats([]); // TODO: Implement chat history
 
-      // Activity from menus
+      // Load chat conversation and recent messages
+      console.log('💬 Loading chat history for user...');
+      try {
+        const conversation = await ChatConversation.getByUserCode(selectedUserCode);
+        if (conversation) {
+          console.log('✅ Conversation found:', conversation.id);
+          const messages = await ChatMessage.listByConversation(conversation.id, { limit: 10 });
+          console.log('✅ Messages loaded:', messages?.length || 0, 'records');
+          
+          // Filter valid messages (same logic as in Chat.jsx)
+          const validMessages = messages.filter(msg => {
+            if (msg.role === 'assistant') {
+              return msg.message !== null && msg.message !== undefined;
+            }
+            return true;
+          });
+          
+          setRecentMessages(validMessages);
+          setStats(prev => ({ ...prev, totalChats: validMessages.length }));
+        } else {
+          console.log('📭 No conversation found for user');
+          setRecentMessages([]);
+          setStats(prev => ({ ...prev, totalChats: 0 }));
+        }
+      } catch (chatError) {
+        console.warn('⚠️ Error loading chat history:', chatError);
+        setRecentMessages([]);
+        setStats(prev => ({ ...prev, totalChats: 0 }));
+      }
+
+      // Activity from menus and messages
       const allActivity = [
         ...userMenus.map(m => ({ ...m, type: 'meal plan' }))
       ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 8);
@@ -126,6 +157,7 @@ export default function Dashboard() {
       setRecentActivity([]);
       setRecentMenus([]);
       setRecentChats([]);
+      setRecentMessages([]);
     } finally {
       setIsLoading(false);
     }
@@ -167,8 +199,8 @@ export default function Dashboard() {
       color: 'text-purple-600',
       bgColor: 'bg-purple-50',
       borderColor: 'border-purple-200',
-      change: '+0',
-      changeColor: 'text-gray-600'
+      change: stats.totalChats > 0 ? `${stats.totalChats} messages` : 'No messages',
+      changeColor: stats.totalChats > 0 ? 'text-green-600' : 'text-gray-600'
     },
     {
       title: translations.weightChange || 'Weight Change',
@@ -775,18 +807,61 @@ export default function Dashboard() {
                 </div>
               </div>
               
-              <div className="text-center py-8">
-                <div className="w-12 h-12 bg-gradient-to-br from-blue-300 to-indigo-400 rounded-xl flex items-center justify-center mx-auto mb-3">
-                  <MessageSquare className="h-6 w-6 text-white" />
+              {recentMessages.length > 0 ? (
+                <div className="space-y-3">
+                  {recentMessages.slice(0, 3).map((message, index) => (
+                    <div key={message.id || index} className="relative overflow-hidden rounded-xl bg-white/60 backdrop-blur-sm border border-white/20 p-3 hover:bg-white/80 transition-all duration-300">
+                      <div className="flex items-start gap-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm ${
+                          message.role === 'user' 
+                            ? 'bg-gradient-to-br from-blue-500 to-indigo-600' 
+                            : 'bg-gradient-to-br from-green-500 to-emerald-600'
+                        }`}>
+                          {message.role === 'user' ? (
+                            <User className="h-4 w-4 text-white" />
+                          ) : (
+                            <MessageSquare className="h-4 w-4 text-white" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-1">
+                            <p className="font-bold text-slate-800 text-sm">
+                              {message.role === 'user' ? (translations.client || 'Client') : (translations.aiAssistant || 'AI Assistant')}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {new Date(message.created_at).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+                            {message.content || message.message || 'Message content not available'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="text-center pt-3">
+                    <Link to={createPageUrl('Chat')}>
+                      <Button className="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-semibold px-4 py-2 rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 text-sm">
+                        {translations.viewFullChat || 'View Full Chat'}
+                        <ArrowUpRight className="h-3 w-3 ml-2" />
+                      </Button>
+                    </Link>
+                  </div>
                 </div>
-                <p className="text-blue-700 font-bold text-base mb-2">{translations.noChatHistory || 'No chat history yet'}</p>
-                <Link to={createPageUrl('Chat')}>
-                  <Button className="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-semibold px-4 py-2 rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 text-sm">
-                    <MessageSquare className="h-3 w-3 mr-2" />
-                    {translations.startFirstChat || 'Start Your First Chat'}
-                  </Button>
-                </Link>
-              </div>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="w-12 h-12 bg-gradient-to-br from-blue-300 to-indigo-400 rounded-xl flex items-center justify-center mx-auto mb-3">
+                    <MessageSquare className="h-6 w-6 text-white" />
+                  </div>
+                  <p className="text-blue-700 font-bold text-base mb-2">{translations.noChatHistory || 'No chat history yet'}</p>
+                  <Link to={createPageUrl('Chat')}>
+                    <Button className="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-semibold px-4 py-2 rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 text-sm">
+                      <MessageSquare className="h-3 w-3 mr-2" />
+                      {translations.startFirstChat || 'Start Your First Chat'}
+                    </Button>
+                  </Link>
+                </div>
+              )}
             </div>
           </div>
         </div>

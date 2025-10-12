@@ -57,6 +57,18 @@ export default function Chat() {
   const autoRefreshIntervalRef = useRef(null);
   const simpleRefreshIntervalRef = useRef(null);
 
+  // Helper function to filter out assistant messages with null "message" column
+  const filterValidMessages = (messages) => {
+    return messages.filter(msg => {
+      // If role is "assistant", only keep messages where "message" column is not null
+      if (msg.role === 'assistant') {
+        return msg.message !== null && msg.message !== undefined;
+      }
+      // Keep all non-assistant messages
+      return true;
+    });
+  };
+
   // Function to show toast notification
   const showToast = (message, type = 'success') => {
     setToastMessage(message);
@@ -140,7 +152,7 @@ export default function Chat() {
         console.log('🔄 Simple auto-refresh: Checking for new messages...');
         const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
         // Reverse to show oldest at top, newest at bottom
-        const reversedMessages = latestMessages.reverse();
+        const reversedMessages = filterValidMessages(latestMessages.reverse());
         
         // Check for new messages by comparing IDs instead of just length
         const currentMessageIds = new Set(messages.map(m => m.id));
@@ -461,7 +473,7 @@ export default function Chat() {
       // Fetch latest messages
       const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
       // Reverse to show oldest at top, newest at bottom
-      const reversedMessages = latestMessages.reverse();
+      const reversedMessages = filterValidMessages(latestMessages.reverse());
       
       setMessages(reversedMessages);
       // Only update firstMessageId if we don't have one yet (initial load)
@@ -506,7 +518,7 @@ export default function Chat() {
       console.log('🧪 Testing auto-refresh manually...');
       const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
       // Reverse to show oldest at top, newest at bottom
-      const reversedMessages = latestMessages.reverse();
+      const reversedMessages = filterValidMessages(latestMessages.reverse());
       
       if (reversedMessages.length > messages.length) {
         console.log(`🧪 Test: New messages detected! Old: ${messages.length}, New: ${reversedMessages.length}`);
@@ -567,7 +579,7 @@ export default function Chat() {
       // Fetch latest 20 messages (descending order from API)
       const msgs = await ChatMessage.listByConversation(conversation.id, { limit: 20 });
       // Reverse to show oldest at top, newest at bottom
-      const reversedMsgs = msgs.reverse();
+      const reversedMsgs = filterValidMessages(msgs.reverse());
       setMessages(reversedMsgs);
       // Set firstMessageId to the oldest message (first in reversed array)
       setFirstMessageId(reversedMsgs.length > 0 ? reversedMsgs[0].id : null);
@@ -1397,7 +1409,7 @@ Your task is to respond to the user's message below, taking into account their s
       
       if (olderMsgs && olderMsgs.length > 0) {
         // Reverse older messages to maintain chronological order (oldest first)
-        const reversedOlderMsgs = olderMsgs.reverse();
+        const reversedOlderMsgs = filterValidMessages(olderMsgs.reverse());
         
         console.log('🔄 Reversed older messages:', {
           count: reversedOlderMsgs.length,
