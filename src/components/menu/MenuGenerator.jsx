@@ -223,7 +223,7 @@ export default function MenuGenerator({
 
       const menuData = {
         programName: `${client.full_name} - ${client.goal.charAt(0).toUpperCase() + client.goal.slice(1)} Plan`,
-        daily_target_total_calories: targetCalories,
+        base_daily_total_calories: targetCalories,
         status: "draft",
         active_from: new Date().toISOString().split('T')[0],
         active_until: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],

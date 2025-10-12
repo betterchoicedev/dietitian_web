@@ -1,6 +1,6 @@
 {
 "programName": "Roee Bina - Personalized Nutrition Plan",
-"daily_target_total_calories": 2100,
+"base_daily_total_calories": 2100,
 "macros": {
   "fat": "65g",  
   "carbs": "180g",

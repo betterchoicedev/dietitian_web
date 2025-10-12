@@ -690,7 +690,7 @@ const MenuLoad = () => {
 
       const { data, error } = await supabase
         .from('chat_users')
-        .select('daily_target_total_calories, macros, region, food_allergies, food_limitations, age, gender, weight_kg, height_cm, client_preference')
+        .select('base_daily_total_calories, macros, region, food_allergies, food_limitations, age, gender, weight_kg, height_cm, client_preference')
         .eq('user_code', userCode)
         .single();
 
@@ -718,7 +718,7 @@ const MenuLoad = () => {
 
       // Check if essential fields are missing
       const missingFields = [];
-      if (!data.daily_target_total_calories) missingFields.push('daily_target_total_calories');
+      if (!data.base_daily_total_calories) missingFields.push('base_daily_total_calories');
       if (!data.macros) missingFields.push('macros');
       
       if (missingFields.length > 0) {
@@ -751,7 +751,7 @@ const MenuLoad = () => {
       };
 
       const userTargetsData = {
-        calories: data.daily_target_total_calories || 2000,
+        calories: data.base_daily_total_calories || 2000,
         macros: {
           protein: parseFloat(parsedMacros?.protein?.replace('g', '') || '150'),
           fat: parseFloat(parsedMacros?.fat?.replace('g', '') || '80'),

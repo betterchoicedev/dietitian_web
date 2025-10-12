@@ -19,7 +19,7 @@ export default function MealList({ menu }) {
             <div>
               <CardTitle>{menu.programName}</CardTitle>
               <p className="text-sm text-gray-500 mt-1">
-                Daily Calories: {menu.daily_target_total_calories} kcal
+                Daily Calories: {menu.base_daily_total_calories} kcal
               </p>
             </div>
             <Badge 

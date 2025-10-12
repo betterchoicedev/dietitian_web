@@ -359,8 +359,8 @@ export default function Dashboard() {
                 </h4>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between items-center p-2 bg-white/50 rounded-lg">
-                    <span className="font-semibold text-slate-700">{translations.daily_target_total_calories || 'Daily Calories'}:</span>
-                    <span className="font-bold text-orange-600">{selectedClient.daily_target_total_calories || 'N/A'} kcal</span>
+                    <span className="font-semibold text-slate-700">{translations.base_daily_total_calories || 'Daily Calories'}:</span>
+                    <span className="font-bold text-orange-600">{selectedClient.base_daily_total_calories || 'N/A'} kcal</span>
                   </div>
                   <div className="flex justify-between items-center p-2 bg-white/50 rounded-lg">
                     <span className="font-semibold text-slate-700">{translations.numberOfMeals || 'Meals'}:</span>

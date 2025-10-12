@@ -244,7 +244,7 @@ export default function Clients() {
 
     },
 
-    daily_target_total_calories: '',
+    base_daily_total_calories: '',
 
     food_limitations: '',
 
@@ -452,7 +452,7 @@ export default function Clients() {
 
   const calculateMacrosFromInputs = (inputType, value, macroType) => {
 
-    const calories = parseInt(formData.daily_target_total_calories) || 0;
+    const calories = parseInt(formData.base_daily_total_calories) || 0;
 
     const weight = parseFloat(formData.weight_kg) || 0;
 
@@ -706,7 +706,7 @@ export default function Clients() {
 
     const total = calculateTotals().totalPercentage;
 
-    const dailyCalories = parseInt(formData.daily_target_total_calories) || 0;
+    const dailyCalories = parseInt(formData.base_daily_total_calories) || 0;
 
     
 
@@ -744,7 +744,7 @@ export default function Clients() {
 
   useEffect(() => {
 
-    const calories = parseInt(formData.daily_target_total_calories) || 0;
+    const calories = parseInt(formData.base_daily_total_calories) || 0;
 
     if (calories > 0 && (!macroInputs.protein.grams && !macroInputs.carbs.grams && !macroInputs.fat.grams)) {
 
@@ -830,7 +830,7 @@ export default function Clients() {
 
     }
 
-  }, [formData.daily_target_total_calories, formData.weight_kg]);
+  }, [formData.base_daily_total_calories, formData.weight_kg]);
 
 
 
@@ -862,7 +862,7 @@ export default function Clients() {
 
 
 
-  // Harris-Benedict calculation function (original formula)
+  // Harris-Benedict calculation function (Revised 1984)
 
   const calculateHarrisBenedict = (age, gender, weight, height, activityLevel, goal) => {
 
@@ -886,7 +886,7 @@ export default function Clients() {
 
 
 
-    // Calculate BMR using Harris-Benedict equation
+    // STEP 1: Calculate BMR using Harris-Benedict equation (Revised 1984)
 
     let bmr = 0;
 
@@ -902,7 +902,7 @@ export default function Clients() {
 
 
 
-    // Apply activity multiplier
+    // STEP 2: Apply activity multiplier to get TDEE
 
     let activityMultiplier = 1.2; // Sedentary as default
 
@@ -928,23 +928,37 @@ export default function Clients() {
 
 
 
-    // Adjust for goal
+    // STEP 3: Apply goal factor (multiplicative, not additive)
+
+    let goalFactor = 1.0; // Default: maintenance
 
     switch (goal) {
 
-      case 'lose': tdee -= 500; break;
+      case 'lose': goalFactor = 0.85; break;        // 15% deficit (middle of 0.8-0.9 range)
 
-      case 'gain': tdee += 500; break;
+      case 'cut': goalFactor = 0.80; break;         // 20% deficit (middle of 0.75-0.85 range) - aggressive fat loss / definition phase
 
-      case 'muscle': tdee += 300; break;
+      case 'gain': goalFactor = 1.15; break;        // 15% surplus (middle of 1.1-1.2 range)
 
-      // 'maintain' and 'health' don't change the calculation
+      case 'muscle': goalFactor = 1.12; break;      // 12% surplus (middle of 1.1-1.15 range)
+
+      case 'performance': goalFactor = 1.10; break; // 10% surplus (middle of 1.05-1.15 range) - increase energy & recovery
+
+      case 'health': goalFactor = 1.0; break;       // Maintenance (middle of 0.95-1.05 range)
+
+      case 'maintain': goalFactor = 1.0; break;     // Maintenance
 
     }
 
 
 
-    return Math.round(tdee);
+    // Final calories = BMR × Activity_Factor × Goal_Factor
+
+    const finalCalories = tdee * goalFactor;
+
+
+
+    return Math.round(finalCalories);
 
   };
 
@@ -974,7 +988,7 @@ export default function Clients() {
 
     if (calculatedCalories && calculatedCalories > 0) {
 
-      setFormData(prev => ({ ...prev, daily_target_total_calories: calculatedCalories.toString() }));
+      setFormData(prev => ({ ...prev, base_daily_total_calories: calculatedCalories.toString() }));
 
       
 
@@ -1052,7 +1066,7 @@ export default function Clients() {
 
       // Clear calories if we have some data but calculation failed
 
-      setFormData(prev => ({ ...prev, daily_target_total_calories: '' }));
+      setFormData(prev => ({ ...prev, base_daily_total_calories: '' }));
 
     }
 
@@ -1064,7 +1078,7 @@ export default function Clients() {
 
   useEffect(() => {
 
-    const calories = parseInt(formData.daily_target_total_calories) || 0;
+    const calories = parseInt(formData.base_daily_total_calories) || 0;
 
     if (calories > 0) {
 
@@ -1140,7 +1154,7 @@ export default function Clients() {
 
     }
 
-  }, [formData.daily_target_total_calories]);
+  }, [formData.base_daily_total_calories]);
 
 
 
@@ -1210,7 +1224,7 @@ export default function Clients() {
 
       // Convert to numbers for numeric fields
 
-      if (['age', 'weight_kg', 'height_cm', 'daily_target_total_calories'].includes(sortField)) {
+      if (['age', 'weight_kg', 'height_cm', 'base_daily_total_calories'].includes(sortField)) {
 
         aValue = parseFloat(aValue) || 0;
 
@@ -1858,7 +1872,7 @@ export default function Clients() {
 
       },
 
-      daily_target_total_calories: '', // Will be calculated automatically when required fields are filled
+      base_daily_total_calories: '', // Will be calculated automatically when required fields are filled
 
       food_limitations: '',
 
@@ -1990,7 +2004,7 @@ export default function Clients() {
 
       },
 
-      daily_target_total_calories: client.daily_target_total_calories?.toString() || '',
+      base_daily_total_calories: client.base_daily_total_calories?.toString() || '',
 
       food_limitations: (() => {
         // First check if food_limitations exists and has content
@@ -2098,7 +2112,7 @@ export default function Clients() {
 
     // Set macro inputs to match the client's macros
 
-    const calories = client.daily_target_total_calories ? parseInt(client.daily_target_total_calories) : 0;
+    const calories = client.base_daily_total_calories ? parseInt(client.base_daily_total_calories) : 0;
 
     const weight = client.weight_kg ? parseFloat(client.weight_kg) : 0;
 
@@ -2176,7 +2190,7 @@ export default function Clients() {
 
       if (calculatedCalories && calculatedCalories > 0) {
 
-        setFormData(prev => ({ ...prev, daily_target_total_calories: calculatedCalories.toString() }));
+        setFormData(prev => ({ ...prev, base_daily_total_calories: calculatedCalories.toString() }));
 
         
 
@@ -2626,7 +2640,7 @@ export default function Clients() {
 
         height_cm: formData.height_cm ? parseFloat(formData.height_cm) : null,
 
-        daily_target_total_calories: formData.daily_target_total_calories ? parseInt(formData.daily_target_total_calories) : null,
+        base_daily_total_calories: formData.base_daily_total_calories ? parseInt(formData.base_daily_total_calories) : null,
 
         number_of_meals: formData.number_of_meals ? parseInt(formData.number_of_meals) : 4,
 
@@ -2998,7 +3012,7 @@ export default function Clients() {
 
     const updatedStructure = formData.meal_plan_structure.filter((_, i) => i !== index);
 
-    const totalCalories = parseInt(formData.daily_target_total_calories) || 0;
+    const totalCalories = parseInt(formData.base_daily_total_calories) || 0;
 
     
 
@@ -3240,9 +3254,9 @@ export default function Clients() {
 
   useEffect(() => {
 
-    if (formData.daily_target_total_calories) {
+    if (formData.base_daily_total_calories) {
 
-      const updatedMealStructure = calculateMealCalories(formData.meal_plan_structure, formData.daily_target_total_calories);
+      const updatedMealStructure = calculateMealCalories(formData.meal_plan_structure, formData.base_daily_total_calories);
 
       setFormData(prev => ({
 
@@ -3254,7 +3268,7 @@ export default function Clients() {
 
     }
 
-  }, [formData.daily_target_total_calories]);
+  }, [formData.base_daily_total_calories]);
 
 
 
@@ -3294,7 +3308,7 @@ export default function Clients() {
 
     if (field === 'calories') {
 
-      const totalCalories = parseInt(formData.daily_target_total_calories) || 0;
+      const totalCalories = parseInt(formData.base_daily_total_calories) || 0;
 
       updatedStructure[index].calories = parseInt(value) || 0;
 
@@ -3350,7 +3364,7 @@ export default function Clients() {
 
     const numericValue = parseInt(value) || 0;
 
-    const dailyTotal = parseInt(formData.daily_target_total_calories) || 0;
+    const dailyTotal = parseInt(formData.base_daily_total_calories) || 0;
 
     
 
@@ -3430,7 +3444,7 @@ export default function Clients() {
 
     const numericValue = parseInt(tempValue) || 0;
 
-    const dailyTotal = parseInt(formData.daily_target_total_calories) || 0;
+    const dailyTotal = parseInt(formData.base_daily_total_calories) || 0;
 
     
 
@@ -3670,7 +3684,7 @@ export default function Clients() {
 
       // Recalculate calories based on new percentages
 
-      const totalCalories = parseInt(formData.daily_target_total_calories) || 0;
+      const totalCalories = parseInt(formData.base_daily_total_calories) || 0;
 
       if (totalCalories > 0) {
 
@@ -3696,7 +3710,7 @@ export default function Clients() {
 
     }
 
-  }, [formData.number_of_meals, formData.daily_target_total_calories, translations]);
+  }, [formData.number_of_meals, formData.base_daily_total_calories, translations]);
 
 
 
@@ -3870,11 +3884,15 @@ export default function Clients() {
 
                     <SelectItem value="lose">{translations.loseWeight}</SelectItem>
 
+                    <SelectItem value="cut">{translations.cut}</SelectItem>
+
                     <SelectItem value="maintain">{translations.maintainWeight}</SelectItem>
 
                     <SelectItem value="gain">{translations.gainWeight}</SelectItem>
 
                     <SelectItem value="muscle">{translations.buildMuscle}</SelectItem>
+
+                    <SelectItem value="performance">{translations.improvePerformance}</SelectItem>
 
                     <SelectItem value="health">{translations.improveHealth}</SelectItem>
 
@@ -4272,7 +4290,7 @@ export default function Clients() {
 
                       className="cursor-pointer hover:bg-gray-50"
 
-                      onClick={() => handleSort('daily_target_total_calories')}
+                      onClick={() => handleSort('base_daily_total_calories')}
 
                     >
 
@@ -4280,7 +4298,7 @@ export default function Clients() {
 
                         {translations.macros}
 
-                        {getSortIcon('daily_target_total_calories')}
+                        {getSortIcon('base_daily_total_calories')}
 
                       </div>
 
@@ -4474,9 +4492,9 @@ export default function Clients() {
 
                               )}
 
-                              {client.daily_target_total_calories && (
+                              {client.base_daily_total_calories && (
 
-                                <div className="text-gray-500">{client.daily_target_total_calories} {translations.kcalPerDay}</div>
+                                <div className="text-gray-500">{client.base_daily_total_calories} {translations.kcalPerDay}</div>
 
                               )}
 
@@ -4632,7 +4650,7 @@ export default function Clients() {
 
                                   )}
 
-                                  {translations.deleteClient || 'Delete Client'}
+                                  {translations.deleteClient}
 
                                 </Button>
 
@@ -5433,11 +5451,15 @@ export default function Clients() {
 
                         <SelectItem value="lose">{translations.loseWeight}</SelectItem>
 
+                        <SelectItem value="cut">{translations.cut}</SelectItem>
+
                         <SelectItem value="maintain">{translations.maintainWeight}</SelectItem>
 
                         <SelectItem value="gain">{translations.gainWeight}</SelectItem>
 
                         <SelectItem value="muscle">{translations.buildMuscle}</SelectItem>
+
+                        <SelectItem value="performance">{translations.improvePerformance}</SelectItem>
 
                         <SelectItem value="health">{translations.improveHealth}</SelectItem>
 
@@ -5497,9 +5519,9 @@ export default function Clients() {
 
                   <div className="space-y-2">
 
-                    <Label htmlFor="daily_target_total_calories" className="text-sm font-medium text-gray-700">
+                    <Label htmlFor="base_daily_total_calories" className="text-sm font-medium text-gray-700">
 
-                      {translations.daily_target_total_calories}
+                      {translations.base_daily_total_calories}
 
                       <span className={`${language === 'he' ? 'mr-2' : 'ml-2'} inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full`}>
 
@@ -5513,13 +5535,13 @@ export default function Clients() {
 
                       <Input
 
-                        id="daily_target_total_calories"
+                        id="base_daily_total_calories"
 
                         type="number"
 
-                        value={formData.daily_target_total_calories}
+                        value={formData.base_daily_total_calories}
 
-                        onChange={(e) => setFormData({...formData, daily_target_total_calories: e.target.value})}
+                        onChange={(e) => setFormData({...formData, base_daily_total_calories: e.target.value})}
 
                         className={`${hasRequiredFieldsForCalculation() ? 'border-green-300 bg-green-50 focus:border-green-500 focus:ring-green-200' : 'border-amber-300 bg-amber-50 focus:border-amber-500 focus:ring-amber-200'}`}
 
@@ -5691,7 +5713,7 @@ export default function Clients() {
 
                         onClick={() => {
 
-                          const calories = parseInt(formData.daily_target_total_calories) || 0;
+                          const calories = parseInt(formData.base_daily_total_calories) || 0;
 
                           if (calories > 0) {
 
@@ -5763,7 +5785,7 @@ export default function Clients() {
 
                         className="text-blue-600 border-blue-300 hover:bg-blue-50 text-xs"
 
-                        disabled={!formData.daily_target_total_calories}
+                        disabled={!formData.base_daily_total_calories}
 
                       >
 
@@ -5785,7 +5807,7 @@ export default function Clients() {
 
                       // Dynamic macro configuration based on daily calories
 
-                      const dailyCalories = parseInt(formData.daily_target_total_calories) || 0;
+                      const dailyCalories = parseInt(formData.base_daily_total_calories) || 0;
 
                       
 
@@ -7103,7 +7125,7 @@ export default function Clients() {
 
                         <span className="font-medium">
 
-                          {formData.meal_plan_structure.reduce((sum, meal) => sum + (meal.calories || 0), 0)} / {formData.daily_target_total_calories || 0}
+                          {formData.meal_plan_structure.reduce((sum, meal) => sum + (meal.calories || 0), 0)} / {formData.base_daily_total_calories || 0}
 
                         </span>
 
@@ -7139,7 +7161,7 @@ export default function Clients() {
 
                         <span className="font-medium text-purple-600">
 
-                          {(parseInt(formData.daily_target_total_calories) || 0) - formData.meal_plan_structure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0)} kcal
+                          {(parseInt(formData.base_daily_total_calories) || 0) - formData.meal_plan_structure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0)} kcal
 
                         </span>
 
@@ -7151,7 +7173,7 @@ export default function Clients() {
 
                         <span className="font-medium text-orange-600">
 
-                          {Math.max(0, (parseInt(formData.daily_target_total_calories) || 0) - formData.meal_plan_structure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0))} kcal
+                          {Math.max(0, (parseInt(formData.base_daily_total_calories) || 0) - formData.meal_plan_structure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0))} kcal
 
                         </span>
 

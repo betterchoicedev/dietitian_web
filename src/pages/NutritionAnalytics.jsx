@@ -182,7 +182,7 @@ export default function NutritionAnalytics() {
         const clientProfile = await ChatUser.getByUserCode(selectedClient.user_code);
         if (clientProfile && clientProfile.macros) {
           setNutritionTargets({
-            daily_target_total_calories: clientProfile.daily_target_total_calories || 0,
+            base_daily_total_calories: clientProfile.base_daily_total_calories || 0,
             protein_target: clientProfile.macros.protein_target || 0,
             carbs_target: clientProfile.macros.carbs_target || 0,
             fat_target: clientProfile.macros.fat_target || 0
@@ -320,8 +320,8 @@ export default function NutritionAnalytics() {
     if (!stats || !nutritionTargets) return null;
 
     return {
-      calories: nutritionTargets.daily_target_total_calories > 0
-        ? Math.round((stats.averages.calories / nutritionTargets.daily_target_total_calories) * 100)
+      calories: nutritionTargets.base_daily_total_calories > 0
+        ? Math.round((stats.averages.calories / nutritionTargets.base_daily_total_calories) * 100)
         : 0,
       protein: nutritionTargets.protein_target > 0
         ? Math.round((stats.averages.protein / nutritionTargets.protein_target) * 100)
@@ -340,7 +340,7 @@ export default function NutritionAnalytics() {
   // Add target lines to chart data if available
   const chartDataWithTargets = chartData.map(data => ({
     ...data,
-    target_calories: nutritionTargets?.daily_target_total_calories || 0,
+    target_calories: nutritionTargets?.base_daily_total_calories || 0,
     target_protein: nutritionTargets?.protein_target || 0,
     target_carbs: nutritionTargets?.carbs_target || 0,
     target_fat: nutritionTargets?.fat_target || 0
@@ -563,7 +563,7 @@ export default function NutritionAnalytics() {
                 <p className="text-sm font-medium text-muted-foreground/70">{translations.caloriesAchievement || 'Calories Achievement'}</p>
                 <p className="text-2xl font-bold text-foreground">{targetAchievements.calories}%</p>
                 <p className="text-sm text-muted-foreground/70">
-                  {stats?.averages.calories || 0} / {nutritionTargets.daily_target_total_calories} {translations.calories || 'cal'}
+                  {stats?.averages.calories || 0} / {nutritionTargets.base_daily_total_calories} {translations.calories || 'cal'}
                 </p>
               </div>
               <div className="w-12 h-12 bg-gradient-to-br from-red-500/20 to-red-500/10 rounded-xl flex items-center justify-center">

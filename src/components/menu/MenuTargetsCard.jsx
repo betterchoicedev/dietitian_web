@@ -88,7 +88,7 @@ export default function MenuTargetsCard({
       
       return {
         ...meal,
-        mealCalories: Math.round(menuData.daily_target_total_calories * ratio),
+        mealCalories: Math.round(menuData.base_daily_total_calories * ratio),
         mealProtein: `${Math.round(totalProtein * ratio)}g`,
         mealFat: `${Math.round(totalFat * ratio)}g`,
         mealCarbs: `${Math.round(totalCarbs * ratio)}g`
@@ -148,9 +148,9 @@ export default function MenuTargetsCard({
     }
     
     // Calculate actual grams based on percentages and total calories
-    const proteinGrams = Math.round((menuData.daily_target_total_calories * (proteinPct / 100)) / 4);
-    const fatGrams = Math.round((menuData.daily_target_total_calories * (fatPct / 100)) / 9);
-    const carbsGrams = Math.round((menuData.daily_target_total_calories * (carbsPct / 100)) / 4);
+    const proteinGrams = Math.round((menuData.base_daily_total_calories * (proteinPct / 100)) / 4);
+    const fatGrams = Math.round((menuData.base_daily_total_calories * (fatPct / 100)) / 9);
+    const carbsGrams = Math.round((menuData.base_daily_total_calories * (carbsPct / 100)) / 4);
     
     onUpdateMenuData({
       ...menuData,
@@ -261,11 +261,11 @@ export default function MenuTargetsCard({
           <Input
             id="dailyCalories"
             type="number"
-            value={menuData.daily_target_total_calories}
+            value={menuData.base_daily_total_calories}
             onChange={(e) => {
               onUpdateMenuData({
                 ...menuData,
-                daily_target_total_calories: parseInt(e.target.value) || 0
+                base_daily_total_calories: parseInt(e.target.value) || 0
               });
               // Recalculate macros based on percentages when calories change
               if (menuData.macroPercentages) {
