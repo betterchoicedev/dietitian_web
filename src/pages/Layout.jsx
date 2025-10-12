@@ -335,6 +335,12 @@ export default function Layout() {
                   <div className="text-sm font-semibold text-foreground">{userData?.email}</div>
                   <div className="text-xs text-muted-foreground/70">{userData?.specialization}</div>
                 </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to="/profile" className="flex items-center w-full">
+                    <UserIcon className="mr-2 h-4 w-4" />
+                    <span>{translations.profile || 'Profile'}</span>
+                  </Link>
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleSignOut} className="hover:bg-destructive/5 text-destructive">
                   <LogOut className="mr-2 h-4 w-4" />
                   <span>{translations.signOut}</span>

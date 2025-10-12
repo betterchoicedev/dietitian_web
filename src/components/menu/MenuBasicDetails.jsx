@@ -85,7 +85,7 @@ export default function MenuBasicDetails({
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
           <div className="space-y-2">
             <Label>Total Calories</Label>
-            <p className="text-xl font-semibold text-green-600">{menuData.dailyTotalCalories || 0} kcal</p>
+            <p className="text-xl font-semibold text-green-600">{menuData.daily_target_total_calories || 0} kcal</p>
           </div>
           <div className="space-y-2">
             <Label>Protein</Label>

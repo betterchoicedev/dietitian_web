@@ -570,7 +570,7 @@ export const entities = {
             height_cm,
             food_allergies,
             user_language,
-            dailyTotalCalories,
+            daily_target_total_calories,
             recommendations,
             food_limitations,
             Activity_level,

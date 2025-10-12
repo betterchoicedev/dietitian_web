@@ -990,7 +990,7 @@ def load_user_preferences(user_code=None):
 
         # Define the specific fields we need to reduce data transfer
 
-        selected_fields = 'user_code,food_allergies,dailyTotalCalories,recommendations,food_limitations,goal,number_of_meals,client_preference,macros,region,meal_plan_structure'
+        selected_fields = 'user_code,food_allergies,daily_target_total_calories,recommendations,food_limitations,goal,number_of_meals,client_preference,macros,region,meal_plan_structure'
 
         
 
@@ -1150,7 +1150,7 @@ def load_user_preferences(user_code=None):
 
         # Ensure we have valid values with proper defaults
 
-        calories_per_day = user_data.get("dailyTotalCalories")
+        calories_per_day = user_data.get("daily_target_total_calories")
 
         if calories_per_day is None:
 
@@ -1411,18 +1411,18 @@ Anything else is treated as a snack.
 
 
 ──────────────────  CALORIE & MACRO DISTRIBUTION  ───────────────────
+**DO NOT CHANGE THE DAILY CALORIES, PROTEIN, AND FAT**
 
 • Use the supplied *meal_structure* to distribute calories, protein, and fat.
 
   For each meal *i*:
 
-    1. kcal_i = daily_calories × (calories_pct_i ÷ 100)
 
-    2. protein_i = daily_protein × (calories_pct_i ÷ 100)
+    1. protein_i = daily_protein × (calories_pct_i ÷ 100)
 
-    3. fat_i = daily_fat × (calories_pct_i ÷ 100)
+    2. fat_i = daily_fat × (calories_pct_i ÷ 100)
 
-    4. Round to the nearest whole number
+    3. Round to the nearest whole number
 
 
 
@@ -1817,17 +1817,13 @@ Return JSON ONLY (no markdown, no comments).
 
 critical: you must out the ingredients true macros and calories, make sure you read the data and not guess.
 
-#  🔑  PRIMARY SUCCESS CRITERIA  🔑
+#    *PRIMARY SUCCESS CRITERIA:*
 
-• 
+**Calories and protein from the *template* are **top priority**.**  
 
-• Calories and protein from the *template* are **top priority**.  
+**YOU MUST HIT THE MACRO TARGETS WITH 0 % TOLERANCE.**  
 
-  – They must be hit with 0 % tolerance.  
-
-  – If you must make tiny trade-offs, adjust carbs and fat *before* calories or protein.  
-
-
+**IF YOU MUST make tiny trade-offs, adjust carbs and fat *before* calories or protein.**  
 
 OUTPUT SCHEMA (object)
 

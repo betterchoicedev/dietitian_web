@@ -18,6 +18,7 @@ import MenuLoad from './pages/MenuLoad';
 import RecipesPage from './pages/RecipesPage';
 import UserWeightLogs from './pages/UserWeightLogs';
 import NutritionAnalytics from './pages/NutritionAnalytics';
+import DietitianProfile from './pages/DietitianProfile';
 
 // Protected Route component
 function ProtectedRoute({ children }) {
@@ -95,6 +96,7 @@ function App() {
                 <Route path="recipes" element={<RecipesPage />} />
                 <Route path="weight-logs" element={<UserWeightLogs />} />
                 <Route path="nutrition-analytics" element={<NutritionAnalytics />} />
+                <Route path="profile" element={<DietitianProfile />} />
               </Route>
             </Routes>
           </ClientProvider>

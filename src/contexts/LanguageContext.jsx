@@ -1014,6 +1014,62 @@ export const translations = {
     allSystemsOperational: 'All systems operational',
     professionalNutrition: 'Professional Nutrition',
     professionalPlatform: 'Professional Platform',
+    
+    // System Messages
+    systemMessages: 'System Messages',
+    viewMessagesFromExternalSystems: 'View messages from external systems',
+    totalMessages: 'Total Messages',
+    activeMessages: 'Active Messages',
+    urgentMessages: 'Urgent Messages',
+    thisWeek: 'This Week',
+    recentMessages: 'Recent Messages',
+    latestSystemMessages: 'Latest system messages and announcements',
+    noRecentMessages: 'No recent messages',
+    messageManagement: 'Message Management',
+    viewAndManageMessages: 'View and manage system messages from external systems',
+    urgentMessageAlert: 'You have {count} urgent message{plural} that require immediate attention.',
+    messageTypes: 'Message Types',
+    allTypes: 'All Types',
+    announcement: 'Announcement',
+    maintenance: 'Maintenance',
+    allPriorities: 'All Priorities',
+    allStatus: 'All Status',
+    noMessagesFound: 'No messages found',
+    clearFiltersToSeeAll: 'Clear filters to see all messages',
+    searchMessages: 'Search messages...',
+    type: 'Type',
+    dates: 'Dates',
+    view: 'View',
+    notificationPreferences: 'Notification Preferences',
+    chooseNotificationSettings: 'Choose how you want to be notified about system updates',
+    urgentMessageNotifications: 'Urgent Messages',
+    getImmediateNotifications: 'Get immediate notifications for urgent system messages',
+    systemMaintenance: 'System Maintenance',
+    maintenanceNotifications: 'Notifications about scheduled maintenance windows',
+    newFeatures: 'New Features',
+    newFeatureUpdates: 'Updates about new platform features and improvements',
+    weeklyDigest: 'Weekly Digest',
+    weeklySummary: 'Weekly summary of all system messages and updates',
+    profileSettings: 'Profile Settings',
+    filters: 'Filters',
+    
+    // Profile Information
+    profileInformation: 'Profile Information',
+    manageAccountDetailsAndPreferences: 'Manage your account details and preferences',
+    changeAvatar: 'Change Avatar',
+    avatarFormatMax: 'JPG, GIF or PNG. 1MB max.',
+    specializationPlaceholder: 'e.g., Sports Nutrition, Clinical Nutrition',
+    phoneNumberPlaceholder: '+1 (555) 123-4567',
+    licenseNumberPlaceholder: 'RD123456',
+    bioPlaceholder: 'Tell us about your experience and expertise...',
+    
+    // Account Settings
+    securityAndPrivacyPreferences: 'Security and privacy preferences',
+    twoFactorAuthentication: 'Two-Factor Authentication',
+    addExtraLayerOfSecurity: 'Add an extra layer of security to your account',
+    receiveEmailUpdates: 'Receive email updates about system messages',
+    profileVisibility: 'Profile Visibility',
+    allowOtherDietitiansToSeeProfile: 'Allow other dietitians to see your profile',
   },
   he: {
     // Navigation & Main Pages
@@ -1844,6 +1900,62 @@ export const translations = {
     expired: 'פג תוקף',
     manageDates: 'נהל תאריכים',
     manageMenuDates: 'נהל תאריכי תפריט',
+    
+    // System Messages (Hebrew)
+    systemMessages: 'הודעות מערכת',
+    viewMessagesFromExternalSystems: 'צפה בהודעות ממערכות חיצוניות',
+    totalMessages: 'סה״כ הודעות',
+    activeMessages: 'הודעות פעילות',
+    urgentMessages: 'הודעות דחופות',
+    thisWeek: 'השבוע',
+    recentMessages: 'הודעות אחרונות',
+    latestSystemMessages: 'הודעות מערכת ומודעות אחרונות',
+    noRecentMessages: 'אין הודעות אחרונות',
+    messageManagement: 'ניהול הודעות',
+    viewAndManageMessages: 'צפה ונהל הודעות מערכת ממערכות חיצוניות',
+    urgentMessageAlert: 'יש לך {count} הודעות דחופות הדורשות תשומת לב מיידית.',
+    messageTypes: 'סוגי הודעות',
+    allTypes: 'כל הסוגים',
+    announcement: 'הודעה',
+    maintenance: 'תחזוקה',
+    allPriorities: 'כל העדיפויות',
+    allStatus: 'כל הסטטוסים',
+    noMessagesFound: 'לא נמצאו הודעות',
+    clearFiltersToSeeAll: 'נקה מסננים כדי לראות את כל ההודעות',
+    searchMessages: 'חפש הודעות...',
+    type: 'סוג',
+    dates: 'תאריכים',
+    view: 'צפייה',
+    notificationPreferences: 'העדפות התראות',
+    chooseNotificationSettings: 'בחר כיצד תרצה לקבל התראות על עדכוני מערכת',
+    urgentMessageNotifications: 'הודעות דחופות',
+    getImmediateNotifications: 'קבל התראות מיידיות להודעות מערכת דחופות',
+    systemMaintenance: 'תחזוקת מערכת',
+    maintenanceNotifications: 'התראות על חלונות תחזוקה מתוזמנים',
+    newFeatures: 'תכונות חדשות',
+    newFeatureUpdates: 'עדכונים על תכונות פלטפורמה חדשות ושיפורים',
+    weeklyDigest: 'סיכום שבועי',
+    weeklySummary: 'סיכום שבועי של כל הודעות המערכת והעדכונים',
+    profileSettings: 'הגדרות פרופיל',
+    filters: 'מסננים',
+    
+    // Profile Information (Hebrew)
+    profileInformation: 'פרטי פרופיל',
+    manageAccountDetailsAndPreferences: 'נהל את פרטי החשבון וההעדפות שלך',
+    changeAvatar: 'שנה תמונה',
+    avatarFormatMax: 'JPG, GIF או PNG. מקסימום 1MB.',
+    specializationPlaceholder: 'לדוגמה: תזונת ספורט, תזונה קלינית',
+    phoneNumberPlaceholder: '+972 (50) 123-4567',
+    licenseNumberPlaceholder: 'RD123456',
+    bioPlaceholder: 'ספר לנו על הניסיון והמומחיות שלך...',
+    
+    // Account Settings (Hebrew)
+    securityAndPrivacyPreferences: 'העדפות אבטחה ופרטיות',
+    twoFactorAuthentication: 'אימות דו-שלבי',
+    addExtraLayerOfSecurity: 'הוסף שכבת אבטחה נוספת לחשבונך',
+    receiveEmailUpdates: 'קבל עדכוני אימייל על הודעות מערכת',
+    profileVisibility: 'נראות פרופיל',
+    allowOtherDietitiansToSeeProfile: 'אפשר לדיאטנים אחרים לראות את הפרופיל שלך',
   }
 };
 
@@ -1880,4 +1992,7 @@ export function useLanguage() {
     throw new Error('useLanguage must be used within a LanguageProvider');
   }
   return context;
-} 
+}
+
+// Default export for Fast Refresh compatibility
+export default LanguageProvider; 

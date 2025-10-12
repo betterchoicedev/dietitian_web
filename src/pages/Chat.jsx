@@ -812,7 +812,7 @@ export default function Chat() {
         ...(selectedClient.goal && { goal: selectedClient.goal }),
 
         // Nutrition targets and preferences
-        ...(selectedClient.dailyTotalCalories && { daily_total_calories: selectedClient.dailyTotalCalories }),
+        ...(selectedClient.daily_target_total_calories && { daily_total_calories: selectedClient.daily_target_total_calories }),
         ...(selectedClient.number_of_meals && { number_of_meals: selectedClient.number_of_meals }),
         ...(selectedClient.macros && { macros: selectedClient.macros }),
         ...(selectedClient.client_preference && { client_preference: selectedClient.client_preference }),
