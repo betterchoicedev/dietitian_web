@@ -97,6 +97,7 @@ function App() {
                 <Route path="weight-logs" element={<UserWeightLogs />} />
                 <Route path="nutrition-analytics" element={<NutritionAnalytics />} />
                 <Route path="profile" element={<DietitianProfile />} />
+                <Route path="dietitian-profile" element={<DietitianProfile />} />
               </Route>
             </Routes>
           </ClientProvider>

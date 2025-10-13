@@ -22,7 +22,8 @@ import {
   User,
   Badge,
   Search,
-  Apple
+  Apple,
+  LayoutDashboard
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -400,55 +401,85 @@ export default function Layout() {
           </button>
         </div>
 
-        <nav className="space-y-1 p-4 pb-8 md:pb-4">
-          <Link to="/dashboard" onClick={() => setSidebarOpen(false)}>
-            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-primary/8 hover:text-primary-darker transition-all duration-300 group">
-              <Activity className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
-              <span className="font-medium">{translations.home}</span>
-            </Button>
-          </Link>
-          <Link to={createPageUrl('Users')} onClick={() => setSidebarOpen(false)}>
-            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-primary/8 hover:text-primary-darker transition-all duration-300 group">
-              <Users className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
-              <span className="font-medium">{translations.users}</span>
-            </Button>
-          </Link>
-          <Link to={createPageUrl('Chat')} onClick={() => setSidebarOpen(false)}>
-            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-primary/8 hover:text-primary-darker transition-all duration-300 group">
-              <MessageSquare className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
-              <span className="font-medium">{translations.chat}</span>
-            </Button>
-          </Link>
-          <Link to={createPageUrl('MenuCreate')} onClick={() => setSidebarOpen(false)}>
-            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-success/8 hover:text-success-darker transition-all duration-300 group">
-              <ListChecks className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
-              <span className="font-medium">{translations.menuCreate}</span>
-            </Button>
-          </Link>
-          <Link to="/recipes" onClick={() => setSidebarOpen(false)}>
-            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-warning/8 hover:text-warning transition-all duration-300 group">
-              <FileText className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
-              <span className="font-medium">{translations.recipes}</span>
-            </Button>
-          </Link>
-          <Link to="/weight-logs" onClick={() => setSidebarOpen(false)}>
-            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-purple/8 hover:text-purple transition-all duration-300 group">
-              <Scale className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
-              <span className="font-medium">{translations.weightLogs || 'Weight & Body Fat Logs'}</span>
-            </Button>
-          </Link>
-          <Link to="/nutrition-analytics" onClick={() => setSidebarOpen(false)}>
-            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-emerald/8 hover:text-emerald transition-all duration-300 group">
-              <Apple className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
-              <span className="font-medium">{translations.nutritionAnalytics || 'Nutrition Analytics'}</span>
-            </Button>
-          </Link>
-          <Link to="/menuload" onClick={() => setSidebarOpen(false)}>
-            <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-info/8 hover:text-info transition-all duration-300 group">
-              <FileText className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
-              <span className="font-medium">{translations.menuload}</span>
-            </Button>
-          </Link>
+        <nav className="space-y-6 p-4 pb-8 md:pb-4">
+          {/* Client Management Group */}
+          <div className="space-y-1">
+            <div className="px-3 mb-2">
+              <h3 className="text-xs font-semibold text-muted-foreground/60 uppercase tracking-wider">
+                {translations.clientManagement || 'Client Management'}
+              </h3>
+            </div>
+            <Link to="/dietitian-profile" onClick={() => setSidebarOpen(false)}>
+              <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-primary/8 hover:text-primary-darker transition-all duration-300 group">
+                <LayoutDashboard className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+                <span className="font-medium">{translations.dietitianDashboard || 'Dietitian Dashboard'}</span>
+              </Button>
+            </Link>
+            <Link to={createPageUrl('Users')} onClick={() => setSidebarOpen(false)}>
+              <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-primary/8 hover:text-primary-darker transition-all duration-300 group">
+                <Users className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+                <span className="font-medium">{translations.users}</span>
+              </Button>
+            </Link>
+          </div>
+
+          {/* Divider */}
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-border/30"></div>
+            </div>
+          </div>
+
+          {/* Client Tools Group */}
+          <div className="space-y-1">
+            <div className="px-3 mb-2">
+              <h3 className="text-xs font-semibold text-muted-foreground/60 uppercase tracking-wider">
+                {translations.clientTools || 'Client Tools'}
+              </h3>
+            </div>
+            <Link to="/dashboard" onClick={() => setSidebarOpen(false)}>
+              <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-primary/8 hover:text-primary-darker transition-all duration-300 group">
+                <Activity className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+                <span className="font-medium">{translations.home}</span>
+              </Button>
+            </Link>
+            <Link to={createPageUrl('Chat')} onClick={() => setSidebarOpen(false)}>
+              <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-primary/8 hover:text-primary-darker transition-all duration-300 group">
+                <MessageSquare className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+                <span className="font-medium">{translations.chat}</span>
+              </Button>
+            </Link>
+            <Link to={createPageUrl('MenuCreate')} onClick={() => setSidebarOpen(false)}>
+              <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-success/8 hover:text-success-darker transition-all duration-300 group">
+                <ListChecks className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+                <span className="font-medium">{translations.menuCreate}</span>
+              </Button>
+            </Link>
+            <Link to="/recipes" onClick={() => setSidebarOpen(false)}>
+              <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-warning/8 hover:text-warning transition-all duration-300 group">
+                <FileText className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+                <span className="font-medium">{translations.recipes}</span>
+              </Button>
+            </Link>
+            <Link to="/weight-logs" onClick={() => setSidebarOpen(false)}>
+              <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-purple/8 hover:text-purple transition-all duration-300 group">
+                <Scale className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+                <span className="font-medium">{translations.weightLogs || 'Weight & Body Fat Logs'}</span>
+              </Button>
+            </Link>
+            <Link to="/nutrition-analytics" onClick={() => setSidebarOpen(false)}>
+              <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-emerald/8 hover:text-emerald transition-all duration-300 group">
+                <Apple className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+                <span className="font-medium">{translations.nutritionAnalytics || 'Nutrition Analytics'}</span>
+              </Button>
+            </Link>
+            <Link to="/menuload" onClick={() => setSidebarOpen(false)}>
+              <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-info/8 hover:text-info transition-all duration-300 group">
+                <FileText className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+                <span className="font-medium">{translations.menuload}</span>
+              </Button>
+            </Link>
+          </div>
         </nav>
         
         {/* Sidebar Footer */}

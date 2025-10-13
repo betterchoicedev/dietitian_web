@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ArrowLeft, Loader, Save, Search, Filter, Utensils, Edit, CalendarRange, Download, Trash2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Menu } from '@/api/entities';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -566,6 +566,7 @@ const MenuLoad = () => {
   const [translatedMenus, setTranslatedMenus] = useState({}); // Cache translations by language
   const [removeBrandsFromPdf, setRemoveBrandsFromPdf] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const { language, translations } = useLanguage();
   const { selectedClient } = useClient();
 
@@ -1128,6 +1129,20 @@ const MenuLoad = () => {
       fetchClientRecommendations(selectedMenu.user_code);
     }
   }, [selectedMenu]);
+
+  // Handle URL parameters to automatically load a specific meal plan
+  useEffect(() => {
+    const urlParams = new URLSearchParams(location.search);
+    const menuId = urlParams.get('menuId');
+    
+    if (menuId && menus.length > 0 && !selectedMenu) {
+      const menuToLoad = menus.find(menu => menu.id === menuId);
+      if (menuToLoad) {
+        console.log('🎯 Auto-loading menu from URL parameter:', menuToLoad);
+        handleMenuSelect(menuToLoad);
+      }
+    }
+  }, [menus, location.search, selectedMenu]);
 
   const filteredMenus = menus.filter(menu => {
     // If a client is selected globally, filter by that client
