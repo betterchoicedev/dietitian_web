@@ -463,7 +463,12 @@ export default function Dashboard() {
                     
                     return hasValidAllergies() && (
                       <div className="px-3 py-1 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-lg font-semibold text-sm shadow-lg">
-                        {translations.foodAllergies || 'Allergies'}: {Array.isArray(selectedClient.food_allergies) ? selectedClient.food_allergies.filter(a => a && a.trim() !== '').join(', ') : selectedClient.food_allergies}
+                        {translations.foodAllergies || 'Allergies'}: {Array.isArray(selectedClient.food_allergies) 
+                          ? selectedClient.food_allergies.filter(a => a && a.trim() !== '').join(', ') 
+                          : (typeof selectedClient.food_allergies === 'string' 
+                              ? selectedClient.food_allergies.replace(/[\[\]"]/g, '').split(',').map(item => item.trim()).filter(item => item).join(', ')
+                              : selectedClient.food_allergies)
+                        }
                       </div>
                     );
                   })()}
@@ -483,7 +488,12 @@ export default function Dashboard() {
                     
                     return hasValidLimitations() && (
                       <div className="px-3 py-1 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg font-semibold text-sm shadow-lg">
-                        {translations.foodLimitations || 'Limitations'}: {Array.isArray(selectedClient.food_limitations) ? selectedClient.food_limitations.filter(l => l && l.trim() !== '').join(', ') : selectedClient.food_limitations}
+                        {translations.foodLimitations || 'Limitations'}: {Array.isArray(selectedClient.food_limitations) 
+                          ? selectedClient.food_limitations.filter(l => l && l.trim() !== '').join(', ') 
+                          : (typeof selectedClient.food_limitations === 'string' 
+                              ? selectedClient.food_limitations.replace(/[\[\]"]/g, '').split(',').map(item => item.trim()).filter(item => item).join(', ')
+                              : selectedClient.food_limitations)
+                        }
                       </div>
                     );
                   })()}

@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useClient } from '@/contexts/ClientContext';
+import { EventBus } from '@/utils/EventBus';
 import { useNavigate } from 'react-router-dom';
 import { entities } from '@/api/client';
 import { 
@@ -94,6 +95,7 @@ export default function DietitianProfile() {
   const [filterType, setFilterType] = useState('all');
   const [filterPriority, setFilterPriority] = useState('all');
   const [filterStatus, setFilterStatus] = useState('active');
+  const [showHistory, setShowHistory] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   
   // Dashboard state
@@ -158,7 +160,7 @@ export default function DietitianProfile() {
 
   useEffect(() => {
     applyFilters();
-  }, [messages, searchTerm, filterType, filterPriority, filterStatus]);
+  }, [messages, searchTerm, filterType, filterPriority, filterStatus, showHistory]);
 
   const loadCurrentUser = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -177,7 +179,7 @@ export default function DietitianProfile() {
       setMessages(data || []);
     } catch (error) {
       console.error('Error loading messages:', error);
-      alert('Failed to load messages');
+      alert(translations.failedToLoadMessages || 'Failed to load messages');
     } finally {
       setIsLoading(false);
     }
@@ -387,8 +389,8 @@ export default function DietitianProfile() {
       filtered = filtered.filter(msg => msg.priority === filterPriority);
     }
 
-    // Status filter
-    if (filterStatus !== 'all') {
+    // Status filter - if showing history, show all; otherwise filter by status
+    if (!showHistory && filterStatus !== 'all') {
       filtered = filtered.filter(msg => 
         filterStatus === 'active' ? msg.is_active : !msg.is_active
       );
@@ -407,10 +409,12 @@ export default function DietitianProfile() {
         .eq('id', message.id);
 
       if (error) throw error;
-      loadMessages();
+      await loadMessages();
+      // Notify other components that system messages were updated
+      EventBus.emit('systemMessagesUpdated');
     } catch (error) {
       console.error('Error toggling message status:', error);
-      alert('Failed to update message status');
+      alert(translations.failedToUpdateMessageStatus || 'Failed to update message status');
     }
   };
 
@@ -758,7 +762,7 @@ export default function DietitianProfile() {
         <div className="flex items-center space-x-2">
           <Badge variant="outline" className="text-green-600 border-green-200">
             <CheckCircle className="h-3 w-3 mr-1" />
-            Active
+            {translations.active || 'Active'}
           </Badge>
         </div>
       </div>
@@ -813,7 +817,7 @@ export default function DietitianProfile() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="dashboard" className="flex items-center space-x-2">
             <LayoutDashboard className="h-4 w-4" />
             <span>{translations.dashboard || 'Dashboard'}</span>
@@ -821,19 +825,15 @@ export default function DietitianProfile() {
           <TabsTrigger value="messages" className="flex items-center space-x-2">
             <Megaphone className="h-4 w-4" />
             <span>{translations.systemMessages || 'System Messages'}</span>
-            {urgentMessages.length > 0 && (
+            {activeMessages.length > 0 && (
               <Badge variant="destructive" className="ml-2">
-                {urgentMessages.length}
+                {activeMessages.length}
               </Badge>
             )}
           </TabsTrigger>
           <TabsTrigger value="profile" className="flex items-center space-x-2">
             <User className="h-4 w-4" />
             <span>{translations.profileSettings || 'Profile Settings'}</span>
-          </TabsTrigger>
-          <TabsTrigger value="notifications" className="flex items-center space-x-2">
-            <Bell className="h-4 w-4" />
-            <span>{translations.notifications || 'Notifications'}</span>
           </TabsTrigger>
         </TabsList>
 
@@ -954,7 +954,7 @@ export default function DietitianProfile() {
                             </p>
                           </div>
                           <p className="text-sm text-gray-700 line-clamp-2 mb-3">
-                            {message.content || message.message || 'Message content not available'}
+                            {message.content || message.message || translations.messageContentNotAvailable || 'Message content not available'}
                           </p>
                           <div className="flex items-center gap-2">
                             <Button
@@ -989,7 +989,7 @@ export default function DietitianProfile() {
                       className="w-full"
                     >
                       <ArrowRight className="h-4 w-4 mr-2 -rotate-90" />
-                      {translations.loadMore || `Load More (${Math.min(5, filteredRecentMessages.length - sectionLimits.messages)} more)`}
+                      {translations.loadMore || `Load More (${Math.min(5, filteredRecentMessages.length - sectionLimits.messages)} ${translations.more || 'more'})`}
                     </Button>
                   </div>
                 )}
@@ -1139,7 +1139,7 @@ export default function DietitianProfile() {
                         className="w-full"
                       >
                       <ArrowRight className="h-4 w-4 mr-2 -rotate-90" />
-                      {translations.loadMore || `Load More (${Math.min(5, getFilteredAndSortedActivity().length - sectionLimits.activity)} more)`}
+                      {translations.loadMore || `Load More (${Math.min(5, getFilteredAndSortedActivity().length - sectionLimits.activity)} ${translations.more || 'more'})`}
                       </Button>
                     </div>
                   )}
@@ -1266,7 +1266,7 @@ export default function DietitianProfile() {
                               </div>
                             </TableCell>
                             <TableCell className="font-medium">
-                              {plan.meal_plan_name || plan.name || 'Unnamed Plan'}
+                              {plan.meal_plan_name || plan.name || translations.unnamedPlan || 'Unnamed Plan'}
                             </TableCell>
                             <TableCell>
                               <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
@@ -1309,7 +1309,7 @@ export default function DietitianProfile() {
                         className="w-full"
                       >
                         <ArrowRight className="h-4 w-4 mr-2 -rotate-90" />
-                        {translations.loadMore || `Load More (${Math.min(5, getFilteredAndSortedRecentMealPlans().length - sectionLimits.mealPlans)} more)`}
+                        {translations.loadMore || `Load More (${Math.min(5, getFilteredAndSortedRecentMealPlans().length - sectionLimits.mealPlans)} ${translations.more || 'more'})`}
                       </Button>
                     </div>
                   )}
@@ -1441,7 +1441,7 @@ export default function DietitianProfile() {
                               </Badge>
                             </div>
                             <p className="text-sm text-gray-700">
-                              {plan.meal_plan_name || plan.name || 'Unnamed Plan'}
+                              {plan.meal_plan_name || plan.name || translations.unnamedPlan || 'Unnamed Plan'}
                             </p>
                             <p className="text-xs text-gray-500 mt-1">
                               {translations.lastUpdate || 'Last Update'}: {new Date(plan.updated_at || plan.created_at).toLocaleString()}
@@ -1468,7 +1468,7 @@ export default function DietitianProfile() {
                       className="w-full"
                     >
                       <ArrowRight className="h-4 w-4 mr-2 -rotate-90" />
-                      {translations.loadMore || `Load More (${Math.min(5, getFilteredAndSortedStatusChanges().length - sectionLimits.statusChanges)} more)`}
+                      {translations.loadMore || `Load More (${Math.min(5, getFilteredAndSortedStatusChanges().length - sectionLimits.statusChanges)} ${translations.more || 'more'})`}
                     </Button>
                   </div>
                 )}
@@ -1589,6 +1589,7 @@ export default function DietitianProfile() {
                           <TableHead>{translations.status || 'Status'}</TableHead>
                           <TableHead>{translations.created || 'Created'}</TableHead>
                           <TableHead>{translations.lastUpdated || 'Last Updated'}</TableHead>
+                          <TableHead>{translations.activeUntil || 'Active Until'}</TableHead>
                           <TableHead className="text-right">{translations.actions || 'Actions'}</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -1604,7 +1605,7 @@ export default function DietitianProfile() {
                               </div>
                             </TableCell>
                             <TableCell className="font-medium">
-                              {plan.meal_plan_name || plan.name || 'Unnamed Plan'}
+                              {plan.meal_plan_name || plan.name || translations.unnamedPlan || 'Unnamed Plan'}
                             </TableCell>
                             <TableCell>
                               <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
@@ -1626,6 +1627,16 @@ export default function DietitianProfile() {
                             </TableCell>
                             <TableCell className="text-sm text-gray-600">
                               {plan.updated_at ? new Date(plan.updated_at).toLocaleDateString() : '-'}
+                            </TableCell>
+                            <TableCell className="text-sm text-gray-600">
+                              {plan.active_until ? (
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="h-3 w-3" />
+                                  {new Date(plan.active_until).toLocaleDateString()}
+                                </div>
+                              ) : (
+                                '-'
+                              )}
                             </TableCell>
                             <TableCell className="text-right">
                               <div className="flex justify-end gap-2">
@@ -1802,7 +1813,7 @@ export default function DietitianProfile() {
                         className="w-full"
                       >
                         <ArrowRight className="h-4 w-4 mr-2 -rotate-90" />
-                        {translations.loadMore || `Load More (${Math.min(5, getFilteredAndSortedWeightLogs().length - sectionLimits.weightLogs)} more)`}
+                        {translations.loadMore || `Load More (${Math.min(5, getFilteredAndSortedWeightLogs().length - sectionLimits.weightLogs)} ${translations.more || 'more'})`}
                       </Button>
                     </div>
                   )}
@@ -1873,9 +1884,20 @@ export default function DietitianProfile() {
           {/* Message Management */}
           <Card>
             <CardHeader>
-              <div>
-                <CardTitle>{translations.systemMessages || 'System Messages'}</CardTitle>
-                <CardDescription>{translations.viewAndManageMessages || 'View and manage system messages from external systems'}</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>{translations.systemMessages || 'System Messages'}</CardTitle>
+                  <CardDescription>{translations.viewAndManageMessages || 'View and manage system messages from external systems'}</CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={showHistory}
+                    onCheckedChange={setShowHistory}
+                  />
+                  <Label className="text-sm font-medium">
+                    {translations.showHistory || 'Show History'}
+                  </Label>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -1939,7 +1961,7 @@ export default function DietitianProfile() {
 
                   <div>
                     <Label>{translations.status || 'Status'}</Label>
-                    <Select value={filterStatus} onValueChange={setFilterStatus}>
+                    <Select value={filterStatus} onValueChange={setFilterStatus} disabled={showHistory}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
@@ -1949,6 +1971,11 @@ export default function DietitianProfile() {
                         <SelectItem value="inactive">{translations.inactive || 'Inactive'}</SelectItem>
                       </SelectContent>
                     </Select>
+                    {showHistory && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        {translations.statusFilterDisabledInHistory || 'Status filter disabled when showing history'}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1986,12 +2013,17 @@ export default function DietitianProfile() {
                     </TableHeader>
                     <TableBody>
                       {filteredMessages.map((message) => (
-                        <TableRow key={message.id}>
+                        <TableRow key={message.id} className={!message.is_active ? 'opacity-60' : ''}>
                           <TableCell>
-                            <Switch
-                              checked={message.is_active}
-                              onCheckedChange={() => toggleActive(message)}
-                            />
+                            <div className="flex items-center gap-2">
+                              <Switch
+                                checked={message.is_active}
+                                onCheckedChange={() => toggleActive(message)}
+                              />
+                              <span className="text-xs text-gray-500">
+                                {message.is_active ? (translations.active || 'Active') : (translations.inactive || 'Inactive')}
+                              </span>
+                            </div>
                           </TableCell>
                           <TableCell>
                             <div className={`inline-flex items-center space-x-2 px-3 py-1 rounded-full ${messageTypeColors[message.message_type]}`}>
@@ -2111,81 +2143,8 @@ export default function DietitianProfile() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{translations.accountSettings || 'Account Settings'}</CardTitle>
-              <CardDescription>{translations.securityAndPrivacyPreferences || 'Security and privacy preferences'}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-medium">{translations.twoFactorAuthentication || 'Two-Factor Authentication'}</h4>
-                  <p className="text-sm text-gray-600">{translations.addExtraLayerOfSecurity || 'Add an extra layer of security to your account'}</p>
-                </div>
-                <Switch />
-              </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-medium">{translations.emailNotifications || 'Email Notifications'}</h4>
-                  <p className="text-sm text-gray-600">{translations.receiveEmailUpdates || 'Receive email updates about system messages'}</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-medium">{translations.profileVisibility || 'Profile Visibility'}</h4>
-                  <p className="text-sm text-gray-600">{translations.allowOtherDietitiansToSeeProfile || 'Allow other dietitians to see your profile'}</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-            </CardContent>
-          </Card>
         </TabsContent>
 
-        {/* Notifications Tab */}
-        <TabsContent value="notifications" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>{translations.notificationPreferences || 'Notification Preferences'}</CardTitle>
-              <CardDescription>{translations.chooseNotificationSettings || 'Choose how you want to be notified about system updates'}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-medium">{translations.urgentMessageNotifications || 'Urgent Messages'}</h4>
-                  <p className="text-sm text-gray-600">{translations.getImmediateNotifications || 'Get immediate notifications for urgent system messages'}</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-medium">{translations.systemMaintenance || 'System Maintenance'}</h4>
-                  <p className="text-sm text-gray-600">{translations.maintenanceNotifications || 'Notifications about scheduled maintenance windows'}</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-medium">{translations.newFeatures || 'New Features'}</h4>
-                  <p className="text-sm text-gray-600">{translations.newFeatureUpdates || 'Updates about new platform features and improvements'}</p>
-                </div>
-                <Switch />
-              </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-medium">{translations.weeklyDigest || 'Weekly Digest'}</h4>
-                  <p className="text-sm text-gray-600">{translations.weeklySummary || 'Weekly summary of all system messages and updates'}</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
       </Tabs>
     </div>
   );

@@ -1110,6 +1110,26 @@ export const translations = {
     dateCreated: 'Date Created',
     client: 'Client',
     allStatus: 'All Status',
+    
+    // Additional DietitianProfile translations
+    failedToLoadMessages: 'Failed to load messages',
+    failedToUpdateMessageStatus: 'Failed to update message status',
+    unnamedPlan: 'Unnamed Plan',
+    messageContentNotAvailable: 'Message content not available',
+    assistant: 'Assistant',
+    dietitian: 'Dietitian',
+    always: 'Always',
+    statusFilterDisabledInHistory: 'Status filter disabled when showing history',
+    noActivityFound: 'No activity found',
+    noMealPlansFound: 'No meal plans found',
+    noActivatedPlans: 'No activated plans found',
+    noWeightLogs: 'No weight logs found',
+    loadMore: 'Load More',
+    more: 'more',
+    showing: 'Showing',
+    filteredBy: 'filtered by',
+    status: 'status',
+    mealPlans: 'meal plans',
   },
   he: {
     // Navigation & Main Pages
@@ -2036,6 +2056,26 @@ export const translations = {
     dateCreated: 'תאריך יצירה',
     client: 'לקוח',
     allStatus: 'כל הסטטוסים',
+    
+    // Additional DietitianProfile translations (Hebrew)
+    failedToLoadMessages: 'טעינת ההודעות נכשלה',
+    failedToUpdateMessageStatus: 'עדכון סטטוס ההודעה נכשל',
+    unnamedPlan: 'תוכנית ללא שם',
+    messageContentNotAvailable: 'תוכן הודעה לא זמין',
+    assistant: 'עוזר',
+    dietitian: 'דיאטנית',
+    always: 'תמיד',
+    statusFilterDisabledInHistory: 'מסנן סטטוס מושבת בעת הצגת היסטוריה',
+    noActivityFound: 'לא נמצאה פעילות',
+    noMealPlansFound: 'לא נמצאו תוכניות ארוחות',
+    noActivatedPlans: 'לא נמצאו תוכניות מופעלות',
+    noWeightLogs: 'לא נמצאו יומני משקל',
+    loadMore: 'טען עוד',
+    more: 'עוד',
+    showing: 'מציג',
+    filteredBy: 'מסונן לפי',
+    status: 'סטטוס',
+    mealPlans: 'תוכניות ארוחות',
   }
 };
 

@@ -1524,6 +1524,11 @@ const MenuLoad = () => {
         updateData.active_until = null;
       }
       
+      // If status is being set to active without an active_until date, set it to far future (2099-01-01)
+      if (statusForm.status === 'active' && !statusForm.active_until) {
+        updateData.active_until = '2099-01-01';
+      }
+      
       // If status is being set to scheduled, require active_from date
       if (statusForm.status === 'scheduled' && !statusForm.active_from) {
         setError('Scheduled status requires an activation date');

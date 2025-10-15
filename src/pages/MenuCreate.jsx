@@ -5120,7 +5120,7 @@ const MenuCreate = () => {
 
     try {
 
-      await ChatUser.update(selectedClient.user_code, { number_of_meals: newNumberOfMeals });
+      await entities.ChatUser.update(selectedClient.user_code, { number_of_meals: newNumberOfMeals });
 
       console.log('✅ Updated number of meals for client:', newNumberOfMeals);
 
@@ -5530,7 +5530,7 @@ const MenuCreate = () => {
 
       const missingFields = [];
 
-      if (!userData.dailyTotalCalories) missingFields.push('dailyTotalCalories');
+      if (!userData.base_daily_total_calories) missingFields.push('base_daily_total_calories');
 
       if (!userData.macros) missingFields.push('macros');
 
@@ -5596,7 +5596,7 @@ const MenuCreate = () => {
 
       const userTargetsData = {
 
-        calories: userData.dailyTotalCalories || 2000,
+        calories: userData.base_daily_total_calories || 2000,
 
         macros: {
 

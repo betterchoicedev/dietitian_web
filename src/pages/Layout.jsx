@@ -47,6 +47,8 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { LanguageToggle } from '@/components/ui/language-toggle';
 import { EventBus } from '@/utils/EventBus';
 import { Input } from '@/components/ui/input';
+import SystemMessageModal from '@/components/SystemMessageModal';
+import { useSystemMessages } from '@/hooks/useSystemMessages';
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -54,6 +56,12 @@ export default function Layout() {
   const { user, signOut } = useAuth();
   const { language, translations, toggleLanguage } = useLanguage();
   const { clients, selectedUserCode, selectClient, isLoading: clientsLoading } = useClient();
+  const { unreadCount, refreshCount } = useSystemMessages();
+  
+  // Debug: log unread count changes
+  useEffect(() => {
+    console.log('Unread count changed:', unreadCount);
+  }, [unreadCount]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
@@ -123,6 +131,18 @@ export default function Layout() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
+
+  // Listen for system messages updates
+  useEffect(() => {
+    const handleSystemMessagesUpdate = () => {
+      refreshCount();
+    };
+
+    EventBus.on('systemMessagesUpdated', handleSystemMessagesUpdate);
+    return () => {
+      EventBus.off('systemMessagesUpdated', handleSystemMessagesUpdate);
+    };
+  }, [refreshCount]);
 
   useEffect(() => {
     const loadUserData = async () => {
@@ -213,6 +233,9 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
+      {/* System Message Modal */}
+      <SystemMessageModal />
+      
       {/* Header */}
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-white/80 backdrop-blur-xl shadow-sm">
         <div className="flex h-16 items-center px-2 md:px-6 gap-1 md:gap-4">
@@ -410,9 +433,14 @@ export default function Layout() {
               </h3>
             </div>
             <Link to="/dietitian-profile" onClick={() => setSidebarOpen(false)}>
-              <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-primary/8 hover:text-primary-darker transition-all duration-300 group">
+              <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-primary/8 hover:text-primary-darker transition-all duration-300 group relative">
                 <LayoutDashboard className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
                 <span className="font-medium">{translations.dietitianDashboard || 'Dietitian Dashboard'}</span>
+                {unreadCount > 0 && (
+                  <span className="absolute top-1.5 right-2 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white shadow-md animate-pulse">
+                    {unreadCount}
+                  </span>
+                )}
               </Button>
             </Link>
             <Link to={createPageUrl('Users')} onClick={() => setSidebarOpen(false)}>
