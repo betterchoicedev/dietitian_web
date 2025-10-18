@@ -1,41 +1,48 @@
-
-### 1. Meal Plan Activation Notification
-- **Files**: `src/pages/MenuLoad.jsx`, `src/pages/Chat.jsx`
-- **Issue**: When a meal plan is activated for a client, send a notification message like "Hi you got a new meal plan" via chat
-- **Status**: Pending
-- **Implementation**: 
-  - Add notification function to send chat message when meal plan status changes to 'active'
-  - Modify handleUpdateStatus in MenuLoad.jsx to trigger notification after successful activation
-  - Create helper function to send notification message via user_message_queue table
-  - Test notification functionality with different meal plan activations
-
-### 2. Dietitian Dashboard with Client Messages
-- **Files**: `src/pages/Dashboard.jsx`, `src/components/`, `src/api/`
-- **Issue**: Create a comprehensive dashboard for dietitians showing recent client activity and messages
+### 4. Weekly Tracking of Red Meat and Alcohol Consumption
+- **Files**: `src/pages/Users.jsx`, `src/pages/NutritionPlan.jsx`, `src/components/`, `src/api/`
+- **Issue**: Track weekly consumption of red meat and alcohol to ensure clients don't exceed their assigned limits
 - **Status**: Pending
 - **Implementation**:
-  - Create dashboard component showing last 5-10 messages from all clients
-  - Add client message preview with timestamp and sender info
-  - Include quick action buttons (reply, view full conversation)
-  - Add client activity metrics (recent meal plans, weight logs, etc.)
-  - Create notification system for new messages
-  - Add filtering options (by client, message type, date range)
-  - Implement real-time updates for new messages
-  - Add dietitian-specific statistics (total clients, active meal plans, etc.)
+  - Add red meat and alcohol weekly limit fields in client profile (Users.jsx)
+  - Create tracking table in database to log daily red meat and alcohol consumption
+  - Build consumption tracking component for clients to log intake
+  - Implement weekly consumption calculation and monitoring
+  - Add visual indicators (progress bars) showing current vs. allowed weekly intake
+  - Create alerts when client approaches or exceeds weekly limits
+  - Add dietitian notification system when limits are exceeded
+  - Display weekly consumption history and trends in nutrition analytics
+  - Reset weekly counters automatically at start of each week
+  - Add consumption data to meal plan recommendations
 
-### 3. Separate Sidebar Layout for Dietitian vs Client Sections
-- **Files**: `src/pages/Layout.jsx`, `src/components/ui/`, `src/contexts/AuthContext.jsx`
-- **Issue**: Create separate sidebar navigation for dietitian and client sections
+
+
+### 6. Fix Ingredient Changes After Generating Alternative Meal
+- **Files**: `src/pages/MenuCreate.jsx`
+- **Issue**: When generating alternative meals, ingredient changes are not properly handled or saved
 - **Status**: Pending
 - **Implementation**:
-  - Create DietitianSidebar component with dietitian-specific navigation
-  - Create ClientSidebar component with client-specific navigation
-  - Add role-based sidebar switching in Layout.jsx
-  - Separate navigation items:
-    - **Dietitian Section**: Users, MenuCreate, MenuLoad, Dashboard, NutritionAnalytics, RecipesPage
-    - **Client Section**: My Profile, My Meal Plans, My Progress, Chat, Nutrition Plan
-  - Update AuthContext to handle role-based navigation
-  - Add visual distinction between dietitian and client sections
-  - Implement responsive design for both sidebar types
-  - Add section headers/separators in sidebar navigation
+  - Investigate alternative meal generation logic in MenuCreate.jsx
+  - Fix ingredient modification handling during alternative meal creation
+  - Ensure ingredient changes are properly saved and reflected in the menu
+  - Test alternative meal generation with various ingredient modifications
+  - Add proper state management for ingredient changes in alternative meals
+  - Ensure nutritional calculations update correctly when ingredients change
+
+### 7. Upgrade Dietitian Dashboard
+- **Files**: `src/pages/DietitianProfile.jsx`, `src/pages/`, `src/components/`
+- **Issue**: Dietitian dashboard needs significant improvements and new features
+- **Status**: Pending
+- **Implementation**:
+  - Analyze current dietitian dashboard functionality
+  - Add new features for better client management
+  - Improve UI/UX for dietitian workflow
+  - Add analytics and reporting capabilities
+  - Implement better client overview and tracking
+  - Add meal plan management tools
+  - Improve navigation and user experience
+  - Add real-time notifications and updates
+
+
+
+
 

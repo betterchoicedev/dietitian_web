@@ -170,9 +170,16 @@ export default function DietitianProfile() {
   const loadMessages = async () => {
     try {
       setIsLoading(true);
+      
+      // Get current user ID
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // Fetch all messages that are either broadcast OR directed to current user
+      // For management view, we could show all, but for user view, filter by directed_to
       const { data, error } = await supabase
         .from('system_messages')
         .select('*')
+        .or(user ? `directed_to.is.null,directed_to.eq.${user.id}` : 'directed_to.is.null')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -1855,11 +1862,22 @@ export default function DietitianProfile() {
                         <div className="flex items-start space-x-3">
                           {getMessageIcon(message.message_type)}
                           <div className="flex-1">
-                            <div className="flex items-center space-x-2">
+                            <div className="flex items-center space-x-2 flex-wrap">
                               <h4 className="font-medium">{message.title}</h4>
                               <Badge className={priorityColors[message.priority]}>
                                 {message.priority}
                               </Badge>
+                              {message.directed_to ? (
+                                <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 text-xs">
+                                  <User className="h-3 w-3 mr-1" />
+                                  {translations.private || 'Private'}
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-xs">
+                                  <Users className="h-3 w-3 mr-1" />
+                                  {translations.broadcast || 'Broadcast'}
+                                </Badge>
+                              )}
                             </div>
                             <p className="text-sm mt-1 opacity-90">{message.content}</p>
                             <p className="text-xs mt-2 opacity-75">
@@ -2002,6 +2020,7 @@ export default function DietitianProfile() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>{translations.status || 'Status'}</TableHead>
+                        <TableHead>{translations.audience || 'Audience'}</TableHead>
                         <TableHead>{translations.type || 'Type'}</TableHead>
                         <TableHead>{translations.priority || 'Priority'}</TableHead>
                         <TableHead>{translations.title || 'Title'}</TableHead>
@@ -2024,6 +2043,19 @@ export default function DietitianProfile() {
                                 {message.is_active ? (translations.active || 'Active') : (translations.inactive || 'Inactive')}
                               </span>
                             </div>
+                          </TableCell>
+                          <TableCell>
+                            {message.directed_to ? (
+                              <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
+                                <User className="h-3 w-3 mr-1" />
+                                {translations.private || 'Private'}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                                <Users className="h-3 w-3 mr-1" />
+                                {translations.broadcast || 'Broadcast'}
+                              </Badge>
+                            )}
                           </TableCell>
                           <TableCell>
                             <div className={`inline-flex items-center space-x-2 px-3 py-1 rounded-full ${messageTypeColors[message.message_type]}`}>

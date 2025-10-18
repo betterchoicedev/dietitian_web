@@ -2073,61 +2073,116 @@ def _build_option_with_retries(
 
 
 
-        # Format previous issues section
-
-        if previous_issues:
-
-            previous_issues_section = f"DO NOT repeat these errors from previous attempts:\n• " + "\n• ".join(previous_issues)
-
-        else:
-
+        # On first attempt: send full prompt
+        # On retry attempts: send focused correction prompt
+        if i == 0:
+            # FIRST ATTEMPT: Full detailed prompt
             previous_issues_section = "No previous issues to avoid (first attempt)."
-
-
-
-        # Format validation feedback section
-
-        if validation_feedback:
-
-            validation_feedback_section = f"CRITICAL: Fix these specific validation errors:\n{validation_feedback}"
-
-        else:
-
             validation_feedback_section = "No current validation issues (first attempt or previous attempt passed validation)."
 
+            prompt = MEAL_BUILDER_PROMPT.format(
+
+                option_type=option_type,
+
+                region_instruction=region_instruction,
+
+                macro_targets=macro_targets,
+
+                required_protein_source=required_protein_source,
+
+                avoid_proteins=avoid_proteins,
+
+                avoid_ingredients=avoid_ingredients,
+
+                previous_issues_section=previous_issues_section,
+
+                validation_feedback_section=validation_feedback_section
+
+            )
+
+            user_payload = {
+
+                "meal_name": meal_name,
+
+                "preferences": preferences
+
+            }
+            
+        else:
+            # RETRY ATTEMPTS: Focused correction prompt
+            prompt = f"""
+
+**MEAL CORRECTION REQUIRED**
+
+Your previous meal attempt failed validation. Review the failed meal and issues below, then return a corrected version.
+
+**CORRECTION INSTRUCTIONS:**
+
+* Read the validation issues carefully - they tell you EXACTLY what's wrong *
+* Adjust ingredient portions to hit the exact macro targets *
+* Fix any dietary restriction violations (kosher, allergies, etc.) *
+* Ensure all text fields are in ENGLISH only *
+* Use real brand names (not "generic") *
+* Keep the same JSON structure*
+* Return ONLY the corrected JSON meal (no markdown, no explanations) *
 
 
-        prompt = MEAL_BUILDER_PROMPT.format(
+**IMPORTANT REMINDERS:**
 
-            option_type=option_type,
-
-            region_instruction=region_instruction,
-
-            macro_targets=macro_targets,
-
-            required_protein_source=required_protein_source,
-
-            avoid_proteins=avoid_proteins,
-
-            avoid_ingredients=avoid_ingredients,
-
-            previous_issues_section=previous_issues_section,
-
-            validation_feedback_section=validation_feedback_section
-
-        )
+* You MUST hit macro targets exactly (calories, protein, fat, carbs) * 
+* Target macros: {macro_targets} *
+* Maximum 7 ingredients per meal *
+* Required protein source: {required_protein_source} *
+* Avoid these proteins: {avoid_proteins} *
+* Avoid these ingredients: {avoid_ingredients} *
+* Regional brands: {region_instruction} *
 
 
+**EXPECTED OUTPUT FORMAT:**
 
-        user_payload = {
+{{{{
 
-            "meal_name": meal_name,        # must be echoed exactly
+  "meal_name": "{meal_name}",
 
-            "preferences": preferences
+  "meal_title": "<dish name in English>",
 
-        }
+  "ingredients": [
+
+    {{{{
+
+      "item": "<ingredient name in English>",
+
+      "portionSI(gram)": <number>,
+
+      "household_measure": "<realistic measure in English>",
+
+      "calories": <int>,
+
+      "protein": <int>,
+
+      "fat": <int>,
+
+      "carbs": <int>,
+
+      "brand of pruduct": "<real brand name in English>"
+
+    }}}}
+
+  ]
+
+}}}}
+
+"""
+
+            user_payload = validation_feedback  # String with failed meal + issues
 
 
+
+        # Construct user message based on attempt type
+        if i == 0:
+            user_message_content = json.dumps(user_payload, ensure_ascii=False)
+        else:
+            user_message_content = user_payload  # Already a formatted string
 
         response = client.chat.completions.create(
 
@@ -2137,7 +2192,7 @@ def _build_option_with_retries(
 
                 {"role": "system", "content": prompt},
 
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)}
+                {"role": "user", "content": user_message_content}
 
             ],
 
@@ -2209,21 +2264,25 @@ def _build_option_with_retries(
 
             
 
-            # Add issues to running list and format for next prompt
+            # Add issues to running list
 
             previous_issues.extend(issues)
 
-            validation_feedback = "\n".join([f"• {issue}" for issue in issues])
-
             
 
-            # Add context about what was generated to help the AI understand what needs fixing
+            # Format validation feedback for next retry
+            validation_feedback = f"""
 
-            if failed_meal:
+**FAILED MEAL FROM PREVIOUS ATTEMPT:**
 
-                meal_context = f"Your previous attempt generated this meal: {json.dumps(failed_meal, ensure_ascii=False)}"
+{json.dumps(failed_meal, indent=2, ensure_ascii=False) if failed_meal else "N/A"}
 
-                validation_feedback = f"{meal_context}\n\nIssues to fix:\n{validation_feedback}"
+
+**ISSUES TO FIX:**
+
+{chr(10).join([f"• {issue}" for issue in issues])}
+
+"""
 
 
 
@@ -2381,15 +2440,27 @@ def api_build_menu():
 
 
 
+                # Extract macro targets from template
+                calories = main_macros.get("calories")
+                protein = main_macros.get("protein")
+                fat = main_macros.get("fat")
+                
+                # Calculate carbs if not provided in template
+                # Formula: Carbs = (Calories - (Protein × 4) - (Fat × 9)) ÷ 4
+                carbs = main_macros.get("carbs")
+                if carbs is None and calories is not None and protein is not None and fat is not None:
+                    carbs = (calories - (protein * 4) - (fat * 9)) / 4
+                    carbs = round(carbs)  # Round to nearest whole number
+                
                 main_targets = {
 
-                    "calories": main_macros.get("calories"),
+                    "calories": calories,
 
-                    "protein":  main_macros.get("protein"),
+                    "protein":  protein,
 
-                    "fat":      main_macros.get("fat"),
+                    "fat":      fat,
 
-                    "carbs":    main_macros.get("carbs"),
+                    "carbs":    carbs,
 
                 }
 
@@ -2455,15 +2526,27 @@ def api_build_menu():
 
 
 
+                # Extract macro targets from template
+                alt_calories = alt_macros.get("calories")
+                alt_protein = alt_macros.get("protein")
+                alt_fat = alt_macros.get("fat")
+                
+                # Calculate carbs if not provided in template
+                # Formula: Carbs = (Calories - (Protein × 4) - (Fat × 9)) ÷ 4
+                alt_carbs = alt_macros.get("carbs")
+                if alt_carbs is None and alt_calories is not None and alt_protein is not None and alt_fat is not None:
+                    alt_carbs = (alt_calories - (alt_protein * 4) - (alt_fat * 9)) / 4
+                    alt_carbs = round(alt_carbs)  # Round to nearest whole number
+                
                 alt_targets = {
 
-                    "calories": alt_macros.get("calories"),
+                    "calories": alt_calories,
 
-                    "protein":  alt_macros.get("protein"),
+                    "protein":  alt_protein,
 
-                    "fat":      alt_macros.get("fat"),
+                    "fat":      alt_fat,
 
-                    "carbs":    alt_macros.get("carbs"),
+                    "carbs":    alt_carbs,
 
                 }
 
@@ -4063,6 +4146,8 @@ def generate_alternative_meal():
 
     validation_feedback = ""  # Current validation feedback
 
+    previous_candidate = None  # Store the failed meal for retry attempts
+
 
 
     data = request.get_json() or {}
@@ -4129,73 +4214,51 @@ def generate_alternative_meal():
 
 
 
-            # Format previous issues section
+            # FIRST ATTEMPT: Use full detailed prompt
 
-            if previous_issues:
+            if attempt == 1:
 
-                previous_issues_section = f"DO NOT repeat these errors from previous attempts:\n• " + "\n• ".join(previous_issues)
+                # Compose full prompt with all constraints
+
+                system_prompt = ALTERNATIVE_GENERATOR_PROMPT.format(
+
+                    region_instruction=region_instruction,
+
+                    macro_targets=macro_targets,
+
+                    avoid_proteins=avoid_proteins,
+
+                    avoid_ingredients=avoid_ingredients
+
+                )
+
+                enhanced_system_prompt = system_prompt
+
+
+
+            # RETRY ATTEMPTS: Use short focused prompt with JSON and issues
 
             else:
 
-                previous_issues_section = "No previous issues to avoid (first attempt)."
+                enhanced_system_prompt = f"""You previously generated an alternative meal that failed validation.
+
+Here is the meal you generated:
+
+{json.dumps(previous_candidate, ensure_ascii=False, indent=2)}
 
 
 
-            # Format validation feedback section
+These are the validation issues that need to be fixed:
 
-            if validation_feedback:
-
-                validation_feedback_section = f"CRITICAL: Fix these specific validation errors:\n{validation_feedback}"
-
-            else:
-
-                validation_feedback_section = "No current validation issues (first attempt or previous attempt passed validation)."
+{validation_feedback}
 
 
 
-            # Compose prompt with previous issues and validation feedback
+return a corrected version of this meal as JSON that fixes ALL the issues above.
 
-            system_prompt = ALTERNATIVE_GENERATOR_PROMPT.format(
+Keep the same meal structure but adjust the values to pass validation.
 
-                region_instruction=region_instruction,
-
-                macro_targets=macro_targets,
-
-                avoid_proteins=avoid_proteins,
-
-                avoid_ingredients=avoid_ingredients
-
-            )
-
-
-
-            # Add previous issues and validation feedback to the prompt
-
-            enhanced_system_prompt = f"""{system_prompt}
-
-
-
-PREVIOUS ISSUES TO AVOID
-
-{previous_issues_section}
-
-
-
-CURRENT VALIDATION FEEDBACK
-
-{validation_feedback_section}
-
-
-
-IMPORTANT: The above issues caused previous attempts to fail.
-
-You MUST address these specific problems in your new alternative meal.
-
-If the previous attempt had macro distribution issues, adjust your calculations accordingly.
-
-If there were dietary restriction violations, ensure strict compliance.
-
-"""
+Return ONLY valid JSON, no markdown fences or explanations."""
 
 
 
@@ -4281,21 +4344,17 @@ If there were dietary restriction violations, ensure strict compliance.
 
                 
 
-                # Add issues to running list and format for next prompt
+                # Store the failed candidate for retry
 
-                previous_issues.extend(issues)
-
-                validation_feedback = "\n".join([f"• {issue}" for issue in issues])
+                previous_candidate = candidate
 
                 
 
-                # Add context about what was generated to help the AI understand what needs fixing
+                # Format validation feedback for next attempt
 
-                if failed_meal:
+                validation_feedback = "\n".join([f"• {issue}" for issue in issues])
 
-                    meal_context = f"Your previous attempt generated this meal: {json.dumps(failed_meal, ensure_ascii=False)}"
-
-                    validation_feedback = f"{meal_context}\n\nIssues to fix:\n{validation_feedback}"
+                previous_issues.extend(issues)
 
                 
 

@@ -664,7 +664,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
     try {
 
-      console.log('🔍 Fetching suggestions from ingredients table for query:', query);
+      console.log('🔍 Fetching suggestions from ingridientsroee table for query:', query);
 
       
 
@@ -675,33 +675,22 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
       const queryWords = query.trim().split(/\s+/).filter(word => word.length > 0);
       console.log('🔍 Query words:', queryWords);
 
-      // Build search conditions with ranking
+      // Build search conditions - ONLY search in product names (not ingredients)
       let searchConditions = [];
-      let orderConditions = [];
 
-      // For each word, create search conditions
+      // For each word, create search conditions only in name fields
       queryWords.forEach((word, index) => {
         const wordPattern = `%${word}%`;
         searchConditions.push(
-          `full_name_product.ilike.${wordPattern}`,
-          `product_description.ilike.${wordPattern}`,
-          `ingredients.ilike.${wordPattern}`,
-          `brand_name.ilike.${wordPattern}`
+          `name.ilike.${wordPattern}`,
+          `english_name.ilike.${wordPattern}`
         );
       });
 
-      // Create ranking conditions for better ordering
-      // 1. Exact full name match gets highest priority
-      orderConditions.push(`full_name_product.ilike.${query}%`);
-      // 2. Full name starts with query
-      orderConditions.push(`full_name_product.ilike.${query}%`);
-      // 3. Full name contains query
-      orderConditions.push(`full_name_product.ilike.%${query}%`);
-
-      // Query the ingredients table with improved search and ranking
+      // Query the ingridientsroee table - only select essential fields
       const { data, error } = await supabase
-        .from('ingredients')
-        .select('*')
+        .from('ingridientsroee')
+        .select('id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g')
         .or(searchConditions.join(','))
         .range((page - 1) * 10, page * 10 - 1);
 
@@ -714,146 +703,204 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
       // Apply ranking and sorting to the results
       const rankedData = data.map(ingredient => {
-        const fullName = (ingredient.full_name_product || ingredient.product_name || '').toLowerCase();
+        const hebrewName = (ingredient.name || '').toLowerCase();
+        const englishName = (ingredient.english_name || '').toLowerCase();
         const queryLower = query.toLowerCase();
         const queryWordsLower = queryWords.map(w => w.toLowerCase());
         
         let score = 0;
+        let matchedInEnglish = false;
+        let matchedInHebrew = false;
         
-        // Exact match gets highest score
-        if (fullName === queryLower) {
-          score += 1000;
-        }
-        // Starts with query gets high score
-        else if (fullName.startsWith(queryLower)) {
-          score += 800;
-        }
-        
-        // Check if first word matches the search term (highest priority for single word searches)
-        const firstWord = fullName.split(' ')[0];
-        if (queryWordsLower.length === 1 && firstWord === queryWordsLower[0]) {
-          score += 900; // Higher than "contains" but lower than "starts with"
-        }
-        
-        // For multi-word searches, check if all words appear together as a phrase
-        if (queryWordsLower.length > 1) {
-          const queryPhrase = queryWordsLower.join(' ');
+        // Helper function to check if query matches in a name
+        const checkMatch = (fullName, isEnglish) => {
+          if (!fullName) return 0;
           
-          // Check if the phrase appears at the beginning
-          if (fullName.startsWith(queryPhrase)) {
-            score += 950; // Higher than single first word match
-          }
-          // Check if the phrase appears anywhere in the name
-          else if (fullName.includes(queryPhrase)) {
-            score += 700; // Higher than individual word matches
+          let localScore = 0;
+          
+          // Exact match gets highest score
+          if (fullName === queryLower) {
+            if (isEnglish) matchedInEnglish = true;
+            else matchedInHebrew = true;
+            return 10000;
           }
           
-          // Check if first two words match (for better Hebrew support)
+          // Starts with query gets very high score (THIS IS KEY!)
+          if (fullName.startsWith(queryLower)) {
+            if (isEnglish) matchedInEnglish = true;
+            else matchedInHebrew = true;
+            return 9000;
+          }
+          
+          // Check if first word exactly matches the search term
           const words = fullName.split(' ');
-          if (words.length >= 2 && 
-              words[0] === queryWordsLower[0] && 
-              words[1] === queryWordsLower[1]) {
-            score += 920; // Very high score for first two words matching
-          }
-        }
-        
-        // Contains exact query gets medium-high score
-        else if (fullName.includes(queryLower)) {
-          score += 600;
-        }
-        
-        // Multi-word matching: check if all query words are present (anywhere in the name)
-        const allWordsPresent = queryWordsLower.every(word => fullName.includes(word));
-        if (allWordsPresent) {
-          score += 500; // Higher base score for having all words
-          
-          // Bonus for words being close together (consecutive)
-          const queryPhrase = queryWordsLower.join(' ');
-          if (fullName.includes(queryPhrase)) {
-            score += 300; // Higher bonus for consecutive words
+          const firstWord = words[0];
+          if (queryWordsLower.length === 1 && firstWord === queryWordsLower[0]) {
+            if (isEnglish) matchedInEnglish = true;
+            else matchedInHebrew = true;
+            return 8500;
           }
           
-          // Bonus for words appearing in order (even if not consecutive)
-          let wordsInOrder = true;
-          let lastIndex = -1;
-          for (const word of queryWordsLower) {
-            const currentIndex = fullName.indexOf(word);
-            if (currentIndex <= lastIndex) {
-              wordsInOrder = false;
-              break;
+          // For multi-word searches, check if phrase appears at start
+          if (queryWordsLower.length > 1) {
+            const queryPhrase = queryWordsLower.join(' ');
+            
+            if (fullName.startsWith(queryPhrase)) {
+              if (isEnglish) matchedInEnglish = true;
+              else matchedInHebrew = true;
+              return 8800;
             }
-            lastIndex = currentIndex;
+            
+            // Check if first N words match
+            if (words.length >= queryWordsLower.length) {
+              let allFirstWordsMatch = true;
+              for (let i = 0; i < queryWordsLower.length; i++) {
+                if (words[i] !== queryWordsLower[i]) {
+                  allFirstWordsMatch = false;
+                  break;
+                }
+              }
+              if (allFirstWordsMatch) {
+                if (isEnglish) matchedInEnglish = true;
+                else matchedInHebrew = true;
+                return 8700;
+              }
+            }
+            
+            // Phrase appears somewhere in the name
+            if (fullName.includes(queryPhrase)) {
+              if (isEnglish) matchedInEnglish = true;
+              else matchedInHebrew = true;
+              return 5000;
+            }
           }
-          if (wordsInOrder) {
-            score += 200; // Bonus for words appearing in search order
+          
+          // Contains exact query (but not at start)
+          if (fullName.includes(queryLower)) {
+            if (isEnglish) matchedInEnglish = true;
+            else matchedInHebrew = true;
+            return 3000;
           }
+          
+          // Multi-word matching: all words present
+          const allWordsPresent = queryWordsLower.every(word => fullName.includes(word));
+          if (allWordsPresent) {
+            if (isEnglish) matchedInEnglish = true;
+            else matchedInHebrew = true;
+            localScore += 2000;
+            
+            // Bonus for words being close together
+            const queryPhrase = queryWordsLower.join(' ');
+            if (fullName.includes(queryPhrase)) {
+              localScore += 1000;
+            }
+            
+            // Bonus for words in order
+            let wordsInOrder = true;
+            let lastIndex = -1;
+            for (const word of queryWordsLower) {
+              const currentIndex = fullName.indexOf(word);
+              if (currentIndex <= lastIndex) {
+                wordsInOrder = false;
+                break;
+              }
+              lastIndex = currentIndex;
+            }
+            if (wordsInOrder) {
+              localScore += 500;
+            }
+            return localScore;
+          }
+          
+          // Individual word matches (partial matches, lower priority)
+          queryWordsLower.forEach((word) => {
+            const wordIndex = words.indexOf(word);
+            
+            if (wordIndex === 0) {
+              if (isEnglish) matchedInEnglish = true;
+              else matchedInHebrew = true;
+              localScore += 1000;
+            } else if (wordIndex > 0) {
+              if (isEnglish) matchedInEnglish = true;
+              else matchedInHebrew = true;
+              localScore += 500;
+            } else if (fullName.includes(word)) {
+              if (isEnglish) matchedInEnglish = true;
+              else matchedInHebrew = true;
+              localScore += 100;
+            }
+          });
+          
+          return localScore;
+        };
+        
+        // Detect if query is in Hebrew or English
+        const isHebrewQuery = /[\u0590-\u05FF]/.test(query);
+        
+        // Check both names
+        const englishScore = checkMatch(englishName, true);
+        const hebrewScore = checkMatch(hebrewName, false);
+        
+        // Use the best score
+        score = Math.max(englishScore, hebrewScore);
+        
+        // Determine which language to display based on which matched better
+        // If query is in Hebrew and Hebrew matched, prefer Hebrew
+        // If query is in English and English matched, prefer English
+        let preferEnglish = false;
+        if (isHebrewQuery) {
+          // For Hebrew queries, prefer Hebrew unless English is significantly better
+          preferEnglish = englishScore > hebrewScore && matchedInEnglish && !matchedInHebrew;
+        } else {
+          // For English queries, prefer English unless Hebrew is significantly better
+          preferEnglish = (englishScore >= hebrewScore && matchedInEnglish) || !matchedInHebrew;
         }
         
-        // Individual word matches (adjusted for multi-word searches)
-        queryWordsLower.forEach((word, index) => {
-          const words = fullName.split(' ');
-          const wordIndex = words.indexOf(word);
-          
-          if (wordIndex === 0) {
-            // First word match gets high score
-            score += 150;
-          } else if (wordIndex > 0) {
-            // Later word match gets lower score, but higher for multi-word searches
-            if (queryWordsLower.length > 1) {
-              score += 80; // Higher score for multi-word searches
-            } else {
-              score += 30; // Lower score for single word searches
-            }
-          } else if (fullName.includes(word)) {
-            // Partial word match gets lowest score
-            score += 10;
-          }
-        });
-        
-        // Brand name matches
-        const brandName = (ingredient.brand_name || '').toLowerCase();
-        queryWordsLower.forEach(word => {
-          if (brandName.includes(word)) {
-            score += 25;
-          }
-        });
-        
-        return { ...ingredient, _searchScore: score };
+        return { 
+          ...ingredient, 
+          _searchScore: score,
+          _preferEnglish: preferEnglish 
+        };
       });
 
-      // Sort by search score (highest first), then by full name
+      // Sort by search score (highest first), then by name
       rankedData.sort((a, b) => {
         if (b._searchScore !== a._searchScore) {
           return b._searchScore - a._searchScore;
         }
-        const aName = a.full_name_product || a.product_name || '';
-        const bName = b.full_name_product || b.product_name || '';
+        // Secondary sort by name
+        const aName = a._preferEnglish ? (a.english_name || a.name || '') : (a.name || a.english_name || '');
+        const bName = b._preferEnglish ? (b.english_name || b.name || '') : (b.name || b.english_name || '');
         return aName.localeCompare(bName);
       });
 
       console.log('📊 Ranked data:', rankedData.map(item => ({ 
-        name: item.full_name_product || item.product_name, 
-        score: item._searchScore 
+        name: item._preferEnglish ? (item.english_name || item.name) : (item.name || item.english_name), 
+        score: item._searchScore,
+        preferEnglish: item._preferEnglish
       })));
 
       // Transform the ranked data to match the expected suggestion format
-      const suggestions = rankedData.map(ingredient => ({
-        english: ingredient.full_name_product || ingredient.product_name || '',
-        hebrew: ingredient.full_name_product || ingredient.product_name || '', // Using full_name_product for both since it's more complete
-        gtinUpc: null, // Not available in ingredients table
-        household_measure: '', // Not available in ingredients table
-        'portionSI(gram)': 100, // Default to 100g per portion
-        calories: ingredient.calories || 0,
-        protein: ingredient.proteins_g || 0,
-        fat: ingredient.fats_g || 0,
-        carbs: ingredient.carbohydrates_g || 0,
-        brand: ingredient.brand_name || '',
-        description: ingredient.product_description || '',
-        ingredients_list: ingredient.ingredients || '',
-        allergies: ingredient.allergies || '',
-        more_info: ingredient.more || '',
-        full_name: ingredient.full_name_product || ingredient.product_name || ''
-      }));
+      // Show results in the language that matched the query
+      const suggestions = rankedData.map(ingredient => {
+        const displayName = ingredient._preferEnglish 
+          ? (ingredient.english_name || ingredient.name || '')
+          : (ingredient.name || ingredient.english_name || '');
+        
+        return {
+          english: ingredient.english_name || ingredient.name || '',
+          hebrew: displayName, // Use displayName for the main display
+          gtinUpc: null,
+          household_measure: '',
+          'portionSI(gram)': 100, // Default to 100g per portion
+          calories: ingredient.calories_energy || 0,
+          protein: ingredient.protein_g || 0,
+          fat: ingredient.fat_g || 0,
+          carbs: ingredient.carbohydrates_g || 0,
+          brand: '',
+          full_name: displayName
+        };
+      });
 
       console.log('📋 Transformed suggestions:', suggestions);
 
@@ -2982,13 +3029,23 @@ const MenuCreate = () => {
 
   useEffect(() => {
 
-    if (selectedClient?.number_of_meals) {
+    if (selectedClient) {
 
-      setNumberOfMeals(selectedClient.number_of_meals);
+      setNumberOfMeals(selectedClient.number_of_meals || 4);
+
+      // Reset unsaved changes when client changes
+
+      setHasUnsavedMealPlanChanges(false);
+
+      setSavedMealPlanStructure(null);
+
+      // Temporarily clear meal plan structure to prevent false comparisons
+
+      setMealPlanStructure([]);
 
     }
 
-  }, [selectedClient?.number_of_meals]);
+  }, [selectedClient]);
 
 
 
@@ -3166,6 +3223,12 @@ const MenuCreate = () => {
 
 
 
+  const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
+
+  const [hasUnsavedMealPlanChanges, setHasUnsavedMealPlanChanges] = useState(false);
+
+  const [savedMealPlanStructure, setSavedMealPlanStructure] = useState(null);
+
   const [mealPlanStructure, setMealPlanStructure] = useState(() => {
 
     // Initialize with numberOfMeals if available
@@ -3175,6 +3238,86 @@ const MenuCreate = () => {
     return getDefaultMealPlanStructure(translations, meals);
 
   });
+
+  // Function to check if there are unsaved changes to meal plan structure
+
+  const checkForUnsavedChanges = () => {
+
+    if (!savedMealPlanStructure || !mealPlanStructure || !Array.isArray(mealPlanStructure) || !Array.isArray(savedMealPlanStructure)) return false;
+
+    // Ensure both structures have the same length
+
+    if (mealPlanStructure.length !== savedMealPlanStructure.length) return false;
+
+    // Compare current structure with saved structure
+
+    const currentStructure = mealPlanStructure.map(meal => ({
+
+      meal: meal.meal,
+
+      description: meal.description,
+
+      calories: meal.calories,
+
+      calories_pct: meal.calories_pct
+
+    }));
+
+    return JSON.stringify(currentStructure) !== JSON.stringify(savedMealPlanStructure);
+
+  };
+
+  // Update unsaved changes state when meal plan structure changes
+
+  useEffect(() => {
+
+    // Don't check for changes if we're in the middle of loading a new client
+
+    if (loadingUserTargets) {
+
+      setHasUnsavedMealPlanChanges(false);
+
+      return;
+
+    }
+
+    // Only check for unsaved changes if we have both structures and they're properly loaded
+
+    if (savedMealPlanStructure && mealPlanStructure && Array.isArray(mealPlanStructure) && Array.isArray(savedMealPlanStructure)) {
+
+      // Add a small delay to ensure the structure is fully updated
+
+      const timeoutId = setTimeout(() => {
+
+        const hasChanges = checkForUnsavedChanges();
+
+        console.log('🔍 Checking for unsaved changes:', {
+
+          hasChanges,
+
+          currentLength: mealPlanStructure.length,
+
+          savedLength: savedMealPlanStructure.length,
+
+          current: mealPlanStructure.map(m => ({ meal: m.meal, description: m.description })),
+
+          saved: savedMealPlanStructure.map(m => ({ meal: m.meal, description: m.description }))
+
+        });
+
+        setHasUnsavedMealPlanChanges(hasChanges);
+
+      }, 200);
+
+      return () => clearTimeout(timeoutId);
+
+    } else {
+
+      setHasUnsavedMealPlanChanges(false);
+
+    }
+
+  }, [mealPlanStructure, savedMealPlanStructure, loadingUserTargets]);
 
 
 
@@ -3564,11 +3707,21 @@ const MenuCreate = () => {
 
   function generateMenuHtml(menu, version = 'portrait', removeBrands = false) {
 
-    // Get current date in Hebrew
+    // Get current date in appropriate language
 
     const today = new Date();
 
     const hebrewDate = today.toLocaleDateString('he-IL', { 
+
+      year: 'numeric', 
+
+      month: 'long', 
+
+      day: 'numeric' 
+
+    });
+
+    const englishDate = today.toLocaleDateString('en-US', { 
 
       year: 'numeric', 
 
@@ -3632,7 +3785,7 @@ const MenuCreate = () => {
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>BetterChoice - תפריט אישי</title>
+    <title>BetterChoice - ${hasHebrewContent ? 'תפריט אישי' : 'Personal Meal Plan'}</title>
 
     <style>
 
@@ -3686,25 +3839,70 @@ const MenuCreate = () => {
 
             background: #e8f5e8;
 
-            padding: 20px;
+            padding: 8px;
 
             text-align: center;
+
+            position: relative;
 
         }
 
         
 
+
+        
+
+        .header-top {
+
+            display: flex;
+
+            justify-content: space-between;
+
+            align-items: flex-start;
+
+            margin-bottom: 5px;
+
+        }
+
+        .title-section {
+
+            display: flex;
+
+            flex-direction: column;
+
+            align-items: flex-start;
+
+        }
+
+        .main-title {
+
+            font-size: 16px;
+
+            font-weight: 700;
+
+            color: #333;
+
+            margin: 0 0 2px 0;
+
+        }
+
         .logo {
 
-            width: 50px;
+            position: absolute;
 
-            height: 50px;
+            top: 8px;
+
+            left: 50%;
+
+            transform: translateX(-50%);
+
+            width: 20px;
+
+            height: 20px;
 
             background: #4CAF50;
 
             border-radius: 50%;
-
-            margin: 0 auto 15px;
 
             display: flex;
 
@@ -3716,21 +3914,19 @@ const MenuCreate = () => {
 
             font-weight: bold;
 
-            font-size: 20px;
+            font-size: 10px;
 
         }
 
-        
+        .date {
 
-        .main-title {
+            font-size: 10px;
 
-            font-size: 28px;
+            font-weight: 500;
 
-            font-weight: 700;
+            color: #666;
 
-            color: #333;
-
-            margin-bottom: 8px;
+            margin: 0;
 
         }
 
@@ -3738,29 +3934,18 @@ const MenuCreate = () => {
 
         .user-name {
 
-            font-size: 20px;
+            font-size: 12px;
 
             font-weight: 600;
 
             color: #4CAF50;
 
-            margin-bottom: 8px;
+            margin: 0;
 
         }
 
         
 
-        .date {
-
-            font-size: 16px;
-
-            font-weight: 500;
-
-            color: #666;
-
-            margin-bottom: 8px;
-
-        }
 
         
 
@@ -3776,9 +3961,15 @@ const MenuCreate = () => {
 
         .meal-section {
 
-            margin-bottom: 20px;
+            margin-bottom: 12px;
 
             page-break-inside: avoid;
+
+            break-inside: avoid;
+
+            page-break-before: auto;
+
+            page-break-after: avoid;
 
         }
 
@@ -3792,7 +3983,7 @@ const MenuCreate = () => {
 
             color: #2d5016;
 
-            text-align: right;
+            text-align: ${hasHebrewContent ? 'right' : 'left'};
 
             margin-bottom: 12px;
 
@@ -3818,7 +4009,7 @@ const MenuCreate = () => {
 
             color: #4CAF50;
 
-            text-align: right;
+            text-align: ${hasHebrewContent ? 'right' : 'left'};
 
             margin-bottom: 8px;
 
@@ -3958,6 +4149,8 @@ const MenuCreate = () => {
 
             line-height: 1.8;
 
+            text-align: ${hasHebrewContent ? 'right' : 'left'};
+
         }
 
         
@@ -3973,6 +4166,12 @@ const MenuCreate = () => {
         @media print {
 
             /* ${version === 'landscape' ? 'Set to A4 landscape with 10mm margins' : 'Disable browser headers and footers'} */
+            
+            /* Better page break control for meal sections */
+            .meal-section {
+                orphans: 3;
+                widows: 3;
+            }
 
             @page {
 
@@ -4189,6 +4388,12 @@ const MenuCreate = () => {
                 page-break-inside: avoid;
 
                 break-inside: avoid;
+
+                page-break-before: auto;
+
+                page-break-after: avoid;
+
+                margin-bottom: 15px;
 
                 ${version === 'landscape' ? 'flex: 1 1 calc(50% - 6px); min-width: 280px; margin-bottom: 12px;' : ''}
 
@@ -4424,11 +4629,19 @@ const MenuCreate = () => {
 
             <div class="logo">BC</div>
 
-            <div class="main-title">תפריט אישי</div>
+            <div class="header-top">
 
-            <div class="user-name">${userName}</div>
+                <div class="title-section">
 
-            <div class="date">${hebrewDate}</div>
+                    <div class="main-title">${hasHebrewContent ? 'תפריט אישי' : 'Personal Meal Plan'}</div>
+
+                    <div class="user-name">${userName}</div>
+
+                </div>
+
+                <div class="date">${hasHebrewContent ? hebrewDate : englishDate}</div>
+
+            </div>
 
         </div>
 
@@ -4452,7 +4665,7 @@ const MenuCreate = () => {
 
                         <h2 class="meal-title">${mealName}</h2>
 
-                        ${isSnack ? '<div class="meal-subtitle">לבחירתך מתי</div>' : ''}
+                        ${isSnack ? `<div class="meal-subtitle">${hasHebrewContent ? 'לבחירתך מתי' : 'Choose when'}</div>` : ''}
 
                         
 
@@ -4658,8 +4871,7 @@ const MenuCreate = () => {
 
                                 if (mealName.toLowerCase().includes('lunch') || mealName.toLowerCase().includes('צהרים')) {
 
-                                    options.push(`<div class="meal-option"><span class="bold-note">**אם רוצה אז להוסיף לך חלבון וירקות**</span></div>`);
-
+                                   
                                 }
 
                                 
@@ -4684,11 +4896,11 @@ const MenuCreate = () => {
 
             <div class="contact-info">
 
-                <div>כתובת: משכית 10, הרצליה</div>
+                <div>${hasHebrewContent ? 'כתובת: משכית 10, הרצליה' : 'Address: Maskit 10, Herzliya'}</div>
 
-                <div>לקביעת תור: 054-3066442</div>
+                <div>${hasHebrewContent ? 'לקביעת תור: 054-3066442' : 'To schedule an appointment: 054-3066442'}</div>
 
-                <div>א"ל: galbecker106@gmail.com</div>
+                <div>${hasHebrewContent ? 'א"ל: galbecker106@gmail.com' : 'Email: galbecker106@gmail.com'}</div>
 
             </div>
 
@@ -5120,7 +5332,7 @@ const MenuCreate = () => {
 
     try {
 
-      await entities.ChatUser.update(selectedClient.user_code, { number_of_meals: newNumberOfMeals });
+      await ChatUser.update(selectedClient.user_code, { number_of_meals: newNumberOfMeals });
 
       console.log('✅ Updated number of meals for client:', newNumberOfMeals);
 
@@ -5480,6 +5692,12 @@ const MenuCreate = () => {
 
       setError(null); // Clear any existing errors
 
+      // Reset unsaved changes when fetching new user targets
+
+      setHasUnsavedMealPlanChanges(false);
+
+      setSavedMealPlanStructure(null);
+
       console.log('🎯 Fetching nutritional targets for user:', userCode);
 
 
@@ -5530,7 +5748,7 @@ const MenuCreate = () => {
 
       const missingFields = [];
 
-      if (!userData.base_daily_total_calories) missingFields.push('base_daily_total_calories');
+      if (!userData.dailyTotalCalories) missingFields.push('dailyTotalCalories');
 
       if (!userData.macros) missingFields.push('macros');
 
@@ -5656,13 +5874,77 @@ const MenuCreate = () => {
 
         setMealPlanStructure(mealPlanWithLocks);
 
+        // Store the modified structure (with locks) as the saved structure for comparison
+
+        setSavedMealPlanStructure(mealPlanWithLocks.map(meal => ({
+
+          meal: meal.meal,
+
+          description: meal.description,
+
+          calories: meal.calories,
+
+          calories_pct: meal.calories_pct
+
+        })));
+
       } else {
 
-        // Use default structure
+        // Use default structure and save it to database
 
-        const defaultStructure = getDefaultMealPlanStructure(translations);
+        const defaultStructure = getDefaultMealPlanStructure(translations, userData.number_of_meals || 4);
 
         setMealPlanStructure(defaultStructure);
+
+        // Save default structure to database
+
+        try {
+
+          const mealPlanToSave = defaultStructure.map(meal => ({
+
+            meal: meal.meal,
+
+            description: meal.description,
+
+            calories: meal.calories,
+
+            calories_pct: meal.calories_pct
+
+          }));
+
+          console.log('💾 Saving default meal plan structure to database for user:', userCode);
+
+          const { error } = await supabase
+
+            .from('chat_users')
+
+            .update({ meal_plan_structure: mealPlanToSave })
+
+            .eq('user_code', userCode);
+
+          if (error) {
+
+            console.error('❌ Error saving default meal plan structure:', error);
+
+          } else {
+
+            console.log('✅ Default meal plan structure saved successfully');
+
+            // Store the saved structure for comparison
+
+            setSavedMealPlanStructure(mealPlanToSave);
+
+          }
+
+          // Set the saved structure to match the current structure
+
+          setSavedMealPlanStructure(mealPlanToSave);
+
+        } catch (err) {
+
+          console.error('❌ Error saving default meal plan structure:', err);
+
+        }
 
       }
 
@@ -6621,6 +6903,12 @@ const MenuCreate = () => {
       console.log('✅ Meal plan structure saved successfully:', data);
 
       alert('Meal plan structure saved successfully!');
+
+      // Update the saved structure to match current structure
+
+      setSavedMealPlanStructure(mealPlanToSave);
+
+      setHasUnsavedMealPlanChanges(false);
 
       
 
@@ -7647,6 +7935,18 @@ const MenuCreate = () => {
       setShowEmptyMealPlanDialog(true);
 
       return; // Don't proceed until user confirms
+
+    }
+
+    // Check if there are unsaved changes to meal plan structure
+
+    if (hasUnsavedMealPlanChanges && !loadingUserTargets) {
+
+      console.log('⚠️ Unsaved changes detected, showing dialog');
+
+      setShowUnsavedChangesDialog(true);
+
+      return; // Don't proceed until user saves or confirms
 
     }
 
@@ -10596,7 +10896,7 @@ const MenuCreate = () => {
 
       {selectedClient && userTargets && (
 
-        <Card className="border-blue-200 bg-blue-50/30 mb-6">
+        <Card className="border-blue-200 bg-blue-50/30 mb-6" data-meal-plan-section>
 
           <CardHeader>
 
@@ -13112,9 +13412,111 @@ const MenuCreate = () => {
 
         </DialogContent>
 
-      </Dialog>
+        </Dialog>
 
-    </div>
+        {/* Unsaved Changes Warning Dialog */}
+
+        <Dialog open={showUnsavedChangesDialog} onOpenChange={setShowUnsavedChangesDialog}>
+
+          <DialogContent className="sm:max-w-md">
+
+            <DialogHeader>
+
+              <DialogTitle className="flex items-center gap-2 text-orange-600">
+
+                <span className="text-2xl">💾</span>
+
+                {translations.unsavedChangesWarning || 'Unsaved Changes'}
+
+              </DialogTitle>
+
+              <DialogDescription className="text-gray-600 pt-2">
+
+                {translations.unsavedChangesMessage || 'You have unsaved changes to the meal plan structure. Please save your changes before generating a menu.'}
+
+              </DialogDescription>
+
+            </DialogHeader>
+
+            
+
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 my-4">
+
+              <div className="flex items-start gap-3">
+
+                <div className="text-orange-600 text-lg">⚠️</div>
+
+                <div>
+
+                  <h4 className="font-medium text-orange-800 mb-1">
+
+                    {translations.whatYouNeedToDo || 'What you need to do:'}
+
+                  </h4>
+
+                  <p className="text-sm text-orange-700">
+
+                    {translations.saveMealPlanFirst || 'Go to the "Meal Plan Structure" section and click "Save Plan" to save your changes before generating the menu.'}
+
+                  </p>
+
+                </div>
+
+              </div>
+
+            </div>
+
+            
+
+            <DialogFooter className="flex gap-3 sm:gap-3">
+
+              <Button
+
+                variant="outline"
+
+                onClick={() => setShowUnsavedChangesDialog(false)}
+
+                className="flex-1 border-gray-300 text-gray-700 hover:bg-gray-50"
+
+              >
+
+                {translations.cancel || 'Cancel'}
+
+              </Button>
+
+              <Button
+
+                onClick={() => {
+
+                  setShowUnsavedChangesDialog(false);
+
+                  // Scroll to meal plan structure section
+
+                  const mealPlanSection = document.querySelector('[data-meal-plan-section]');
+
+                  if (mealPlanSection) {
+
+                    mealPlanSection.scrollIntoView({ behavior: 'smooth' });
+
+                  }
+
+                }}
+
+                className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
+
+              >
+
+                {translations.goToMealPlan || 'Go to Meal Plan'}
+
+              </Button>
+
+            </DialogFooter>
+
+          </DialogContent>
+
+        </Dialog>
+
+      </div>
 
   );
 

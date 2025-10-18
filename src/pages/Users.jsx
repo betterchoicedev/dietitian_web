@@ -4,6 +4,8 @@ import { ChatUser, FoodLogs } from '@/api/entities';
 
 import { useLanguage } from '@/contexts/LanguageContext';
 
+import { getMyProfile, getCompanyProfileIds } from '@/utils/auth';
+
 import { 
 
   Search, 
@@ -171,6 +173,8 @@ export default function Clients() {
   const [error, setError] = useState(null);
 
   const [showAll, setShowAll] = useState(false);
+
+  const [userRole, setUserRole] = useState(null); // Store user's role for UI permissions
 
   
 
@@ -1782,9 +1786,59 @@ export default function Clients() {
 
     try {
 
-      const clientData = await ChatUser.list();
+      // 1) Fetch all clients (unchanged)
 
-      setClients(clientData || []);
+      const all = await ChatUser.list(); // returns chat_users rows
+
+      
+
+      // 2) Fetch my profile to determine role and company
+
+      const me = await getMyProfile();
+
+      
+
+      // Store role for UI permissions
+
+      setUserRole(me.role);
+
+
+
+      let visible = all;
+
+
+
+      if (me.role === "sys_admin") {
+
+        // sys_admin: see everything
+
+        visible = all;
+
+      } else if (me.role === "company_manager") {
+
+        // company_manager: see clients assigned to *any* employee in my company
+
+        const ids = await getCompanyProfileIds(me.company_id); // array of profile.id
+
+        const idSet = new Set(ids);
+
+        visible = all.filter(c => c.provider_id && idSet.has(c.provider_id));
+
+        // Note: unassigned clients (provider_id IS NULL) won't show for managers
+
+        // unless you add client_company_id to chat_users
+
+      } else {
+
+        // employee: only clients assigned directly to me
+
+        visible = all.filter(c => c.provider_id === me.id);
+
+      }
+
+
+
+      setClients(visible || []);
 
       setError(null);
 
@@ -1792,7 +1846,7 @@ export default function Clients() {
 
       console.error('Error loading clients:', error);
 
-      setError(translations.failedToLoadClients);
+      setError(translations.failedToLoadClients || 'Failed to load clients');
 
       setClients([]);
 
@@ -3748,19 +3802,25 @@ export default function Clients() {
 
         </div>
 
-        <Button 
+        {/* Only sys_admin and company_manager can add new clients */}
 
-          onClick={handleAdd}
+        {userRole && userRole !== 'employee' && (
 
-          className="bg-green-600 hover:bg-green-700"
+          <Button 
 
-        >
+            onClick={handleAdd}
 
-          <Plus className="h-4 w-4 mr-2" />
+            className="bg-green-600 hover:bg-green-700"
 
-          {translations.addNewClient}
+          >
 
-        </Button>
+            <Plus className="h-4 w-4 mr-2" />
+
+            {translations.addNewClient}
+
+          </Button>
+
+        )}
 
       </div>
 

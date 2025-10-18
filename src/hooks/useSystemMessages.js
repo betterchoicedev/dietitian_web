@@ -39,11 +39,20 @@ export function useSystemMessages() {
       setLoading(true);
       const now = new Date().toISOString();
 
-      // Fetch ALL active messages (not just urgent)
+      // Get current user ID
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.log('No authenticated user');
+        setUnreadCount(0);
+        return;
+      }
+
+      // Fetch active messages - either broadcast (directed_to IS NULL) or directed to current user
       const { data, error } = await supabase
         .from('system_messages')
-        .select('id, start_date, end_date, priority')
-        .eq('is_active', true);
+        .select('id, start_date, end_date, priority, directed_to')
+        .eq('is_active', true)
+        .or(`directed_to.is.null,directed_to.eq.${user.id}`);
 
       if (error) {
         console.error('Supabase query error:', error);

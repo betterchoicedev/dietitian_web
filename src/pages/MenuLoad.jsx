@@ -644,6 +644,31 @@ const MenuLoad = () => {
         };
       }
 
+      // Convert additional alternatives array if it exists
+      if (meal.alternatives && Array.isArray(meal.alternatives)) {
+        console.log(`🔄 Converting ${meal.alternatives.length} additional alternatives for meal ${mealIndex}:`, meal.alternatives);
+        result.alternatives = meal.alternatives.map((alt, altIndex) => ({
+          meal_title: alt.meal_title || alt.itemName || `${mealName} Alternative ${altIndex + 2}`,
+          mealIndex,
+          alternativeIndex: altIndex,
+          nutrition: {
+            calories: alt.nutrition?.calories || alt.mealCalories || 0,
+            protein: alt.nutrition?.protein || alt.mealProtein || 0,
+            fat: alt.nutrition?.fat || alt.mealFat || 0,
+            carbs: alt.nutrition?.carbs || alt.mealCarbs || 0
+          },
+          ingredients: (alt.ingredients || []).map(ing => ({
+            item: ing.item || ing.ingredientName || ing.name || '',
+            household_measure: ing.household_measure || ing.portionUser || ing.portion || '',
+            calories: ing.calories || 0,
+            protein: ing.protein || 0,
+            fat: ing.fat || 0,
+            carbs: ing.carbs || 0,
+            'brand of pruduct': ing['brand of pruduct'] || ing.brand || ''
+          }))
+        }));
+      }
+
       return result;
     });
 
@@ -1451,6 +1476,30 @@ const MenuLoad = () => {
                   UPC: ing.UPC || null
                 }))
               };
+            }
+
+            // Add additional alternatives array if it exists
+            if (meal.alternatives && meal.alternatives.length > 0) {
+              mealData.alternatives = meal.alternatives.map(alt => ({
+                meal_name: meal.meal,
+                meal_title: alt.meal_title,
+                nutrition: {
+                  calories: Math.round(alt.nutrition.calories || 0),
+                  protein: Math.round(alt.nutrition.protein || 0),
+                  fat: Math.round(alt.nutrition.fat || 0),
+                  carbs: Math.round(alt.nutrition.carbs || 0)
+                },
+                ingredients: alt.ingredients.map(ing => ({
+                  item: ing.item,
+                  household_measure: ing.household_measure,
+                  calories: Math.round(ing.calories || 0),
+                  protein: Math.round(ing.protein || 0),
+                  fat: Math.round(ing.fat || 0),
+                  carbs: Math.round(ing.carbs || 0),
+                  'brand of pruduct': ing['brand of pruduct'] || '',
+                  UPC: ing.UPC || null
+                }))
+              }));
             }
 
             return mealData;
@@ -3348,6 +3397,7 @@ const MenuLoad = () => {
                     <div className="mt-4">
                       <div className="font-semibold mb-2 text-blue-700">{translations.otherAlternatives || 'Other Alternatives'}:</div>
                       <div className="space-y-4">
+                        {console.log(`🎯 Rendering ${meal.alternatives.length} additional alternatives for meal ${mealIdx}:`, meal.alternatives)}
                         {meal.alternatives.map((alt, altIdx) => (
                           <div key={altIdx} className="bg-blue-50 rounded-lg p-3">
                             {renderMealOption({ ...alt, mealIndex: mealIdx, alternativeIndex: altIdx }, true)}

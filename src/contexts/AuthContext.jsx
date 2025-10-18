@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { EventBus } from '@/utils/EventBus';
 
 const AuthContext = createContext({});
 
@@ -23,8 +24,17 @@ export function AuthProvider({ children }) {
         setUser(session?.user ?? null);
         
         // Listen for changes on auth state (sign in, sign out, etc.)
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
           setUser(session?.user ?? null);
+          
+          // Emit events for client list refresh
+          if (event === 'SIGNED_IN' && session?.user) {
+            console.log('🔐 User signed in, emitting userLoggedIn event');
+            EventBus.emit('userLoggedIn');
+          } else if (event === 'SIGNED_OUT') {
+            console.log('🔐 User signed out, emitting userLoggedOut event');
+            EventBus.emit('userLoggedOut');
+          }
         });
 
         return () => {

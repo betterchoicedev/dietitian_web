@@ -93,12 +93,21 @@ export default function SystemMessageModal() {
       setLoading(true);
       const now = new Date().toISOString();
 
-      // Fetch ONLY urgent active messages for popup
+      // Get current user ID
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.log('No authenticated user');
+        setLoading(false);
+        return;
+      }
+
+      // Fetch ONLY urgent active messages for popup - either broadcast or directed to current user
       const { data, error } = await supabase
         .from('system_messages')
         .select('*')
         .eq('is_active', true)
         .eq('priority', 'urgent')
+        .or(`directed_to.is.null,directed_to.eq.${user.id}`)
         .order('created_at', { ascending: false });
 
       if (error) throw error;

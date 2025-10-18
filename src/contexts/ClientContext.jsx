@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ChatUser } from '@/api/entities';
 import { EventBus } from '@/utils/EventBus';
+import { getMyProfile, getCompanyProfileIds } from '@/utils/auth';
 
 const ClientContext = createContext();
 
@@ -40,6 +41,34 @@ export function ClientProvider({ children }) {
     };
   }, []);
 
+  // Listen for role changes or profile updates
+  useEffect(() => {
+    const refreshHandler = () => {
+      console.log('🔄 Role or profile changed, reloading clients...');
+      loadClients();
+    };
+    
+    const logoutHandler = () => {
+      console.log('🔐 User logged out, clearing client list...');
+      setClients([]);
+      setSelectedUserCode(null);
+      setSelectedClient(null);
+    };
+    
+    EventBus.on('profileUpdated', refreshHandler);
+    EventBus.on('roleChanged', refreshHandler);
+    EventBus.on('userLoggedIn', refreshHandler); // Listen for login events
+    EventBus.on('userLoggedOut', logoutHandler); // Listen for logout events
+    return () => {
+      if (EventBus.off) {
+        EventBus.off('profileUpdated', refreshHandler);
+        EventBus.off('roleChanged', refreshHandler);
+        EventBus.off('userLoggedIn', refreshHandler);
+        EventBus.off('userLoggedOut', logoutHandler);
+      }
+    };
+  }, []);
+
   // Persist selection whenever it changes and load the client details
   useEffect(() => {
     try {
@@ -60,19 +89,67 @@ export function ClientProvider({ children }) {
       setIsLoading(true);
       setError(null);
       console.log('👥 Loading clients from chat_users table...');
-      const clientsData = await ChatUser.list();
-      console.log('✅ Clients loaded:', clientsData?.length || 0, 'records');
-      setClients(clientsData || []);
+      
+      // 1) Fetch all clients (unchanged)
+      const all = await ChatUser.list(); // returns chat_users rows
+      console.log('📋 All clients fetched:', all?.length || 0, 'records');
+      
+      // 2) Fetch my profile to determine role and company
+      const me = await getMyProfile();
+      console.log('👤 User profile:', { role: me.role, company_id: me.company_id, id: me.id });
+
+      let visible = all;
+
+      if (me.role === "sys_admin") {
+        // sys_admin: see everything
+        console.log('🔓 Sys admin: showing all clients');
+        visible = all;
+      } else if (me.role === "company_manager") {
+        // company_manager: see clients assigned to *any* employee in my company
+        console.log('🏢 Company manager: filtering by company', me.company_id);
+        const ids = await getCompanyProfileIds(me.company_id); // array of profile.id
+        console.log('👥 Company profile IDs:', ids);
+        const idSet = new Set(ids);
+        visible = all.filter(c => c.provider_id && idSet.has(c.provider_id));
+        console.log('✅ Company manager filtered clients:', visible.length);
+        // Note: unassigned clients (provider_id IS NULL) won't show for managers
+        // unless you add client_company_id to chat_users
+      } else {
+        // employee: only clients assigned directly to me
+        console.log('👷 Employee: filtering by my ID', me.id);
+        console.log('🔍 All clients with provider_id:', all.map(c => ({ user_code: c.user_code, provider_id: c.provider_id })));
+        
+        // Filter clients where provider_id matches the current user's ID
+        visible = all.filter(c => {
+          const matches = c.provider_id === me.id;
+          console.log(`🔍 Client ${c.user_code}: provider_id=${c.provider_id}, my_id=${me.id}, matches=${matches}`);
+          return matches;
+        });
+        
+        console.log('✅ Employee filtered clients:', visible.length, visible.map(c => c.user_code));
+        
+        // If no clients are assigned to this employee, show a helpful message
+        if (visible.length === 0) {
+          console.log('⚠️ No clients assigned to this employee. Make sure clients have provider_id set to:', me.id);
+        }
+      }
+
+      console.log('✅ Clients loaded:', visible?.length || 0, 'records (filtered by role)');
+      setClients(visible || []);
       
       // If there is a stored selection but it no longer exists, fall back to first client
-      if (clientsData && clientsData.length > 0) {
-        const hasStored = selectedUserCode && clientsData.some(c => c.user_code === selectedUserCode);
+      if (visible && visible.length > 0) {
+        const hasStored = selectedUserCode && visible.some(c => c.user_code === selectedUserCode);
         if (!hasStored && !selectedUserCode) {
-          setSelectedUserCode(clientsData[0].user_code);
+          console.log('🔄 No stored selection, selecting first client:', visible[0].user_code);
+          setSelectedUserCode(visible[0].user_code);
         }
         if (!hasStored && selectedUserCode) {
-          setSelectedUserCode(clientsData[0].user_code);
+          console.log('🔄 Stored selection no longer valid, selecting first client:', visible[0].user_code);
+          setSelectedUserCode(visible[0].user_code);
         }
+      } else {
+        console.log('⚠️ No visible clients after filtering');
       }
     } catch (error) {
       console.error("❌ Error loading clients:", error);
