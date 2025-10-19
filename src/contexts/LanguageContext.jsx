@@ -265,6 +265,10 @@ export const translations = {
     improveHealth: 'Improve Health',
     nutritionInformation: 'Nutrition Information',
     dailyTotalCalories: 'Daily Total Calories',
+    basalMetabolicRate: 'Basal Metabolic Rate (BMR)',
+    bmrDescription: 'Calories your body burns at rest (Harris-Benedict equation)',
+    dailyTargetCalories: 'Daily Target Calories',
+    dailyTargetDescription: 'BMR × Activity × Goal - Your actual daily calorie target',
     autoCalculated: 'Auto-calculated',
     harrisBenedictInfo: 'Based on Harris-Benedict equation using age, gender, weight, height, activity level, and goal',
     mifflinStJeorInfo: 'Based on Mifflin-St Jeor equation using age, gender, weight, height, activity level, and goal',
@@ -1053,7 +1057,6 @@ export const translations = {
     newFeatureUpdates: 'Updates about new platform features and improvements',
     weeklyDigest: 'Weekly Digest',
     weeklySummary: 'Weekly summary of all system messages and updates',
-    profileSettings: 'Profile Settings',
     filters: 'Filters',
     
     // Profile Information
@@ -1076,7 +1079,6 @@ export const translations = {
     
     // Dietitian Dashboard
     dietitianDashboard: 'Dietitian Dashboard',
-    clientManagement: 'Client Management',
     clientTools: 'Client Tools',
     quickStats: 'Quick Stats',
     expand: 'Expand',
@@ -1095,21 +1097,16 @@ export const translations = {
     manageAllMealPlans: 'View, filter, and manage all meal plans across all clients',
     recentWeightLogs: 'Recent Weight & Body Fat Logs',
     latestWeightLogsFromClients: 'Latest weight and body fat measurements from all clients',
-    searchClients: 'Search clients...',
     searchMealPlans: 'Search meal plans or clients...',
     mealPlanName: 'Meal Plan Name',
     lastUpdated: 'Last Updated',
     date: 'Date',
     order: 'Order',
     showingResults: 'Showing',
-    filteredBy: 'filtered by',
-    mealPlans: 'meal plans',
-    noActivatedPlans: 'No activated plans found',
     logDate: 'Log Date',
     inactive: 'Inactive',
     dateCreated: 'Date Created',
     client: 'Client',
-    allStatus: 'All Status',
     
     // Additional DietitianProfile translations
     failedToLoadMessages: 'Failed to load messages',
@@ -1121,15 +1118,7 @@ export const translations = {
     always: 'Always',
     statusFilterDisabledInHistory: 'Status filter disabled when showing history',
     noActivityFound: 'No activity found',
-    noMealPlansFound: 'No meal plans found',
-    noActivatedPlans: 'No activated plans found',
-    noWeightLogs: 'No weight logs found',
-    loadMore: 'Load More',
-    more: 'more',
     showing: 'Showing',
-    filteredBy: 'filtered by',
-    status: 'status',
-    mealPlans: 'meal plans',
   },
   he: {
     // Navigation & Main Pages
@@ -1388,6 +1377,10 @@ export const translations = {
     improveHealth: 'שיפור בריאות',
     nutritionInformation: 'מידע תזונתי',
     dailyTotalCalories: 'קלוריות כוללות יומיות',
+    basalMetabolicRate: 'קצב חילוף חומרים בסיסי (BMR)',
+    bmrDescription: 'קלוריות שהגוף שורף במנוחה (נוסחת האריס-בנדיקט)',
+    dailyTargetCalories: 'יעד קלוריות יומי',
+    dailyTargetDescription: 'BMR × פעילות × מטרה - יעד הקלוריות היומי בפועל',
     autoCalculated: 'מחושב אוטומטית',
     harrisBenedictInfo: 'מבוסס על נוסחת האריס-בנדיקט באמצעות גיל, מין, משקל, גובה, רמת פעילות ומטרה',
     mifflinStJeorInfo: 'מבוסס על נוסחת מיפלין-סנט ג׳ור באמצעות גיל, מין, משקל, גובה, רמת פעילות ומטרה',
@@ -2022,7 +2015,6 @@ export const translations = {
     
     // Dietitian Dashboard
     dietitianDashboard: 'לוח בקרה דיאטנית',
-    clientManagement: 'ניהול לקוחות',
     clientTools: 'כלי לקוחות',
     quickStats: 'סטטיסטיקות מהירות',
     expand: 'הרחב',
@@ -2041,21 +2033,16 @@ export const translations = {
     manageAllMealPlans: 'צפייה, סינון וניהול כל תוכניות הארוחות בכל הלקוחות',
     recentWeightLogs: 'יומני משקל ואחוז שומן אחרונים',
     latestWeightLogsFromClients: 'מדידות משקל ואחוז שומן אחרונות מכל הלקוחות',
-    searchClients: 'חפש לקוחות...',
     searchMealPlans: 'חפש תוכניות ארוחות או לקוחות...',
     mealPlanName: 'שם תוכנית ארוחות',
     lastUpdated: 'עדכון אחרון',
     date: 'תאריך',
     order: 'סדר',
     showingResults: 'מציג',
-    filteredBy: 'מסונן לפי',
-    mealPlans: 'תוכניות ארוחות',
-    noActivatedPlans: 'לא נמצאו תוכניות מופעלות',
     logDate: 'תאריך רישום',
     inactive: 'לא פעיל',
     dateCreated: 'תאריך יצירה',
     client: 'לקוח',
-    allStatus: 'כל הסטטוסים',
     
     // Additional DietitianProfile translations (Hebrew)
     failedToLoadMessages: 'טעינת ההודעות נכשלה',
@@ -2067,15 +2054,7 @@ export const translations = {
     always: 'תמיד',
     statusFilterDisabledInHistory: 'מסנן סטטוס מושבת בעת הצגת היסטוריה',
     noActivityFound: 'לא נמצאה פעילות',
-    noMealPlansFound: 'לא נמצאו תוכניות ארוחות',
-    noActivatedPlans: 'לא נמצאו תוכניות מופעלות',
-    noWeightLogs: 'לא נמצאו יומני משקל',
-    loadMore: 'טען עוד',
-    more: 'עוד',
     showing: 'מציג',
-    filteredBy: 'מסונן לפי',
-    status: 'סטטוס',
-    mealPlans: 'תוכניות ארוחות',
   }
 };
 

@@ -248,7 +248,9 @@ export default function Clients() {
 
     },
 
-    base_daily_total_calories: '',
+    base_daily_total_calories: '',  // BMR - Basal Metabolic Rate
+
+    daily_target_total_calories: '',  // TDEE with goal adjustments (Harris-Benedict full calculation)
 
     food_limitations: '',
 
@@ -456,7 +458,7 @@ export default function Clients() {
 
   const calculateMacrosFromInputs = (inputType, value, macroType) => {
 
-    const calories = parseInt(formData.base_daily_total_calories) || 0;
+    const calories = parseInt(formData.daily_target_total_calories) || 0;
 
     const weight = parseFloat(formData.weight_kg) || 0;
 
@@ -710,7 +712,7 @@ export default function Clients() {
 
     const total = calculateTotals().totalPercentage;
 
-    const dailyCalories = parseInt(formData.base_daily_total_calories) || 0;
+    const dailyCalories = parseInt(formData.daily_target_total_calories) || 0;
 
     
 
@@ -748,7 +750,7 @@ export default function Clients() {
 
   useEffect(() => {
 
-    const calories = parseInt(formData.base_daily_total_calories) || 0;
+    const calories = parseInt(formData.daily_target_total_calories) || 0;
 
     if (calories > 0 && (!macroInputs.protein.grams && !macroInputs.carbs.grams && !macroInputs.fat.grams)) {
 
@@ -834,7 +836,7 @@ export default function Clients() {
 
     }
 
-  }, [formData.base_daily_total_calories, formData.weight_kg]);
+  }, [formData.daily_target_total_calories, formData.weight_kg]);
 
 
 
@@ -870,7 +872,7 @@ export default function Clients() {
 
   const calculateHarrisBenedict = (age, gender, weight, height, activityLevel, goal) => {
 
-    if (!age || !gender || !weight || !height || !activityLevel) {
+    if (!age || !gender || !weight || !height) {
 
       return null;
 
@@ -906,63 +908,75 @@ export default function Clients() {
 
 
 
-    // STEP 2: Apply activity multiplier to get TDEE
+    // STEP 2: Apply activity multiplier to get TDEE (if activity level provided)
 
-    let activityMultiplier = 1.2; // Sedentary as default
+    let tdee = bmr;
 
-    switch (activityLevel) {
+    if (activityLevel) {
 
-      case 'sedentary': activityMultiplier = 1.2; break;
+      let activityMultiplier = 1.2; // Sedentary as default
 
-      case 'light': activityMultiplier = 1.375; break;
+      switch (activityLevel) {
 
-      case 'moderate': activityMultiplier = 1.55; break;
+        case 'sedentary': activityMultiplier = 1.2; break;
 
-      case 'very': activityMultiplier = 1.725; break;
+        case 'light': activityMultiplier = 1.375; break;
 
-      case 'extra': activityMultiplier = 1.9; break;
+        case 'moderate': activityMultiplier = 1.55; break;
 
-    }
+        case 'very': activityMultiplier = 1.725; break;
 
+        case 'extra': activityMultiplier = 1.9; break;
 
+      }
 
-    // Calculate TDEE (Total Daily Energy Expenditure)
-
-    let tdee = bmr * activityMultiplier;
-
-
-
-    // STEP 3: Apply goal factor (multiplicative, not additive)
-
-    let goalFactor = 1.0; // Default: maintenance
-
-    switch (goal) {
-
-      case 'lose': goalFactor = 0.85; break;        // 15% deficit (middle of 0.8-0.9 range)
-
-      case 'cut': goalFactor = 0.80; break;         // 20% deficit (middle of 0.75-0.85 range) - aggressive fat loss / definition phase
-
-      case 'gain': goalFactor = 1.15; break;        // 15% surplus (middle of 1.1-1.2 range)
-
-      case 'muscle': goalFactor = 1.12; break;      // 12% surplus (middle of 1.1-1.15 range)
-
-      case 'performance': goalFactor = 1.10; break; // 10% surplus (middle of 1.05-1.15 range) - increase energy & recovery
-
-      case 'health': goalFactor = 1.0; break;       // Maintenance (middle of 0.95-1.05 range)
-
-      case 'maintain': goalFactor = 1.0; break;     // Maintenance
+      tdee = bmr * activityMultiplier;
 
     }
 
 
 
-    // Final calories = BMR × Activity_Factor × Goal_Factor
+    // STEP 3: Apply goal factor (multiplicative, not additive) if goal provided
 
-    const finalCalories = tdee * goalFactor;
+    let finalCalories = tdee;
+
+    if (goal) {
+
+      let goalFactor = 1.0; // Default: maintenance
+
+      switch (goal) {
+
+        case 'lose': goalFactor = 0.85; break;        // 15% deficit (middle of 0.8-0.9 range)
+
+        case 'cut': goalFactor = 0.80; break;         // 20% deficit (middle of 0.75-0.85 range) - aggressive fat loss / definition phase
+
+        case 'gain': goalFactor = 1.15; break;        // 15% surplus (middle of 1.1-1.2 range)
+
+        case 'muscle': goalFactor = 1.12; break;      // 12% surplus (middle of 1.1-1.15 range)
+
+        case 'performance': goalFactor = 1.10; break; // 10% surplus (middle of 1.05-1.15 range) - increase energy & recovery
+
+        case 'health': goalFactor = 1.0; break;       // Maintenance (middle of 0.95-1.05 range)
+
+        case 'maintain': goalFactor = 1.0; break;     // Maintenance
+
+      }
+
+      finalCalories = tdee * goalFactor;
+
+    }
 
 
 
-    return Math.round(finalCalories);
+    // Return both BMR and final daily target
+
+    return {
+
+      bmr: Math.round(bmr),
+
+      dailyTarget: Math.round(finalCalories)
+
+    };
 
   };
 
@@ -972,7 +986,7 @@ export default function Clients() {
 
   useEffect(() => {
 
-    const calculatedCalories = calculateHarrisBenedict(
+    const calculationResult = calculateHarrisBenedict(
 
       formData.age,
 
@@ -990,13 +1004,21 @@ export default function Clients() {
 
 
 
-    if (calculatedCalories && calculatedCalories > 0) {
+    if (calculationResult && calculationResult.bmr > 0) {
 
-      setFormData(prev => ({ ...prev, base_daily_total_calories: calculatedCalories.toString() }));
+      setFormData(prev => ({ 
+
+        ...prev, 
+
+        base_daily_total_calories: calculationResult.bmr.toString(),
+
+        daily_target_total_calories: calculationResult.dailyTarget.toString()
+
+      }));
 
       
 
-      // Update macros to match the new calorie total
+      // Update macros to match the new daily target calorie total
 
       const currentPercentages = {
 
@@ -1010,7 +1032,7 @@ export default function Clients() {
 
       
 
-      // If we have existing percentages, recalculate grams based on new calories
+      // If we have existing percentages, recalculate grams based on new daily target calories
 
       if (currentPercentages.protein > 0 || currentPercentages.carbs > 0 || currentPercentages.fat > 0) {
 
@@ -1022,9 +1044,9 @@ export default function Clients() {
 
             percentage: currentPercentages.protein,
 
-            grams: Math.round(((currentPercentages.protein / 100) * calculatedCalories) / 4),
+            grams: Math.round(((currentPercentages.protein / 100) * calculationResult.dailyTarget) / 4),
 
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.protein / 100) * calculatedCalories) / 4) / weight * 1000) / 1000 : 0
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.protein / 100) * calculationResult.dailyTarget) / 4) / weight * 1000) / 1000 : 0
 
           },
 
@@ -1032,9 +1054,9 @@ export default function Clients() {
 
             percentage: currentPercentages.carbs,
 
-            grams: Math.round(((currentPercentages.carbs / 100) * calculatedCalories) / 4),
+            grams: Math.round(((currentPercentages.carbs / 100) * calculationResult.dailyTarget) / 4),
 
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.carbs / 100) * calculatedCalories) / 4) / weight * 1000) / 1000 : 0
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.carbs / 100) * calculationResult.dailyTarget) / 4) / weight * 1000) / 1000 : 0
 
           },
 
@@ -1042,9 +1064,9 @@ export default function Clients() {
 
             percentage: currentPercentages.fat,
 
-            grams: Math.round(((currentPercentages.fat / 100) * calculatedCalories) / 9),
+            grams: Math.round(((currentPercentages.fat / 100) * calculationResult.dailyTarget) / 9),
 
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.fat / 100) * calculatedCalories) / 9) / weight * 1000) / 1000 : 0
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.fat / 100) * calculationResult.dailyTarget) / 9) / weight * 1000) / 1000 : 0
 
           }
 
@@ -1070,7 +1092,15 @@ export default function Clients() {
 
       // Clear calories if we have some data but calculation failed
 
-      setFormData(prev => ({ ...prev, base_daily_total_calories: '' }));
+      setFormData(prev => ({ 
+
+        ...prev, 
+
+        base_daily_total_calories: '',
+
+        daily_target_total_calories: ''
+
+      }));
 
     }
 
@@ -1082,7 +1112,7 @@ export default function Clients() {
 
   useEffect(() => {
 
-    const calories = parseInt(formData.base_daily_total_calories) || 0;
+    const calories = parseInt(formData.daily_target_total_calories) || 0;
 
     if (calories > 0) {
 
@@ -1158,7 +1188,7 @@ export default function Clients() {
 
     }
 
-  }, [formData.base_daily_total_calories]);
+  }, [formData.daily_target_total_calories]);
 
 
 
@@ -1926,7 +1956,9 @@ export default function Clients() {
 
       },
 
-      base_daily_total_calories: '', // Will be calculated automatically when required fields are filled
+      base_daily_total_calories: '', // BMR - Will be calculated automatically
+
+      daily_target_total_calories: '', // TDEE with goal - Will be calculated automatically
 
       food_limitations: '',
 
@@ -2060,6 +2092,8 @@ export default function Clients() {
 
       base_daily_total_calories: client.base_daily_total_calories?.toString() || '',
 
+      daily_target_total_calories: client.daily_target_total_calories?.toString() || '',
+
       food_limitations: (() => {
         // First check if food_limitations exists and has content
         if (client.food_limitations) {
@@ -2166,7 +2200,9 @@ export default function Clients() {
 
     // Set macro inputs to match the client's macros
 
-    const calories = client.base_daily_total_calories ? parseInt(client.base_daily_total_calories) : 0;
+    // Use daily_target_total_calories for macro percentage calculations (macros are based on target, not BMR)
+
+    const targetCalories = client.daily_target_total_calories ? parseInt(client.daily_target_total_calories) : 0;
 
     const weight = client.weight_kg ? parseFloat(client.weight_kg) : 0;
 
@@ -2176,7 +2212,7 @@ export default function Clients() {
 
       protein: {
 
-        percentage: calories > 0 ? Math.round(((proteinValue * 4) / calories) * 100) : 0,
+        percentage: targetCalories > 0 ? Math.round(((proteinValue * 4) / targetCalories) * 100) : 0,
 
         grams: proteinValue,
 
@@ -2186,7 +2222,7 @@ export default function Clients() {
 
       carbs: {
 
-        percentage: calories > 0 ? Math.round(((carbsValue * 4) / calories) * 100) : 0,
+        percentage: targetCalories > 0 ? Math.round(((carbsValue * 4) / targetCalories) * 100) : 0,
 
         grams: carbsValue,
 
@@ -2196,7 +2232,7 @@ export default function Clients() {
 
       fat: {
 
-        percentage: calories > 0 ? Math.round(((fatValue * 9) / calories) * 100) : 0,
+        percentage: targetCalories > 0 ? Math.round(((fatValue * 9) / targetCalories) * 100) : 0,
 
         grams: fatValue,
 
@@ -2224,7 +2260,7 @@ export default function Clients() {
 
     setTimeout(() => {
 
-      const calculatedCalories = calculateHarrisBenedict(
+      const calculationResult = calculateHarrisBenedict(
 
         formData.age,
 
@@ -2242,13 +2278,21 @@ export default function Clients() {
 
       
 
-      if (calculatedCalories && calculatedCalories > 0) {
+      if (calculationResult && calculationResult.bmr > 0) {
 
-        setFormData(prev => ({ ...prev, base_daily_total_calories: calculatedCalories.toString() }));
+        setFormData(prev => ({ 
+
+          ...prev, 
+
+          base_daily_total_calories: calculationResult.bmr.toString(),
+
+          daily_target_total_calories: calculationResult.dailyTarget.toString()
+
+        }));
 
         
 
-        // Update macros to match the new calorie total
+        // Update macros to match the new daily target calorie total
 
         const currentPercentages = {
 
@@ -2270,9 +2314,9 @@ export default function Clients() {
 
             percentage: currentPercentages.protein,
 
-            grams: Math.round(((currentPercentages.protein / 100) * calculatedCalories) / 4),
+            grams: Math.round(((currentPercentages.protein / 100) * calculationResult.dailyTarget) / 4),
 
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.protein / 100) * calculatedCalories) / 4) / weight * 1000) / 1000 : 0
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.protein / 100) * calculationResult.dailyTarget) / 4) / weight * 1000) / 1000 : 0
 
           },
 
@@ -2280,9 +2324,9 @@ export default function Clients() {
 
             percentage: currentPercentages.carbs,
 
-            grams: Math.round(((currentPercentages.carbs / 100) * calculatedCalories) / 4),
+            grams: Math.round(((currentPercentages.carbs / 100) * calculationResult.dailyTarget) / 4),
 
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.carbs / 100) * calculatedCalories) / 4) / weight * 1000) / 1000 : 0
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.carbs / 100) * calculationResult.dailyTarget) / 4) / weight * 1000) / 1000 : 0
 
           },
 
@@ -2290,9 +2334,9 @@ export default function Clients() {
 
             percentage: currentPercentages.fat,
 
-            grams: Math.round(((currentPercentages.fat / 100) * calculatedCalories) / 9),
+            grams: Math.round(((currentPercentages.fat / 100) * calculationResult.dailyTarget) / 9),
 
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.fat / 100) * calculatedCalories) / 9) / weight * 1000) / 1000 : 0
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.fat / 100) * calculationResult.dailyTarget) / 9) / weight * 1000) / 1000 : 0
 
           }
 
@@ -2696,6 +2740,8 @@ export default function Clients() {
 
         base_daily_total_calories: formData.base_daily_total_calories ? parseInt(formData.base_daily_total_calories) : null,
 
+        daily_target_total_calories: formData.daily_target_total_calories ? parseInt(formData.daily_target_total_calories) : null,
+
         number_of_meals: formData.number_of_meals ? parseInt(formData.number_of_meals) : 4,
 
         date_of_birth: formData.date_of_birth && formData.date_of_birth.trim() !== '' ? formData.date_of_birth : null,
@@ -3066,7 +3112,7 @@ export default function Clients() {
 
     const updatedStructure = formData.meal_plan_structure.filter((_, i) => i !== index);
 
-    const totalCalories = parseInt(formData.base_daily_total_calories) || 0;
+    const totalCalories = parseInt(formData.daily_target_total_calories) || 0;
 
     
 
@@ -3308,9 +3354,9 @@ export default function Clients() {
 
   useEffect(() => {
 
-    if (formData.base_daily_total_calories) {
+    if (formData.daily_target_total_calories) {
 
-      const updatedMealStructure = calculateMealCalories(formData.meal_plan_structure, formData.base_daily_total_calories);
+      const updatedMealStructure = calculateMealCalories(formData.meal_plan_structure, formData.daily_target_total_calories);
 
       setFormData(prev => ({
 
@@ -3322,7 +3368,7 @@ export default function Clients() {
 
     }
 
-  }, [formData.base_daily_total_calories]);
+  }, [formData.daily_target_total_calories]);
 
 
 
@@ -3362,7 +3408,7 @@ export default function Clients() {
 
     if (field === 'calories') {
 
-      const totalCalories = parseInt(formData.base_daily_total_calories) || 0;
+      const totalCalories = parseInt(formData.daily_target_total_calories) || 0;
 
       updatedStructure[index].calories = parseInt(value) || 0;
 
@@ -3418,7 +3464,7 @@ export default function Clients() {
 
     const numericValue = parseInt(value) || 0;
 
-    const dailyTotal = parseInt(formData.base_daily_total_calories) || 0;
+    const dailyTotal = parseInt(formData.daily_target_total_calories) || 0;
 
     
 
@@ -3498,7 +3544,7 @@ export default function Clients() {
 
     const numericValue = parseInt(tempValue) || 0;
 
-    const dailyTotal = parseInt(formData.base_daily_total_calories) || 0;
+    const dailyTotal = parseInt(formData.daily_target_total_calories) || 0;
 
     
 
@@ -3738,7 +3784,7 @@ export default function Clients() {
 
       // Recalculate calories based on new percentages
 
-      const totalCalories = parseInt(formData.base_daily_total_calories) || 0;
+      const totalCalories = parseInt(formData.daily_target_total_calories) || 0;
 
       if (totalCalories > 0) {
 
@@ -3764,7 +3810,7 @@ export default function Clients() {
 
     }
 
-  }, [formData.number_of_meals, formData.base_daily_total_calories, translations]);
+  }, [formData.number_of_meals, formData.daily_target_total_calories, translations]);
 
 
 
@@ -5581,7 +5627,7 @@ export default function Clients() {
 
                     <Label htmlFor="base_daily_total_calories" className="text-sm font-medium text-gray-700">
 
-                      {translations.base_daily_total_calories}
+                      {translations.basalMetabolicRate || 'Basal Metabolic Rate (BMR)'}
 
                       <span className={`${language === 'he' ? 'mr-2' : 'ml-2'} inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full`}>
 
@@ -5601,7 +5647,65 @@ export default function Clients() {
 
                         value={formData.base_daily_total_calories}
 
-                        onChange={(e) => setFormData({...formData, base_daily_total_calories: e.target.value})}
+                        readOnly
+
+                        className="border-gray-300 bg-gray-50 cursor-not-allowed text-gray-600"
+
+                        placeholder={hasRequiredFieldsForCalculation() ? translations.autoCalculated : translations.fillRequiredFieldsToCalculate}
+
+                      />
+
+                      <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+
+                        {hasRequiredFieldsForCalculation() ? (
+
+                          <span className="text-green-500 text-sm">✓</span>
+
+                        ) : (
+
+                          <span className="text-amber-500 text-sm">⚠️</span>
+
+                        )}
+
+                      </div>
+
+                    </div>
+
+                    <p className="text-xs text-gray-500">
+
+                      {translations.bmrDescription || 'Calories your body burns at rest (Harris-Benedict equation)'}
+
+                    </p>
+
+                  </div>
+
+                  
+
+                  <div className="space-y-2">
+
+                    <Label htmlFor="daily_target_total_calories" className="text-sm font-medium text-gray-700">
+
+                      {translations.dailyTargetCalories || 'Daily Target Calories'}
+
+                      <span className={`${language === 'he' ? 'mr-2' : 'ml-2'} inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full`}>
+
+                        🎯 {translations.autoCalculated || 'Auto-calculated'}
+
+                      </span>
+
+                    </Label>
+
+                    <div className="relative">
+
+                      <Input
+
+                        id="daily_target_total_calories"
+
+                        type="number"
+
+                        value={formData.daily_target_total_calories}
+
+                        onChange={(e) => setFormData({...formData, daily_target_total_calories: e.target.value})}
 
                         className={`${hasRequiredFieldsForCalculation() ? 'border-green-300 bg-green-50 focus:border-green-500 focus:ring-green-200' : 'border-amber-300 bg-amber-50 focus:border-amber-500 focus:ring-amber-200'}`}
 
@@ -5629,9 +5733,9 @@ export default function Clients() {
 
                       {hasRequiredFieldsForCalculation() 
 
-                        ? translations.harrisBenedictInfo || 'Calculated using Harris-Benedict equation'
+                        ? translations.dailyTargetDescription || 'BMR × Activity × Goal - Your actual daily calorie target'
 
-                        : translations.fillRequiredFieldsToCalculate || 'Fill in age, gender, weight, height, and activity level to calculate'
+                        : translations.fillRequiredFieldsToCalculate || 'Fill in age, gender, weight, height, activity level, and goal to calculate'
 
                       }
 
@@ -5773,7 +5877,7 @@ export default function Clients() {
 
                         onClick={() => {
 
-                          const calories = parseInt(formData.base_daily_total_calories) || 0;
+                          const calories = parseInt(formData.daily_target_total_calories) || 0;
 
                           if (calories > 0) {
 
@@ -5845,7 +5949,7 @@ export default function Clients() {
 
                         className="text-blue-600 border-blue-300 hover:bg-blue-50 text-xs"
 
-                        disabled={!formData.base_daily_total_calories}
+                        disabled={!formData.daily_target_total_calories}
 
                       >
 
@@ -5865,9 +5969,9 @@ export default function Clients() {
 
                     {(() => {
 
-                      // Dynamic macro configuration based on daily calories
+                      // Dynamic macro configuration based on daily target calories
 
-                      const dailyCalories = parseInt(formData.base_daily_total_calories) || 0;
+                      const dailyCalories = parseInt(formData.daily_target_total_calories) || 0;
 
                       
 
@@ -7185,7 +7289,7 @@ export default function Clients() {
 
                         <span className="font-medium">
 
-                          {formData.meal_plan_structure.reduce((sum, meal) => sum + (meal.calories || 0), 0)} / {formData.base_daily_total_calories || 0}
+                          {formData.meal_plan_structure.reduce((sum, meal) => sum + (meal.calories || 0), 0)} / {formData.daily_target_total_calories || 0}
 
                         </span>
 
@@ -7221,7 +7325,7 @@ export default function Clients() {
 
                         <span className="font-medium text-purple-600">
 
-                          {(parseInt(formData.base_daily_total_calories) || 0) - formData.meal_plan_structure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0)} kcal
+                          {(parseInt(formData.daily_target_total_calories) || 0) - formData.meal_plan_structure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0)} kcal
 
                         </span>
 
@@ -7233,7 +7337,7 @@ export default function Clients() {
 
                         <span className="font-medium text-orange-600">
 
-                          {Math.max(0, (parseInt(formData.base_daily_total_calories) || 0) - formData.meal_plan_structure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0))} kcal
+                          {Math.max(0, (parseInt(formData.daily_target_total_calories) || 0) - formData.meal_plan_structure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0))} kcal
 
                         </span>
 

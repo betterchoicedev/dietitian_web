@@ -42,6 +42,37 @@
   - Improve navigation and user experience
   - Add real-time notifications and updates
 
+### 8. Fix Chat Auto-Scroll on Refresh
+- **Files**: `src/pages/Chat.jsx`
+- **Issue**: When the chat refreshes, it should automatically scroll to the last message
+- **Status**: Pending
+- **Implementation**:
+  - Add auto-scroll functionality to chat component on mount/refresh
+  - Implement scrollToBottom function triggered after messages load
+  - Ensure scroll behavior works with new messages
+  - Handle scroll position preservation when user manually scrolls up
+  - Add smooth scroll animation for better UX
+  - Test with various message counts and chat histories
+  - Ensure it works with both initial load and refresh scenarios
+
+### 9. Separate BMR and Daily Target Calories in Client Profile
+- **Files**: `src/pages/Users.jsx`, `src/contexts/LanguageContext.jsx`, `backend/backend.py`
+- **Issue**: Need to separate BMR (Basal Metabolic Rate) from Daily Target Calories for better clarity and data tracking
+- **Status**: In Progress
+- **Implementation**:
+  - ✅ Add `daily_target_total_calories` field to formData state
+  - ✅ Modify `calculateHarrisBenedict()` to return both BMR and daily target
+  - ✅ Update `base_daily_total_calories` to store BMR only (read-only field)
+  - ✅ Update `daily_target_total_calories` to store full calculation (BMR × Activity × Goal)
+  - ✅ Update all macro calculations to use daily_target_total_calories
+  - ✅ Update all meal plan structure calculations to use daily_target_total_calories
+  - ✅ Update UI to show both fields separately with clear labels
+  - ✅ Add translations for new field labels (English & Hebrew)
+  - 🔄 Add `daily_target_total_calories` column to Supabase `chat_users` table
+  - 🔄 Update backend `load_user_preferences()` to fetch both fields
+  - 🔄 Test with existing clients to ensure backward compatibility
+  - 🔄 Verify meal plan generation uses correct calorie value
+
 
 
 

@@ -150,29 +150,16 @@ export default function Chat() {
     simpleRefreshIntervalRef.current = setInterval(async () => {
       try {
         console.log('🔄 Simple auto-refresh: Checking for new messages...');
-        
-        // Get the latest message from our current messages to compare timestamps
-        const currentLatestMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-        
-        // Fetch the most recent messages (limit 50 to have more context)
-        const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 50 });
+        const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
         // Reverse to show oldest at top, newest at bottom
         const reversedMessages = filterValidMessages(latestMessages.reverse());
         
-        // Only check for truly new messages by timestamp comparison
-        let trulyNewMessages = [];
-        if (currentLatestMessage) {
-          // Find messages that are newer than our current latest message
-          trulyNewMessages = reversedMessages.filter(msg => 
-            new Date(msg.created_at) > new Date(currentLatestMessage.created_at)
-          );
-        } else {
-          // If we don't have any messages yet, all messages are "new"
-          trulyNewMessages = reversedMessages;
-        }
+        // Check for new messages by comparing IDs instead of just length
+        const currentMessageIds = new Set(messages.map(m => m.id));
+        const newMessages = reversedMessages.filter(msg => !currentMessageIds.has(msg.id));
         
-        if (trulyNewMessages.length > 0) {
-          console.log(`🔄 Simple auto-refresh: New messages detected! Found ${trulyNewMessages.length} truly new messages`);
+        if (newMessages.length > 0) {
+          console.log(`🔄 Simple auto-refresh: New messages detected! Found ${newMessages.length} new messages`);
           
           // Capture user's scroll position before updating messages
           const scrollArea = scrollAreaRef.current;
@@ -181,29 +168,17 @@ export default function Chat() {
           const prevScrollHeight = viewport ? viewport.scrollHeight : 0;
           const prevClientHeight = viewport ? viewport.clientHeight : 0;
           
-          // Check if user was at the bottom (within 50px) or near the bottom
+          // Check if user was at the bottom (within 50px)
           const distanceFromBottom = prevScrollHeight - prevScrollTop - prevClientHeight;
           const wasAtBottom = distanceFromBottom <= 50;
-          const wasNearBottom = distanceFromBottom <= 100; // More generous threshold
           
-          // Merge new messages with existing messages, avoiding duplicates
-          setMessages(prevMessages => {
-            const existingIds = new Set(prevMessages.map(m => m.id));
-            const newUniqueMessages = trulyNewMessages.filter(msg => !existingIds.has(msg.id));
-            
-            if (newUniqueMessages.length > 0) {
-              // Append new messages to the end
-              return [...prevMessages, ...newUniqueMessages];
-            }
-            
-            return prevMessages;
-          });
-          
+          setMessages(reversedMessages);
           // Only update firstMessageId if we don't have one yet (initial load)
-          if (!firstMessageId && reversedMessages.length > 0) {
-            setFirstMessageId(reversedMessages[0].id);
+          // or if we're loading more messages and need to update it
+          if (!firstMessageId) {
+            setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
           }
-          setHasMoreMessages(latestMessages.length === 50);
+          setHasMoreMessages(latestMessages.length === 20);
           setLastRefreshTime(new Date());
           
           // Restore scroll position after DOM updates
@@ -214,25 +189,16 @@ export default function Chat() {
               chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
               setHasNewMessages(false); // Clear flag since we're scrolling to new messages
             } else {
-              // User was scrolling up, preserve their position more accurately
+              // User was scrolling up, preserve their position
               console.log('🔄 Preserving scroll position, user was not at bottom');
               if (viewport) {
                 const newScrollHeight = viewport.scrollHeight;
                 const heightDifference = newScrollHeight - prevScrollHeight;
-                // More precise scroll position restoration
-                const newScrollTop = prevScrollTop + heightDifference;
-                viewport.scrollTop = newScrollTop;
-                
-                // Double-check the position after a brief delay
-                setTimeout(() => {
-                  if (viewport.scrollTop !== newScrollTop) {
-                    viewport.scrollTop = newScrollTop;
-                  }
-                }, 50);
+                viewport.scrollTop = prevScrollTop + heightDifference;
               }
               setHasNewMessages(true); // Set flag to show new message indicator
             }
-          }, 100); // Slightly longer delay for better DOM stability
+          }, 0);
         } else {
           console.log('Simple auto-refresh: No new messages found');
           // No new messages, preserve scroll position
@@ -525,24 +491,15 @@ export default function Chat() {
           console.log('🔄 Manual refresh: Auto-scrolling to bottom for new messages');
           chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
         } else {
-          // User was scrolling up, preserve their position more accurately
+          // User was scrolling up, preserve their position
           console.log('🔄 Manual refresh: Preserving scroll position, user was not at bottom');
           if (viewport) {
             const newScrollHeight = viewport.scrollHeight;
             const heightDifference = newScrollHeight - prevScrollHeight;
-            // More precise scroll position restoration
-            const newScrollTop = prevScrollTop + heightDifference;
-            viewport.scrollTop = newScrollTop;
-            
-            // Double-check the position after a brief delay
-            setTimeout(() => {
-              if (viewport.scrollTop !== newScrollTop) {
-                viewport.scrollTop = newScrollTop;
-              }
-            }, 50);
+            viewport.scrollTop = prevScrollTop + heightDifference;
           }
         }
-      }, 100); // Slightly longer delay for better DOM stability
+      }, 0);
       
       console.log('✅ Chat refreshed successfully');
     } catch (error) {
@@ -1213,11 +1170,7 @@ Your task is to respond to the user's message below, taking into account their s
     const scrollArea = scrollAreaRef.current;
     if (!scrollArea) return;
     
-    // Find the viewport element within ScrollArea
-    const viewport = scrollArea.querySelector('[data-radix-scroll-area-viewport]');
-    if (!viewport) return;
-    
-    const { scrollTop, scrollHeight, clientHeight } = viewport;
+    const { scrollTop, scrollHeight, clientHeight } = scrollArea;
     const scrollBottom = scrollHeight - clientHeight;
     const distanceFromBottom = scrollBottom - scrollTop;
     
@@ -1488,23 +1441,14 @@ Your task is to respond to the user's message below, taking into account their s
         console.log('📭 No more messages to load');
         setHasMoreMessages(false);
       }
-      // After messages update, restore scroll position more accurately
+      // After messages update, restore scroll position
       setTimeout(() => {
         if (viewport) {
           const newScrollHeight = viewport.scrollHeight;
           const heightDifference = newScrollHeight - prevScrollHeight;
-          // Set scroll position to maintain the user's view of the messages
-          const newScrollTop = heightDifference;
-          viewport.scrollTop = newScrollTop;
-          
-          // Double-check the position after DOM updates
-          setTimeout(() => {
-            if (viewport.scrollTop !== newScrollTop) {
-              viewport.scrollTop = newScrollTop;
-            }
-          }, 50);
+          viewport.scrollTop = heightDifference;
         }
-      }, 100); // Longer delay to ensure DOM is fully updated
+      }, 0);
     } catch (err) {
       console.error('❌ Error loading more messages:', err);
       // Don't show error in chat UI - just log it
