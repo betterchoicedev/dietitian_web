@@ -368,6 +368,94 @@ export default function Clients() {
 
 
 
+  // Calculate what Harris-Benedict formula would give and compare with current values
+
+  const getCalculationComparison = () => {
+
+    if (!hasRequiredFieldsForCalculation()) {
+
+      return { hasData: false };
+
+    }
+
+
+
+    const calculationResult = calculateHarrisBenedict(
+
+      formData.age,
+
+      formData.gender,
+
+      formData.weight_kg,
+
+      formData.height_cm,
+
+      formData.Activity_level,
+
+      formData.goal
+
+    );
+
+
+
+    if (!calculationResult) {
+
+      return { hasData: false };
+
+    }
+
+
+
+    const currentBMR = parseInt(formData.base_daily_total_calories) || 0;
+
+    const currentTarget = parseInt(formData.daily_target_total_calories) || 0;
+
+    const calculatedBMR = calculationResult.bmr;
+
+    const calculatedTarget = calculationResult.dailyTarget;
+
+
+
+    const bmrDifference = Math.abs(currentBMR - calculatedBMR);
+
+    const targetDifference = Math.abs(currentTarget - calculatedTarget);
+
+
+
+    // Consider values matching if within 5 calories
+
+    const bmrMatches = bmrDifference <= 5;
+
+    const targetMatches = targetDifference <= 5;
+
+
+
+    return {
+
+      hasData: true,
+
+      currentBMR,
+
+      currentTarget,
+
+      calculatedBMR,
+
+      calculatedTarget,
+
+      bmrDifference,
+
+      targetDifference,
+
+      bmrMatches,
+
+      targetMatches
+
+    };
+
+  };
+
+
+
   // Check if a field should show error styling
 
   const shouldShowError = (fieldName) => {
@@ -472,6 +560,10 @@ export default function Clients() {
 
     let targetPercentage = 0;
 
+    let targetGrams = 0;
+
+    let targetGramsPerKg = 0;
+
     
 
     // Calculate target percentage based on input type
@@ -480,15 +572,27 @@ export default function Clients() {
 
       targetPercentage = Math.max(0, Math.min(100, value));
 
+      targetGrams = Math.round((targetPercentage / 100) * calories / (macroType === 'fat' ? 9 : 4));
+
+      targetGramsPerKg = weight > 0 ? Math.round((targetGrams / weight) * 1000) / 1000 : 0;
+
     } else if (inputType === 'grams') {
 
-      targetPercentage = calories > 0 ? (value * (macroType === 'fat' ? 9 : 4) / calories) * 100 : 0;
+      targetGrams = Math.round(value);
+
+      targetPercentage = calories > 0 ? (targetGrams * (macroType === 'fat' ? 9 : 4) / calories) * 100 : 0;
+
+      targetGramsPerKg = weight > 0 ? Math.round((targetGrams / weight) * 1000) / 1000 : 0;
 
     } else if (inputType === 'gramsPerKg') {
 
-      const grams = weight > 0 ? value * weight : 0;
+      // Use the direct input value for gramsPerKg to avoid recalculation issues
 
-      targetPercentage = calories > 0 ? (grams * (macroType === 'fat' ? 9 : 4) / calories) * 100 : 0;
+      targetGramsPerKg = Math.round(value * 1000) / 1000; // Round to 3 decimal places
+
+      targetGrams = weight > 0 ? Math.round(targetGramsPerKg * weight) : 0;
+
+      targetPercentage = calories > 0 ? (targetGrams * (macroType === 'fat' ? 9 : 4) / calories) * 100 : 0;
 
     }
 
@@ -496,15 +600,13 @@ export default function Clients() {
 
     // Update the target macro
 
-    const grams = Math.round((targetPercentage / 100) * calories / (macroType === 'fat' ? 9 : 4));
-
     newMacros[macroType] = {
 
       percentage: Math.round(targetPercentage * 1000) / 1000, // Allow 3 decimal places
 
-      grams: grams,
+      grams: targetGrams,
 
-      gramsPerKg: weight > 0 ? Math.round((grams / weight) * 1000) / 1000 : 0 // Allow 3 decimal places
+      gramsPerKg: targetGramsPerKg
 
     };
 
@@ -986,6 +1088,18 @@ export default function Clients() {
 
   useEffect(() => {
 
+    // Skip auto-calculation if we're editing an existing client with existing calorie values
+
+    // This preserves manually edited values by the dietitian
+
+    if (currentClient && currentClient.daily_target_total_calories) {
+
+      return;
+
+    }
+
+
+
     const calculationResult = calculateHarrisBenedict(
 
       formData.age,
@@ -1104,7 +1218,7 @@ export default function Clients() {
 
     }
 
-  }, [formData.age, formData.gender, formData.weight_kg, formData.height_cm, formData.Activity_level, formData.goal]);
+  }, [formData.age, formData.gender, formData.weight_kg, formData.height_cm, formData.Activity_level, formData.goal, currentClient]);
 
 
 
@@ -2254,112 +2368,6 @@ export default function Clients() {
 
     setDialogOpen(true);
 
-    
-
-    // Recalculate calories after a short delay to ensure form data is set
-
-    setTimeout(() => {
-
-      const calculationResult = calculateHarrisBenedict(
-
-        formData.age,
-
-        formData.gender,
-
-        formData.weight_kg,
-
-        formData.height_cm,
-
-        formData.Activity_level,
-
-        formData.goal
-
-      );
-
-      
-
-      if (calculationResult && calculationResult.bmr > 0) {
-
-        setFormData(prev => ({ 
-
-          ...prev, 
-
-          base_daily_total_calories: calculationResult.bmr.toString(),
-
-          daily_target_total_calories: calculationResult.dailyTarget.toString()
-
-        }));
-
-        
-
-        // Update macros to match the new daily target calorie total
-
-        const currentPercentages = {
-
-          protein: macroInputsData.protein.percentage,
-
-          carbs: macroInputsData.carbs.percentage,
-
-          fat: macroInputsData.fat.percentage
-
-        };
-
-        
-
-        const weight = parseFloat(formData.weight_kg) || 0;
-
-        const updatedMacros = {
-
-          protein: {
-
-            percentage: currentPercentages.protein,
-
-            grams: Math.round(((currentPercentages.protein / 100) * calculationResult.dailyTarget) / 4),
-
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.protein / 100) * calculationResult.dailyTarget) / 4) / weight * 1000) / 1000 : 0
-
-          },
-
-          carbs: {
-
-            percentage: currentPercentages.carbs,
-
-            grams: Math.round(((currentPercentages.carbs / 100) * calculationResult.dailyTarget) / 4),
-
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.carbs / 100) * calculationResult.dailyTarget) / 4) / weight * 1000) / 1000 : 0
-
-          },
-
-          fat: {
-
-            percentage: currentPercentages.fat,
-
-            grams: Math.round(((currentPercentages.fat / 100) * calculationResult.dailyTarget) / 9),
-
-            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.fat / 100) * calculationResult.dailyTarget) / 9) / weight * 1000) / 1000 : 0
-
-          }
-
-        };
-
-        
-
-        setMacroInputs(updatedMacros);
-
-        setMacroSliders({
-
-          protein: updatedMacros.protein.grams,
-
-          carbs: updatedMacros.carbs.grams,
-
-          fat: updatedMacros.fat.grams
-
-        });
-
-      }
-
-    }, 100);
-
   };
 
 
@@ -2754,9 +2762,9 @@ export default function Clients() {
 
         client_preference: parseJsonField(formData.client_preference, 'array'),
 
-        food_diary: formData.food_diary ? formData.food_diary.trim() : '',
+        food_diary: formData.food_diary && typeof formData.food_diary === 'string' ? formData.food_diary.trim() : '',
 
-        recommendations: formData.recommendations ? formData.recommendations.trim() : '',
+        recommendations: formData.recommendations && typeof formData.recommendations === 'string' ? formData.recommendations.trim() : '',
 
         meal_plan_structure: formData.meal_plan_structure.map(meal => ({
 
@@ -2823,6 +2831,8 @@ export default function Clients() {
       setFormSubmitted(false);
 
       setTouchedFields({});
+
+      setCurrentClient(null);
 
       loadClients();
 
@@ -5671,11 +5681,51 @@ export default function Clients() {
 
                     </div>
 
-                    <p className="text-xs text-gray-500">
+                    {(() => {
 
-                      {translations.bmrDescription || 'Calories your body burns at rest (Harris-Benedict equation)'}
+                      const comparison = getCalculationComparison();
 
-                    </p>
+                      if (comparison.hasData && !comparison.bmrMatches && comparison.currentBMR > 0) {
+
+                        return (
+
+                          <div className="bg-amber-50 border border-amber-200 rounded-md p-2 text-xs">
+
+                            <div className="flex items-center gap-1 text-amber-800 font-medium mb-1">
+
+                              ⚠️ {translations.manuallyEdited || 'Manually edited'}
+
+                            </div>
+
+                            <div className="text-amber-700">
+
+                              {translations.formulaWouldGive || 'Formula would give'}: <span className="font-semibold">{comparison.calculatedBMR} kcal</span>
+
+                              <span className="text-amber-600 ml-1">
+
+                                ({comparison.currentBMR > comparison.calculatedBMR ? '+' : ''}{comparison.currentBMR - comparison.calculatedBMR} kcal)
+
+                              </span>
+
+                            </div>
+
+                          </div>
+
+                        );
+
+                      }
+
+                      return (
+
+                        <p className="text-xs text-gray-500">
+
+                          {translations.bmrDescription || 'Calories your body burns at rest (Harris-Benedict equation)'}
+
+                        </p>
+
+                      );
+
+                    })()}
 
                   </div>
 
@@ -5729,17 +5779,57 @@ export default function Clients() {
 
                     </div>
 
-                    <p className="text-xs text-gray-500">
+                    {(() => {
 
-                      {hasRequiredFieldsForCalculation() 
+                      const comparison = getCalculationComparison();
 
-                        ? translations.dailyTargetDescription || 'BMR × Activity × Goal - Your actual daily calorie target'
+                      if (comparison.hasData && !comparison.targetMatches && comparison.currentTarget > 0) {
 
-                        : translations.fillRequiredFieldsToCalculate || 'Fill in age, gender, weight, height, activity level, and goal to calculate'
+                        return (
+
+                          <div className="bg-amber-50 border border-amber-200 rounded-md p-2 text-xs">
+
+                            <div className="flex items-center gap-1 text-amber-800 font-medium mb-1">
+
+                              ⚠️ {translations.manuallyEdited || 'Manually edited'}
+
+                            </div>
+
+                            <div className="text-amber-700">
+
+                              {translations.formulaWouldGive || 'Formula would give'}: <span className="font-semibold">{comparison.calculatedTarget} kcal</span>
+
+                              <span className="text-amber-600 ml-1">
+
+                                ({comparison.currentTarget > comparison.calculatedTarget ? '+' : ''}{comparison.currentTarget - comparison.calculatedTarget} kcal)
+
+                              </span>
+
+                            </div>
+
+                          </div>
+
+                        );
 
                       }
 
-                    </p>
+                      return (
+
+                        <p className="text-xs text-gray-500">
+
+                          {hasRequiredFieldsForCalculation() 
+
+                            ? translations.dailyTargetDescription || 'BMR × Activity × Goal - Your actual daily calorie target'
+
+                            : translations.fillRequiredFieldsToCalculate || 'Fill in age, gender, weight, height, activity level, and goal to calculate'
+
+                          }
+
+                        </p>
+
+                      );
+
+                    })()}
 
                   </div>
 
@@ -7400,6 +7490,8 @@ export default function Clients() {
                   setFormSubmitted(false);
 
                   setTouchedFields({});
+
+                  setCurrentClient(null);
 
                   setFoodLogsAnalysis(null);
 
