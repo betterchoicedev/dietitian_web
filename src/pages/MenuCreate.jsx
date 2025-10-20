@@ -36,6 +36,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
+import { Slider } from '@/components/ui/slider';
+
 
 
 import { supabase } from '@/lib/supabase';
@@ -3239,6 +3241,25 @@ const MenuCreate = () => {
 
   });
 
+  // Macro distribution state (similar to Users.jsx)
+  const [macroInputs, setMacroInputs] = useState({
+    protein: { percentage: 0, grams: 0, gramsPerKg: 0 },
+    carbs: { percentage: 0, grams: 0, gramsPerKg: 0 },
+    fat: { percentage: 0, grams: 0, gramsPerKg: 0 }
+  });
+
+  const [previousMacroDistribution, setPreviousMacroDistribution] = useState({
+    protein: 30,
+    carbs: 40,
+    fat: 30
+  });
+
+  const [lockedMacros, setLockedMacros] = useState({
+    protein: false,
+    carbs: false,
+    fat: false
+  });
+
   // Function to check if there are unsaved changes to meal plan structure
 
   const checkForUnsavedChanges = () => {
@@ -3351,7 +3372,307 @@ const MenuCreate = () => {
 
   // State for minimizing Meal Plan Structure section
 
-  const [isMealPlanMinimized, setIsMealPlanMinimized] = useState(false);
+  const [isMealPlanMinimized, setIsMealPlanMinimized] = useState(true);
+
+  // State for minimizing Daily Targets & Macros section
+  const [isDailyTargetsMinimized, setIsDailyTargetsMinimized] = useState(true);
+
+  // State for minimizing Recommendations section
+  const [isRecommendationsMinimized, setIsRecommendationsMinimized] = useState(true);
+
+  // Macro calculation functions (from Users.jsx)
+  const calculateTotals = () => {
+    const totalPercentage = macroInputs.protein.percentage + macroInputs.carbs.percentage + macroInputs.fat.percentage;
+    const totalCalories = (macroInputs.protein.grams * 4) + (macroInputs.carbs.grams * 4) + (macroInputs.fat.grams * 9);
+    return { totalPercentage, totalCalories };
+  };
+
+  const validateMacroPercentages = () => {
+    const total = calculateTotals().totalPercentage;
+    const dailyCalories = parseInt(userTargets?.calories_per_day) || 0;
+    
+    // If daily calories haven't been set yet, don't show red warning for 0% macros
+    if (dailyCalories === 0) {
+      return { 
+        isValid: true, 
+        warning: null, 
+        total,
+        isCaloriesNotSet: true 
+      };
+    }
+    
+    const isValid = Math.abs(total - 100) < 0.1; // Allow small rounding differences
+    const warning = !isValid ? `Macro percentages should add up to 100%. Current total: ${total.toFixed(1)}%` : null;
+    return { isValid, warning, total, isCaloriesNotSet: false };
+  };
+
+  const toggleMacroLock = (macroType) => {
+    setLockedMacros(prev => ({
+      ...prev,
+      [macroType]: !prev[macroType]
+    }));
+  };
+
+  const calculateMacrosFromInputs = (inputType, value, macroType) => {
+    const calories = parseInt(userTargets?.calories_per_day) || 0;
+    const weight = parseFloat(selectedClient?.weight_kg) || 0;
+    
+    if (calories <= 0) return;
+
+    let newMacros = { ...macroInputs };
+    let targetPercentage = 0;
+    let targetGrams = 0;
+    let targetGramsPerKg = 0;
+    
+    // Calculate target percentage based on input type
+    if (inputType === 'percentage') {
+      targetPercentage = Math.max(0, Math.min(100, value));
+      targetGrams = Math.round((targetPercentage / 100) * calories / (macroType === 'fat' ? 9 : 4));
+      targetGramsPerKg = weight > 0 ? Math.round((targetGrams / weight) * 1000) / 1000 : 0;
+    } else if (inputType === 'grams') {
+      targetGrams = Math.round(value);
+      targetPercentage = calories > 0 ? (targetGrams * (macroType === 'fat' ? 9 : 4) / calories) * 100 : 0;
+      targetGramsPerKg = weight > 0 ? Math.round((targetGrams / weight) * 1000) / 1000 : 0;
+    } else if (inputType === 'gramsPerKg') {
+      // Use the direct input value for gramsPerKg to avoid recalculation issues
+      targetGramsPerKg = Math.round(value * 1000) / 1000; // Round to 3 decimal places
+      targetGrams = weight > 0 ? Math.round(targetGramsPerKg * weight) : 0;
+      targetPercentage = calories > 0 ? (targetGrams * (macroType === 'fat' ? 9 : 4) / calories) * 100 : 0;
+    }
+    
+    // Update the target macro
+    newMacros[macroType] = {
+      percentage: Math.round(targetPercentage * 1000) / 1000, // Allow 3 decimal places
+      grams: targetGrams,
+      gramsPerKg: targetGramsPerKg
+    };
+    
+    // Simple proportional rebalancing: distribute remaining percentage among other unlocked macros
+    const otherMacros = ['protein', 'carbs', 'fat'].filter(key => key !== macroType);
+    const unlockedOtherMacros = otherMacros.filter(key => !lockedMacros[key]);
+    const lockedOtherMacros = otherMacros.filter(key => lockedMacros[key]);
+    
+    // Calculate locked percentage total
+    const lockedTotal = lockedOtherMacros.reduce((sum, key) => sum + (newMacros[key]?.percentage || 0), 0);
+    
+    // Calculate available percentage for unlocked macros
+    const availableForUnlocked = 100 - targetPercentage - lockedTotal;
+    
+    // Check if we have enough space
+    if (availableForUnlocked < 0) {
+      console.warn(`Cannot maintain 100% total. Locked: ${lockedTotal.toFixed(1)}%, Target: ${targetPercentage.toFixed(1)}%`);
+      return;
+    }
+    
+    // Distribute available percentage among unlocked macros proportionally
+    if (unlockedOtherMacros.length > 0) {
+      const currentUnlockedTotal = unlockedOtherMacros.reduce((sum, key) => sum + (newMacros[key]?.percentage || 0), 0);
+      
+      if (currentUnlockedTotal > 0) {
+        // Scale proportionally
+        const scaleFactor = availableForUnlocked / currentUnlockedTotal;
+        
+        unlockedOtherMacros.forEach(key => {
+          const newPercentage = Math.max(0, (newMacros[key]?.percentage || 0) * scaleFactor);
+          const newGrams = Math.round((newPercentage / 100) * calories / (key === 'fat' ? 9 : 4));
+          
+          newMacros[key] = {
+            percentage: Math.round(newPercentage * 1000) / 1000, // Allow 3 decimal places
+            grams: newGrams,
+            gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 1000) / 1000 : 0 // Allow 3 decimal places
+          };
+        });
+      } else {
+        // All unlocked macros are at 0%, distribute equally
+        const percentagePerMacro = availableForUnlocked / unlockedOtherMacros.length;
+        
+        unlockedOtherMacros.forEach(key => {
+          const newGrams = Math.round((percentagePerMacro / 100) * calories / (key === 'fat' ? 9 : 4));
+          
+          newMacros[key] = {
+            percentage: Math.round(percentagePerMacro * 1000) / 1000, // Allow 3 decimal places
+            grams: newGrams,
+            gramsPerKg: weight > 0 ? Math.round((newGrams / weight) * 1000) / 1000 : 0 // Allow 3 decimal places
+          };
+        });
+      }
+    }
+    
+    // Final adjustment to ensure total is exactly 100%
+    const currentTotal = newMacros.protein.percentage + newMacros.carbs.percentage + newMacros.fat.percentage;
+    const difference = 100 - currentTotal;
+    
+    if (Math.abs(difference) > 0.01 && unlockedOtherMacros.length > 0) {
+      // Adjust the largest unlocked macro to fix rounding
+      const largestUnlocked = unlockedOtherMacros.reduce((largest, current) => 
+        (newMacros[current]?.percentage || 0) > (newMacros[largest]?.percentage || 0) ? current : largest
+      );
+      
+      const adjustedPercentage = (newMacros[largestUnlocked]?.percentage || 0) + difference;
+      const adjustedGrams = Math.round((adjustedPercentage / 100) * calories / (largestUnlocked === 'fat' ? 9 : 4));
+      
+      newMacros[largestUnlocked] = {
+        percentage: Math.round(adjustedPercentage * 1000) / 1000, // Allow 3 decimal places
+        grams: adjustedGrams,
+        gramsPerKg: weight > 0 ? Math.round((adjustedGrams / weight) * 1000) / 1000 : 0 // Allow 3 decimal places
+      };
+    }
+
+    setMacroInputs(newMacros);
+    
+    // Update previous distribution for smart rebalancing
+    const totalPercentage = newMacros.protein.percentage + newMacros.carbs.percentage + newMacros.fat.percentage;
+    if (Math.abs(totalPercentage - 100) < 0.5) {
+      setPreviousMacroDistribution({
+        protein: newMacros.protein.percentage,
+        carbs: newMacros.carbs.percentage,
+        fat: newMacros.fat.percentage
+      });
+    }
+  };
+
+  // Auto-calculate initial macros when userTargets change
+  useEffect(() => {
+    const calories = parseInt(userTargets?.calories_per_day) || 0;
+    if (calories > 0) {
+      // Check if macros are empty or significantly incorrect (less than 10% of expected values)
+      const expectedProtein = Math.round((0.30 * calories) / 4);
+      const expectedCarbs = Math.round((0.40 * calories) / 4);
+      const expectedFat = Math.round((0.30 * calories) / 9);
+      
+      const isEmpty = (!macroInputs.protein.grams && !macroInputs.carbs.grams && !macroInputs.fat.grams);
+      const isIncorrect = (
+        macroInputs.protein.grams < expectedProtein * 0.1 ||
+        macroInputs.carbs.grams < expectedCarbs * 0.1 ||
+        macroInputs.fat.grams < expectedFat * 0.1
+      );
+      
+      if (isEmpty || isIncorrect) {
+        // Default distribution: 30% protein, 40% carbs, 30% fat (total: 100%)
+        const defaultMacros = {
+          protein: { 
+            percentage: 30, 
+            grams: expectedProtein, 
+            gramsPerKg: 0 
+          },
+          carbs: { 
+            percentage: 40, 
+            grams: expectedCarbs, 
+            gramsPerKg: 0 
+          },
+          fat: { 
+            percentage: 30, 
+            grams: expectedFat, 
+            gramsPerKg: 0 
+          }
+        };
+        
+        // Calculate grams per kg if weight is available
+        const weight = parseFloat(selectedClient?.weight_kg) || 0;
+        if (weight > 0) {
+          defaultMacros.protein.gramsPerKg = Math.round((defaultMacros.protein.grams / weight) * 1000) / 1000;
+          defaultMacros.carbs.gramsPerKg = Math.round((defaultMacros.carbs.grams / weight) * 1000) / 1000;
+          defaultMacros.fat.gramsPerKg = Math.round((defaultMacros.fat.grams / weight) * 1000) / 1000;
+        }
+        
+        setMacroInputs(defaultMacros);
+        
+        // Set previous distribution for smart rebalancing
+        setPreviousMacroDistribution({
+          protein: defaultMacros.protein.percentage,
+          carbs: defaultMacros.carbs.percentage,
+          fat: defaultMacros.fat.percentage
+        });
+      }
+    }
+  }, [userTargets?.calories_per_day, selectedClient?.weight_kg]);
+
+  // Initialize macros when component loads with existing userTargets
+  useEffect(() => {
+    if (userTargets?.calories_per_day && macroInputs.protein.grams === 0 && macroInputs.carbs.grams === 0 && macroInputs.fat.grams === 0) {
+      const calories = parseInt(userTargets.calories_per_day) || 0;
+      if (calories > 0) {
+        const defaultMacros = {
+          protein: { 
+            percentage: 30, 
+            grams: Math.round((0.30 * calories) / 4), 
+            gramsPerKg: 0 
+          },
+          carbs: { 
+            percentage: 40, 
+            grams: Math.round((0.40 * calories) / 4), 
+            gramsPerKg: 0 
+          },
+          fat: { 
+            percentage: 30, 
+            grams: Math.round((0.30 * calories) / 9), 
+            gramsPerKg: 0 
+          }
+        };
+        
+        // Calculate grams per kg if weight is available
+        const weight = parseFloat(selectedClient?.weight_kg) || 0;
+        if (weight > 0) {
+          defaultMacros.protein.gramsPerKg = Math.round((defaultMacros.protein.grams / weight) * 1000) / 1000;
+          defaultMacros.carbs.gramsPerKg = Math.round((defaultMacros.carbs.grams / weight) * 1000) / 1000;
+          defaultMacros.fat.gramsPerKg = Math.round((defaultMacros.fat.grams / weight) * 1000) / 1000;
+        }
+        
+        setMacroInputs(defaultMacros);
+        
+        // Set previous distribution for smart rebalancing
+        setPreviousMacroDistribution({
+          protein: defaultMacros.protein.percentage,
+          carbs: defaultMacros.carbs.percentage,
+          fat: defaultMacros.fat.percentage
+        });
+      }
+    }
+  }, []); // Run once on component mount
+
+  // Recalculate macros when daily calories change
+  useEffect(() => {
+    const calories = parseInt(userTargets?.calories_per_day) || 0;
+    if (calories > 0 && macroInputs.protein.grams > 0) {
+      // Get current percentages
+      const currentPercentages = {
+        protein: macroInputs.protein.percentage,
+        carbs: macroInputs.carbs.percentage,
+        fat: macroInputs.fat.percentage
+      };
+      
+      // If we have existing percentages, recalculate grams based on new calories
+      if (currentPercentages.protein > 0 || currentPercentages.carbs > 0 || currentPercentages.fat > 0) {
+        const weight = parseFloat(selectedClient?.weight_kg) || 0;
+        const updatedMacros = {
+          protein: {
+            percentage: currentPercentages.protein,
+            grams: Math.round(((currentPercentages.protein / 100) * calories) / 4),
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.protein / 100) * calories) / 4) / weight * 1000) / 1000 : 0
+          },
+          carbs: {
+            percentage: currentPercentages.carbs,
+            grams: Math.round(((currentPercentages.carbs / 100) * calories) / 4),
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.carbs / 100) * calories) / 4) / weight * 1000) / 1000 : 0
+          },
+          fat: {
+            percentage: currentPercentages.fat,
+            grams: Math.round(((currentPercentages.fat / 100) * calories) / 9),
+            gramsPerKg: weight > 0 ? Math.round((((currentPercentages.fat / 100) * calories) / 9) / weight * 1000) / 1000 : 0
+          }
+        };
+        
+        setMacroInputs(updatedMacros);
+        
+        // Update previous distribution for smart rebalancing
+        setPreviousMacroDistribution({
+          protein: updatedMacros.protein.percentage,
+          carbs: updatedMacros.carbs.percentage,
+          fat: updatedMacros.fat.percentage
+        });
+      }
+    }
+  }, [userTargets?.calories_per_day]);
 
   
 
@@ -3595,15 +3916,15 @@ const MenuCreate = () => {
 
   useEffect(() => {
 
-    if (userTargets?.calories) {
+    if (userTargets?.calories_per_day || userTargets?.calories) {
 
-      const updatedMealStructure = calculateMealCalories(mealPlanStructure, userTargets.calories);
+      const updatedMealStructure = calculateMealCalories(mealPlanStructure, userTargets.calories_per_day || userTargets.calories);
 
       setMealPlanStructure(updatedMealStructure);
 
     }
 
-  }, [userTargets?.calories]);
+  }, [userTargets?.calories_per_day, userTargets?.calories]);
 
 
 
@@ -5816,13 +6137,15 @@ const MenuCreate = () => {
 
         calories: userData.base_daily_total_calories || 2000,
 
+        calories_per_day: userData.daily_target_total_calories || 2000, // Use daily_target_total_calories for Daily Target Calories UI
+
         macros: {
 
-          protein: parseFloat(parsedMacros?.protein?.replace('g', '') || '150'),
+          protein: parseFloat((parsedMacros?.protein?.toString() || '150').replace('g', '')),
 
-          fat: parseFloat(parsedMacros?.fat?.replace('g', '') || '80'),
+          fat: parseFloat((parsedMacros?.fat?.toString() || '80').replace('g', '')),
 
-          carbs: parseFloat(parsedMacros?.carbs?.replace('g', '') || '250')
+          carbs: parseFloat((parsedMacros?.carbs?.toString() || '250').replace('g', ''))
 
         },
 
@@ -6382,7 +6705,7 @@ const MenuCreate = () => {
 
     const updatedStructure = mealPlanStructure.filter((_, i) => i !== index);
 
-    const totalCalories = userTargets?.calories || 0;
+    const totalCalories = userTargets?.calories_per_day || userTargets?.calories || 0;
 
     
 
@@ -6580,7 +6903,7 @@ const MenuCreate = () => {
 
     if (field === 'calories') {
 
-      const totalCalories = userTargets?.calories || 0;
+      const totalCalories = userTargets?.calories_per_day || userTargets?.calories || 0;
 
       updatedStructure[index].calories = parseInt(value) || 0;
 
@@ -6628,7 +6951,7 @@ const MenuCreate = () => {
 
     const numericValue = parseInt(value) || 0;
 
-    const dailyTotal = userTargets?.calories || 0;
+    const dailyTotal = userTargets?.calories_per_day || userTargets?.calories || 0;
 
     
 
@@ -6708,7 +7031,7 @@ const MenuCreate = () => {
 
     const numericValue = parseInt(tempValue) || 0;
 
-    const dailyTotal = userTargets?.calories || 0;
+    const dailyTotal = userTargets?.calories_per_day || userTargets?.calories || 0;
 
     
 
@@ -10890,7 +11213,473 @@ const MenuCreate = () => {
 
       )}
 
+      {/* Daily Calories and Macros Section */}
+      {selectedClient && userTargets && (
+        <Card className="border-green-200 bg-green-50/30 mb-6">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-green-800">
+                <span>🎯</span>
+                <CardTitle>{translations.dailyTargetsAndMacros || 'Daily Targets & Macros'}</CardTitle>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsDailyTargetsMinimized(!isDailyTargetsMinimized)}
+                className="text-green-600 hover:bg-green-100"
+                title={isDailyTargetsMinimized ? "Expand Daily Targets & Macros" : "Minimize Daily Targets & Macros"}
+              >
+                {isDailyTargetsMinimized ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+              </Button>
+            </div>
+            <CardDescription className="text-green-600">
+              {translations.dailyTargetsDescription || 'Set daily calorie targets and macronutrient distribution'}
+            </CardDescription>
+          </CardHeader>
+          {!isDailyTargetsMinimized && (
+            <CardContent>
+            <div className="space-y-6">
+              {/* Daily Target Calories */}
+              <div className="space-y-2">
+                <Label htmlFor="daily_target_calories" className="text-sm font-medium text-gray-700">
+                  {translations.dailyTargetCalories || 'Daily Target Calories'}
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="daily_target_calories"
+                    type="number"
+                    value={userTargets?.calories_per_day || ''}
+                    onChange={(e) => {
+                      const newValue = e.target.value;
+                      setUserTargets(prev => ({
+                        ...prev,
+                        calories_per_day: newValue
+                      }));
+                    }}
+                    className="border-gray-300 focus:border-green-500 focus:ring-green-200"
+                    placeholder="2000"
+                  />
+                  {/* Show original DB value if different from current */}
+                  {selectedClient?.daily_target_total_calories && 
+                   selectedClient.daily_target_total_calories !== userTargets?.calories_per_day && (
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                      <div className="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded border">
+                        DB: {selectedClient.daily_target_total_calories}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500">
+                  {translations.dailyTargetDescription || 'Total daily calorie target for the client'}
+                  {selectedClient?.daily_target_total_calories && 
+                   selectedClient.daily_target_total_calories !== userTargets?.calories_per_day && (
+                    <span className="text-blue-600 ml-2">
+                      • Original: {selectedClient.daily_target_total_calories} kcal
+                    </span>
+                  )}
+                </p>
+              </div>
 
+              {/* Macro Distribution */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-base font-medium text-gray-800">
+                      {translations.macroDistribution || 'Macro Distribution'}
+                    </Label>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {translations.macrosDescription || 'Set macronutrient targets'}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setLockedMacros({
+                          protein: true,
+                          carbs: true,
+                          fat: true
+                        });
+                      }}
+                      className="text-orange-600 border-orange-300 hover:bg-orange-50 text-xs"
+                      title={translations.lockAllMacrosTooltip || 'Lock all macros'}
+                    >
+                      🔒 {translations.lockAll || 'Lock All'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setLockedMacros({
+                          protein: false,
+                          carbs: false,
+                          fat: false
+                        });
+                      }}
+                      className="text-green-600 border-green-300 hover:bg-green-50 text-xs"
+                      title={translations.unlockAllMacrosTooltip || 'Unlock all macros'}
+                    >
+                      🔓 {translations.unlockAll || 'Unlock All'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const calories = parseInt(userTargets?.calories_per_day) || 0;
+                        if (calories > 0) {
+                          const weight = parseFloat(selectedClient?.weight_kg) || 0;
+                          const defaultMacros = {
+                            protein: { 
+                              percentage: 30, 
+                              grams: Math.round((0.30 * calories) / 4), 
+                              gramsPerKg: weight > 0 ? Math.round((Math.round((0.30 * calories) / 4) / weight) * 1000) / 1000 : 0
+                            },
+                            carbs: { 
+                              percentage: 40, 
+                              grams: Math.round((0.40 * calories) / 4), 
+                              gramsPerKg: weight > 0 ? Math.round((Math.round((0.40 * calories) / 4) / weight) * 1000) / 1000 : 0
+                            },
+                            fat: { 
+                              percentage: 30, 
+                              grams: Math.round((0.30 * calories) / 9), 
+                              gramsPerKg: weight > 0 ? Math.round((Math.round((0.30 * calories) / 9) / weight) * 1000) / 1000 : 0
+                            }
+                          };
+                          setMacroInputs(defaultMacros);
+                          setPreviousMacroDistribution({
+                            protein: defaultMacros.protein.percentage,
+                            carbs: defaultMacros.carbs.percentage,
+                            fat: defaultMacros.fat.percentage
+                          });
+                        }
+                      }}
+                      className="text-blue-600 border-blue-300 hover:bg-blue-50 text-xs"
+                      disabled={!userTargets?.calories_per_day}
+                    >
+                      🔄 {translations.resetToDefault || 'Reset to Default (30/40/30)'}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Macro Input Rows */}
+                <div className="space-y-3">
+                  {(() => {
+                    const dailyCalories = parseInt(userTargets?.calories_per_day) || 0;
+                    const maxProteinGrams = dailyCalories > 0 ? Math.ceil(dailyCalories / 4) : 300;
+                    const maxCarbsGrams = dailyCalories > 0 ? Math.ceil(dailyCalories / 4) : 400;
+                    const maxFatGrams = dailyCalories > 0 ? Math.ceil(dailyCalories / 9) : 150;
+                    const maxProtein = Math.min(maxProteinGrams, 500);
+                    const maxCarbs = Math.min(maxCarbsGrams, 800);
+                    const maxFat = Math.min(maxFatGrams, 200);
+                    
+                    const macroConfig = [
+                      { key: 'protein', label: translations.protein || 'Protein', color: 'blue', maxGrams: maxProtein, icon: '💪' },
+                      { key: 'carbs', label: translations.carbs || 'Carbs', color: 'purple', maxGrams: maxCarbs, icon: '🍞' },
+                      { key: 'fat', label: translations.fat || 'Fat', color: 'teal', maxGrams: maxFat, icon: '🥑' }
+                    ];
+                    
+                    return macroConfig.map(macro => (
+                      <div key={macro.key} className="border border-gray-200 rounded-lg p-4 bg-gradient-to-r from-gray-50 to-white hover:shadow-sm transition-shadow">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">{macro.icon}</span>
+                            <Label className="text-sm font-medium text-gray-700 capitalize">{macro.label}</Label>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="text-sm text-gray-600 bg-white px-2 py-1 rounded border">
+                              {macroInputs[macro.key].grams}g
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => toggleMacroLock(macro.key)}
+                              className={`p-1 h-6 w-6 transition-colors ${
+                                lockedMacros[macro.key] 
+                                  ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-100' 
+                                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                              }`}
+                              title={lockedMacros[macro.key] ? 'Unlock macro' : 'Lock macro'}
+                            >
+                              {lockedMacros[macro.key] ? '🔒' : '🔓'}
+                            </Button>
+                          </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-4 gap-3 items-center">
+                          {/* Percentage Input */}
+                          <div className="space-y-1">
+                            <Label className="text-xs text-gray-600 flex items-center gap-1">
+                              % {lockedMacros[macro.key] && <span className="text-blue-600">🔒</span>}
+                            </Label>
+                            <Input
+                              type="number"
+                              value={macroInputs[macro.key].percentage}
+                              onChange={(e) => calculateMacrosFromInputs('percentage', parseFloat(e.target.value) || 0, macro.key)}
+                              className={`text-xs h-8 ${
+                                macroInputs[macro.key].percentage < 0 || macroInputs[macro.key].percentage > 100
+                                  ? 'border-red-300 bg-red-50' 
+                                  : lockedMacros[macro.key]
+                                  ? 'border-blue-300 bg-blue-50 cursor-not-allowed'
+                                  : 'border-gray-300 focus:border-blue-500 focus:ring-blue-200'
+                              }`}
+                              min="0"
+                              max="100"
+                              step="0.001"
+                              placeholder="0"
+                              disabled={lockedMacros[macro.key]}
+                            />
+                          </div>
+                          
+                          {/* Grams Input */}
+                          <div className="space-y-1">
+                            <Label className="text-xs text-gray-600">{translations.grams || 'Grams'}</Label>
+                            <Input
+                              type="number"
+                              value={macroInputs[macro.key].grams}
+                              onChange={(e) => calculateMacrosFromInputs('grams', parseFloat(e.target.value) || 0, macro.key)}
+                              className="text-xs h-8 border-gray-300 focus:border-blue-500 focus:ring-blue-200"
+                              min="0"
+                              max={macro.maxGrams}
+                            />
+                          </div>
+                          
+                          {/* Grams per Kg Input */}
+                          <div className="space-y-1">
+                            <Label className="text-xs text-gray-600">g/kg</Label>
+                            <Input
+                              type="number"
+                              value={macroInputs[macro.key].gramsPerKg}
+                              onChange={(e) => calculateMacrosFromInputs('gramsPerKg', parseFloat(e.target.value) || 0, macro.key)}
+                              className="text-xs h-8 border-gray-300 focus:border-blue-500 focus:ring-blue-200"
+                              min="0"
+                              step="0.001"
+                            />
+                          </div>
+                          
+                          {/* Slider */}
+                          <div className="flex-1 space-y-1">
+                            <Slider
+                              min={0}
+                              max={macro.maxGrams}
+                              step={1}
+                              value={[macroInputs[macro.key].grams]}
+                              onValueChange={([val]) => calculateMacrosFromInputs('grams', val, macro.key)}
+                              className={`[&>span]:bg-${macro.color}-500`}
+                            />
+                            <div className="text-xs text-gray-500 text-center">
+                              0 - {macro.maxGrams}g
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+
+                {/* Macro Summary */}
+                <div className={`border-2 rounded-xl p-6 ${
+                  validateMacroPercentages().isCaloriesNotSet
+                    ? 'bg-gradient-to-r from-gray-50 to-slate-50 border-gray-200'
+                    : validateMacroPercentages().isValid 
+                      ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200' 
+                      : 'bg-gradient-to-r from-red-50 to-pink-50 border-red-200'
+                }`}>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                      validateMacroPercentages().isCaloriesNotSet
+                        ? 'bg-gray-500 text-white' 
+                        : validateMacroPercentages().isValid 
+                          ? 'bg-green-500 text-white' 
+                          : 'bg-red-500 text-white'
+                    }`}>
+                      {validateMacroPercentages().isCaloriesNotSet ? '⏳' : validateMacroPercentages().isValid ? '✓' : '⚠️'}
+                    </div>
+                    <div>
+                      <h4 className={`font-semibold ${
+                        validateMacroPercentages().isCaloriesNotSet
+                          ? 'text-gray-800' 
+                          : validateMacroPercentages().isValid ? 'text-green-800' : 'text-red-800'
+                      }`}>
+                        {validateMacroPercentages().isCaloriesNotSet 
+                          ? translations.caloriesNotSet || 'Daily calories not set yet' 
+                          : validateMacroPercentages().isValid 
+                            ? translations.macrosPerfectlyBalanced || 'Macros are perfectly balanced!' 
+                            : translations.macroBalanceNeedsAttention || 'Macro balance needs attention'
+                        }
+                      </h4>
+                      <p className={`text-sm ${
+                        validateMacroPercentages().isCaloriesNotSet
+                          ? 'text-gray-600' 
+                          : validateMacroPercentages().isValid ? 'text-green-600' : 'text-red-600'
+                      }`}>
+                        {validateMacroPercentages().isCaloriesNotSet 
+                          ? translations.setCaloriesFirst || 'Set daily calories first to configure macro percentages' 
+                          : validateMacroPercentages().isValid 
+                            ? translations.macrosReadyToGo || 'Your nutrition targets are ready to go!' 
+                            : validateMacroPercentages().warning
+                        }
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4 mt-4">
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-blue-600">{macroInputs.protein.percentage.toFixed(1)}%</div>
+                      <div className="text-xs text-gray-600">{translations.protein || 'Protein'}</div>
+                      <div className="text-xs text-gray-500">{macroInputs.protein.grams}g</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-purple-600">{macroInputs.carbs.percentage.toFixed(1)}%</div>
+                      <div className="text-xs text-gray-600">{translations.carbs || 'Carbs'}</div>
+                      <div className="text-xs text-gray-500">{macroInputs.carbs.grams}g</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-teal-600">{macroInputs.fat.percentage.toFixed(1)}%</div>
+                      <div className="text-xs text-gray-600">{translations.fat || 'Fat'}</div>
+                      <div className="text-xs text-gray-500">{macroInputs.fat.grams}g</div>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-gray-300">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">{translations.totalPercentage || 'Total Percentage'}:</span>
+                      <span className={`font-semibold ${
+                        validateMacroPercentages().isValid ? 'text-green-600' : 'text-red-600'
+                      }`}>
+                        {calculateTotals().totalPercentage.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm mt-1">
+                      <span className="text-gray-600">{translations.totalCaloriesFromMacros || 'Total Calories from Macros'}:</span>
+                      <span className="font-semibold text-gray-800">{calculateTotals().totalCalories} kcal</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="flex justify-between items-center pt-4 border-t border-gray-200">
+                {/* Show unsaved changes indicator */}
+                {(() => {
+                  const hasCalorieChanges = selectedClient?.daily_target_total_calories && 
+                    selectedClient.daily_target_total_calories !== userTargets?.calories_per_day;
+                  
+                  const hasMacroChanges = selectedClient?.macros && (
+                    selectedClient.macros.protein !== macroInputs.protein.grams ||
+                    selectedClient.macros.carbs !== macroInputs.carbs.grams ||
+                    selectedClient.macros.fat !== macroInputs.fat.grams
+                  );
+                  
+                  const hasChanges = hasCalorieChanges || hasMacroChanges;
+                  
+                  return hasChanges ? (
+                    <div className="flex items-center gap-2 text-amber-600">
+                      <div className="w-2 h-2 bg-amber-500 rounded-full"></div>
+                      <span className="text-sm font-medium">
+                        {translations.unsavedChanges || 'Unsaved changes'}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-green-600">
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span className="text-sm font-medium">
+                        {translations.allChangesSaved || 'All changes saved'}
+                      </span>
+                    </div>
+                  );
+                })()}
+                
+                <Button
+                  onClick={async () => {
+                    try {
+                      setSaving(true);
+                      
+                      // Prepare the data to save
+                      const saveData = {
+                        daily_target_total_calories: parseInt(userTargets?.calories_per_day) || 0,
+                        macros: {
+                          protein: macroInputs.protein.grams,
+                          carbs: macroInputs.carbs.grams,
+                          fat: macroInputs.fat.grams
+                        },
+                        meal_plan_structure: mealPlanStructure.map(meal => ({
+                          meal: meal.meal,
+                          description: meal.description,
+                          calories: meal.calories,
+                          calories_pct: meal.calories_pct
+                        }))
+                      };
+
+                      console.log('💾 Saving nutrition targets and meal plan structure:', saveData);
+
+                      // Update the client in the database
+                      const { error } = await supabase
+                        .from('chat_users')
+                        .update({
+                          daily_target_total_calories: saveData.daily_target_total_calories,
+                          macros: saveData.macros,
+                          meal_plan_structure: saveData.meal_plan_structure
+                        })
+                        .eq('user_code', selectedClient.user_code);
+
+                      if (error) {
+                        console.error('❌ Error saving nutrition targets:', error);
+                        setError('Failed to save nutrition targets: ' + error.message);
+                        return;
+                      }
+
+                      console.log('✅ Nutrition targets and meal plan structure saved successfully');
+                      
+                      // Update the selectedClient to reflect the saved values
+                      // This will hide the "DB: original value" indicators
+                      if (window.updateClientContext) {
+                        window.updateClientContext({
+                          ...selectedClient,
+                          daily_target_total_calories: saveData.daily_target_total_calories,
+                          macros: saveData.macros,
+                          meal_plan_structure: saveData.meal_plan_structure
+                        });
+                      }
+
+                      // Update the saved meal plan structure to reflect the changes
+                      setSavedMealPlanStructure(saveData.meal_plan_structure);
+                      setHasUnsavedMealPlanChanges(false);
+
+                      // Show success message (you could add a toast notification here)
+                      alert('Nutrition targets and meal plan structure saved successfully!');
+                      
+                    } catch (err) {
+                      console.error('❌ Error saving nutrition targets:', err);
+                      setError('Failed to save nutrition targets: ' + err.message);
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                  disabled={saving || !selectedClient}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  {saving ? (
+                    <>
+                      <Loader className="animate-spin h-4 w-4 mr-2" />
+                      {translations.saving || 'Saving...'}
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4 mr-2" />
+                      {translations.saveNutritionTargets || 'Save Nutrition Targets'}
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+            </CardContent>
+          )}
+        </Card>
+      )}
 
       {/* Meal Plan Structure Section */}
 
@@ -11292,7 +12081,7 @@ const MenuCreate = () => {
 
                       <span className="font-medium">
 
-                        {mealPlanStructure.reduce((sum, meal) => sum + (meal.calories || 0), 0)} / {userTargets?.calories || 0}
+                        {mealPlanStructure.reduce((sum, meal) => sum + (meal.calories || 0), 0)} / {userTargets?.calories_per_day || userTargets?.calories || 0}
 
                       </span>
 
@@ -11328,7 +12117,7 @@ const MenuCreate = () => {
 
                       <span className="font-medium text-purple-600">
 
-                        {Math.max(0, (userTargets?.calories || 0) - mealPlanStructure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0))} kcal
+                        {Math.max(0, (userTargets?.calories_per_day || userTargets?.calories || 0) - mealPlanStructure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0))} kcal
 
                       </span>
 
@@ -11340,7 +12129,7 @@ const MenuCreate = () => {
 
                       <span className="font-medium text-orange-600">
 
-                        {Math.max(0, (userTargets?.calories || 0) - mealPlanStructure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0))} kcal
+                        {Math.max(0, (userTargets?.calories_per_day || userTargets?.calories || 0) - mealPlanStructure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0))} kcal
 
                       </span>
 
@@ -11420,6 +12209,26 @@ const MenuCreate = () => {
 
                 type="button"
 
+                variant="ghost"
+
+                size="sm"
+
+                onClick={() => setIsRecommendationsMinimized(!isRecommendationsMinimized)}
+
+                className="text-purple-600 hover:bg-purple-100"
+
+                title={isRecommendationsMinimized ? "Expand Recommendations" : "Minimize Recommendations"}
+
+              >
+
+                {isRecommendationsMinimized ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+
+              </Button>
+
+              <Button
+
+                type="button"
+
                 variant="outline"
 
                 size="sm"
@@ -11445,6 +12254,8 @@ const MenuCreate = () => {
             </CardDescription>
 
           </CardHeader>
+
+          {!isRecommendationsMinimized && (
 
           <CardContent>
 
@@ -11798,6 +12609,8 @@ const MenuCreate = () => {
 
           </CardContent>
 
+          )}
+
         </Card>
 
       )}
@@ -11854,7 +12667,7 @@ const MenuCreate = () => {
 
                     <p className="text-2xl font-bold text-blue-700">
 
-                      {userTargets.calories}
+                      {selectedClient?.daily_target_total_calories || userTargets?.calories_per_day || userTargets?.calories}
 
                       <span className="text-sm font-normal text-blue-600 ml-1">{translations.calories || 'kcal'}</span>
 
@@ -12152,7 +12965,7 @@ const MenuCreate = () => {
 
                             <span className="text-sm text-blue-600">{translations.target || 'Target'}:</span>
 
-                            <span className="font-bold text-blue-700">{userTargets.calories}</span>
+                            <span className="font-bold text-blue-700">{selectedClient?.daily_target_total_calories || userTargets?.calories_per_day || userTargets?.calories}</span>
 
                           </div>
 
@@ -12168,7 +12981,7 @@ const MenuCreate = () => {
 
                             <span className="text-xs text-gray-500">{translations.difference || 'Difference'}:</span>
 
-                            <span className={`text-sm font-medium ${Math.abs(menu.totals.calories - userTargets.calories) <= userTargets.calories * 0.05
+                            <span className={`text-sm font-medium ${Math.abs(menu.totals.calories - (selectedClient?.daily_target_total_calories || userTargets?.calories_per_day || userTargets?.calories)) <= (selectedClient?.daily_target_total_calories || userTargets?.calories_per_day || userTargets?.calories) * 0.05
 
                                 ? 'text-green-600'
 
@@ -12176,7 +12989,7 @@ const MenuCreate = () => {
 
                               }`}>
 
-                              {`${menu.totals.calories - userTargets.calories > 0 ? '+' : ''}${((menu.totals.calories - userTargets.calories) / userTargets.calories * 100)
+                              {`${menu.totals.calories - (selectedClient?.daily_target_total_calories || userTargets?.calories_per_day || userTargets?.calories) > 0 ? '+' : ''}${((menu.totals.calories - (selectedClient?.daily_target_total_calories || userTargets?.calories_per_day || userTargets?.calories)) / (selectedClient?.daily_target_total_calories || userTargets?.calories_per_day || userTargets?.calories) * 100)
 
                                   .toFixed(1)
 
@@ -12376,7 +13189,7 @@ const MenuCreate = () => {
 
                             // Calculate percentage differences for each metric
 
-                            const caloriesDiff = Math.abs((menu.totals.calories - userTargets.calories) / userTargets.calories * 100);
+                            const caloriesDiff = Math.abs((menu.totals.calories - (selectedClient?.daily_target_total_calories || userTargets?.calories_per_day || userTargets?.calories)) / (selectedClient?.daily_target_total_calories || userTargets?.calories_per_day || userTargets?.calories) * 100);
 
                             const proteinDiff = Math.abs((menu.totals.protein - userTargets.macros.protein) / userTargets.macros.protein * 100);
 

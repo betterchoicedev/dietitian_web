@@ -14,8 +14,6 @@
   - Reset weekly counters automatically at start of each week
   - Add consumption data to meal plan recommendations
 
-
-
 ### 6. Fix Ingredient Changes After Generating Alternative Meal
 - **Files**: `src/pages/MenuCreate.jsx`
 - **Issue**: When generating alternative meals, ingredient changes are not properly handled or saved
@@ -58,7 +56,7 @@
 ### 9. Separate BMR and Daily Target Calories in Client Profile
 - **Files**: `src/pages/Users.jsx`, `src/contexts/LanguageContext.jsx`, `backend/backend.py`
 - **Issue**: Need to separate BMR (Basal Metabolic Rate) from Daily Target Calories for better clarity and data tracking
-- **Status**: In Progress
+- **Status**: Fixed
 - **Implementation**:
   - ✅ Add `daily_target_total_calories` field to formData state
   - ✅ Modify `calculateHarrisBenedict()` to return both BMR and daily target

@@ -189,13 +189,9 @@ export default function Chat() {
               chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
               setHasNewMessages(false); // Clear flag since we're scrolling to new messages
             } else {
-              // User was scrolling up, preserve their position
+              // User was scrolling up, don't adjust scroll position at all
+              // Just show the new message indicator
               console.log('🔄 Preserving scroll position, user was not at bottom');
-              if (viewport) {
-                const newScrollHeight = viewport.scrollHeight;
-                const heightDifference = newScrollHeight - prevScrollHeight;
-                viewport.scrollTop = prevScrollTop + heightDifference;
-              }
               setHasNewMessages(true); // Set flag to show new message indicator
             }
           }, 0);
@@ -491,13 +487,8 @@ export default function Chat() {
           console.log('🔄 Manual refresh: Auto-scrolling to bottom for new messages');
           chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
         } else {
-          // User was scrolling up, preserve their position
+          // User was scrolling up, don't adjust scroll position at all
           console.log('🔄 Manual refresh: Preserving scroll position, user was not at bottom');
-          if (viewport) {
-            const newScrollHeight = viewport.scrollHeight;
-            const heightDifference = newScrollHeight - prevScrollHeight;
-            viewport.scrollTop = prevScrollTop + heightDifference;
-          }
         }
       }, 0);
       
@@ -1170,7 +1161,11 @@ Your task is to respond to the user's message below, taking into account their s
     const scrollArea = scrollAreaRef.current;
     if (!scrollArea) return;
     
-    const { scrollTop, scrollHeight, clientHeight } = scrollArea;
+    // Find the viewport element within ScrollArea
+    const viewport = scrollArea.querySelector('[data-radix-scroll-area-viewport]');
+    if (!viewport) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = viewport;
     const scrollBottom = scrollHeight - clientHeight;
     const distanceFromBottom = scrollBottom - scrollTop;
     
@@ -1186,6 +1181,12 @@ Your task is to respond to the user's message below, taking into account their s
     } else if (scrollTop <= 50) {
       setUserScrollPosition('top');
       console.log('📍 User scrolled to top');
+      
+      // Auto-load more messages when reaching the top
+      if (hasMoreMessages && !isLoadingMore && conversationId && firstMessageId) {
+        console.log('🔄 Auto-loading more messages at top...');
+        handleLoadMore();
+      }
     } else {
       setUserScrollPosition('middle');
       console.log('📍 User scrolled to middle, distance from bottom:', distanceFromBottom);
@@ -1337,19 +1338,19 @@ Your task is to respond to the user's message below, taking into account their s
                         {dietitianName}
                       </span>
                     </div>
-                    <div className="whitespace-pre-wrap text-slate-800 leading-tight pl-8 border-l-2 border-emerald-200 text-xs">
+                    <div className="whitespace-pre-wrap text-slate-800 leading-relaxed pl-8 border-l-2 border-emerald-200 text-sm">
                       {messageContent}
                     </div>
                   </>
                 );
               } else {
                 // Fallback if no colon found
-                return <div className="whitespace-pre-wrap text-xs leading-tight">{text}</div>;
+                return <div className="whitespace-pre-wrap text-sm leading-relaxed">{text}</div>;
               }
             })()}
           </div>
         ) : (
-          <div className="whitespace-pre-wrap text-xs leading-tight">{text}</div>
+          <div className="whitespace-pre-wrap text-sm leading-relaxed">{text}</div>
         )}
       </>
     );
@@ -1801,7 +1802,7 @@ Your task is to respond to the user's message below, taking into account their s
 
         {/* Premium Image Modal */}
         <Dialog open={isImageModalOpen} onOpenChange={setIsImageModalOpen}>
-          <DialogContent className="max-w-5xl max-h-[90vh] p-0 bg-white/95 backdrop-blur-2xl border border-white/20 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)] rounded-3xl">
+          <DialogContent className="max-w-5xl max-h-[90vh] p-0 bg-white/95 backdrop-blur-2xl border border-white/20 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)] rounded-3xl [&>button]:hidden">
             <DialogHeader className="p-6 pb-0">
               <div className="flex items-center justify-between">
                 <DialogTitle className="text-xl font-bold bg-gradient-to-r from-slate-800 to-blue-600 bg-clip-text text-transparent">

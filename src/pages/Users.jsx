@@ -362,7 +362,7 @@ export default function Clients() {
 
   const hasRequiredFieldsForCalculation = () => {
 
-    return formData.age && formData.gender && formData.weight_kg && formData.height_cm && formData.Activity_level;
+    return formData.age && formData.gender && formData.weight_kg && formData.height_cm && formData.Activity_level && formData.goal;
 
   };
 
@@ -1092,7 +1092,7 @@ export default function Clients() {
 
     // This preserves manually edited values by the dietitian
 
-    if (currentClient && currentClient.daily_target_total_calories) {
+    if (currentClient && currentClient.daily_target_total_calories && currentClient.base_daily_total_calories) {
 
       return;
 
@@ -1206,15 +1206,21 @@ export default function Clients() {
 
       // Clear calories if we have some data but calculation failed
 
-      setFormData(prev => ({ 
+      // Only clear if we don't have valid existing values for existing clients
 
-        ...prev, 
+      if (!currentClient || (!currentClient.base_daily_total_calories && !currentClient.daily_target_total_calories)) {
 
-        base_daily_total_calories: '',
+        setFormData(prev => ({ 
 
-        daily_target_total_calories: ''
+          ...prev, 
 
-      }));
+          base_daily_total_calories: '',
+
+          daily_target_total_calories: ''
+
+        }));
+
+      }
 
     }
 
