@@ -990,7 +990,7 @@ def load_user_preferences(user_code=None):
 
         # Define the specific fields we need to reduce data transfer
 
-        selected_fields = 'user_code,food_allergies,base_daily_total_calories,recommendations,food_limitations,goal,number_of_meals,client_preference,macros,region,meal_plan_structure'
+        selected_fields = 'user_code,food_allergies,daily_target_total_calories,recommendations,food_limitations,goal,number_of_meals,client_preference,macros,region,meal_plan_structure'
 
         
 
@@ -1150,7 +1150,7 @@ def load_user_preferences(user_code=None):
 
         # Ensure we have valid values with proper defaults
 
-        calories_per_day = user_data.get("base_daily_total_calories")
+        calories_per_day = user_data.get("daily_target_total_calories")
 
         if calories_per_day is None:
 

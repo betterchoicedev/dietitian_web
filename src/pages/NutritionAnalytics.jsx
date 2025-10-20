@@ -169,7 +169,10 @@ export default function NutritionAnalytics() {
             total_protein_g: typeof log.total_protein_g === 'number' && !isNaN(log.total_protein_g) ? log.total_protein_g : 0,
             total_carbs_g: typeof log.total_carbs_g === 'number' && !isNaN(log.total_carbs_g) ? log.total_carbs_g : 0,
             total_fat_g: typeof log.total_fat_g === 'number' && !isNaN(log.total_fat_g) ? log.total_fat_g : 0,
-            // Format date for display
+            // Stable ISO date key and formatted label
+            iso_date: typeof log.log_date === 'string'
+              ? log.log_date
+              : (log.log_date ? new Date(log.log_date).toISOString().slice(0, 10) : null),
             display_date: log.log_date ? new Date(log.log_date).toLocaleDateString() : 'Unknown Date',
             original_date: log.log_date
           };
@@ -182,7 +185,7 @@ export default function NutritionAnalytics() {
         const clientProfile = await ChatUser.getByUserCode(selectedClient.user_code);
         if (clientProfile && clientProfile.macros) {
           setNutritionTargets({
-            base_daily_total_calories: clientProfile.base_daily_total_calories || 0,
+            daily_target_total_calories: clientProfile.daily_target_total_calories || 0,
             protein_target: clientProfile.macros.protein_target || 0,
             carbs_target: clientProfile.macros.carbs_target || 0,
             fat_target: clientProfile.macros.fat_target || 0
@@ -230,10 +233,13 @@ export default function NutritionAnalytics() {
 
   // Prepare chart data - aggregate by day
   const dailyChartData = filteredLogs.reduce((acc, log) => {
-    const date = log.display_date;
-    if (!acc[date]) {
-      acc[date] = {
-        date: date,
+    // Use an ISO date key (YYYY-MM-DD) for grouping to avoid locale issues
+    const isoKey = log.iso_date || (log.original_date ? new Date(log.original_date).toISOString().slice(0, 10) : 'unknown');
+    const dateLabel = log.display_date;
+    if (!acc[isoKey]) {
+      acc[isoKey] = {
+        iso: isoKey,
+        date: dateLabel,
         total_calories: 0,
         total_protein_g: 0,
         total_carbs_g: 0,
@@ -242,27 +248,85 @@ export default function NutritionAnalytics() {
         meals: []
       };
     }
-    acc[date].total_calories += log.total_calories || 0;
-    acc[date].total_protein_g += log.total_protein_g || 0;
-    acc[date].total_carbs_g += log.total_carbs_g || 0;
-    acc[date].total_fat_g += log.total_fat_g || 0;
-    acc[date].meal_count += 1;
-    acc[date].meals.push({
+    acc[isoKey].total_calories += log.total_calories || 0;
+    acc[isoKey].total_protein_g += log.total_protein_g || 0;
+    acc[isoKey].total_carbs_g += log.total_carbs_g || 0;
+    acc[isoKey].total_fat_g += log.total_fat_g || 0;
+    acc[isoKey].meal_count += 1;
+    acc[isoKey].meals.push({
       meal_label: log.meal_label,
       calories: log.total_calories,
       protein: log.total_protein_g,
       carbs: log.total_carbs_g,
-      fat: log.total_fat_g
+      fat: log.total_fat_g,
+      food_items: log.food_items || []
     });
     return acc;
   }, {});
 
-  const chartData = Object.values(dailyChartData).sort((a, b) => {
-    // Sort by date in ascending order (oldest first, newest last)
-    const dateA = new Date(a.date);
-    const dateB = new Date(b.date);
-    return dateA - dateB;
-  });
+  const chartData = Object.values(dailyChartData)
+    .sort((a, b) => a.iso.localeCompare(b.iso));
+
+  // Helper: normalize a food item to a displayable name
+  const normalizeFoodItemName = (item) => {
+    try {
+      if (!item) return '';
+      if (typeof item === 'string') return item;
+      if (typeof item === 'object') {
+        return (
+          item.food_name ||
+          item.name ||
+          item.title ||
+          item.product_name ||
+          item.label ||
+          JSON.stringify(item)
+        );
+      }
+      return String(item);
+    } catch (e) {
+      return '';
+    }
+  };
+
+  // Helper: group meals by label and aggregate macros + collapse duplicate items (xN)
+  const groupMealsByLabel = (meals) => {
+    const labelToGroup = new Map();
+    (meals || []).forEach((meal) => {
+      const labelKey = (meal.meal_label || 'Unknown Meal').toString().toLowerCase();
+      const existing = labelToGroup.get(labelKey) || {
+        meal_label: meal.meal_label || 'Unknown Meal',
+        calories: 0,
+        protein: 0,
+        carbs: 0,
+        fat: 0,
+        itemsCount: {},
+      };
+
+      existing.calories += meal.calories || 0;
+      existing.protein += meal.protein || 0;
+      existing.carbs += meal.carbs || 0;
+      existing.fat += meal.fat || 0;
+
+      const items = Array.isArray(meal.food_items) ? meal.food_items : [];
+      items.forEach((it) => {
+        const name = normalizeFoodItemName(it).trim();
+        if (!name) return;
+        existing.itemsCount[name] = (existing.itemsCount[name] || 0) + 1;
+      });
+
+      labelToGroup.set(labelKey, existing);
+    });
+
+    // Convert itemsCount to array for rendering
+    return Array.from(labelToGroup.values()).map((g) => ({
+      meal_label: g.meal_label,
+      calories: g.calories,
+      protein: g.protein,
+      carbs: g.carbs,
+      fat: g.fat,
+      food_items: Object.entries(g.itemsCount).map(([name, count]) => ({ name, count })),
+    }));
+  };
 
   // Calculate nutrition statistics - daily averages
   const calculateNutritionStats = () => {
@@ -320,8 +384,8 @@ export default function NutritionAnalytics() {
     if (!stats || !nutritionTargets) return null;
 
     return {
-      calories: nutritionTargets.base_daily_total_calories > 0
-        ? Math.round((stats.averages.calories / nutritionTargets.base_daily_total_calories) * 100)
+      calories: nutritionTargets.daily_target_total_calories > 0
+        ? Math.round((stats.averages.calories / nutritionTargets.daily_target_total_calories) * 100)
         : 0,
       protein: nutritionTargets.protein_target > 0
         ? Math.round((stats.averages.protein / nutritionTargets.protein_target) * 100)
@@ -340,7 +404,7 @@ export default function NutritionAnalytics() {
   // Add target lines to chart data if available
   const chartDataWithTargets = chartData.map(data => ({
     ...data,
-    target_calories: nutritionTargets?.base_daily_total_calories || 0,
+    target_calories: nutritionTargets?.daily_target_total_calories || 0,
     target_protein: nutritionTargets?.protein_target || 0,
     target_carbs: nutritionTargets?.carbs_target || 0,
     target_fat: nutritionTargets?.fat_target || 0
@@ -563,7 +627,7 @@ export default function NutritionAnalytics() {
                 <p className="text-sm font-medium text-muted-foreground/70">{translations.caloriesAchievement || 'Calories Achievement'}</p>
                 <p className="text-2xl font-bold text-foreground">{targetAchievements.calories}%</p>
                 <p className="text-sm text-muted-foreground/70">
-                  {stats?.averages.calories || 0} / {nutritionTargets.base_daily_total_calories} {translations.calories || 'cal'}
+                  {stats?.averages.calories || 0} / {nutritionTargets.daily_target_total_calories} {translations.calories || 'cal'}
                 </p>
               </div>
               <div className="w-12 h-12 bg-gradient-to-br from-red-500/20 to-red-500/10 rounded-xl flex items-center justify-center">
@@ -948,12 +1012,20 @@ export default function NutritionAnalytics() {
                       <th className="p-4 font-semibold text-foreground/80 text-left">{translations.carbohydrates || 'Carbs (g)'}</th>
                       <th className="p-4 font-semibold text-foreground/80 text-left">{translations.fat || 'Fat (g)'}</th>
                       <th className="p-4 font-semibold text-foreground/80 text-left">{translations.mealsLogged || 'Meals'}</th>
-                      <th className="p-4 font-semibold text-foreground/80 text-left">{translations.mealDetails || 'Meal Details'}</th>
+                      <th className="p-4 font-semibold text-foreground/80 text-left min-w-[300px]">{translations.foodItemsAndMacros || translations.mealDetails || 'Food Items & Macros'}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {chartData.slice(0, 10).map((day, index) => (
-                      <tr key={index} className="border-b border-border/20 hover:bg-muted/20 transition-colors duration-200">
+                      <React.Fragment key={index}>
+                        {index > 0 && (
+                          <tr>
+                            <td colSpan={7} className="py-3">
+                              <div className="h-0.5 bg-border/60 rounded-full" />
+                            </td>
+                          </tr>
+                        )}
+                        <tr className="hover:bg-muted/10 transition-colors duration-200">
                         <td className="p-4 text-sm font-medium text-foreground/80">{day.date}</td>
                         <td className="p-4 text-sm font-medium">{day.total_calories}</td>
                         <td className="p-4 text-sm font-medium">{Math.round(day.total_protein_g * 10) / 10}</td>
@@ -961,16 +1033,52 @@ export default function NutritionAnalytics() {
                         <td className="p-4 text-sm font-medium">{Math.round(day.total_fat_g * 10) / 10}</td>
                         <td className="p-4 text-sm font-medium">{day.meal_count}</td>
                         <td className="p-4 text-sm">
-                          <div className="max-w-md">
-                            {day.meals.map((meal, mealIndex) => (
-                              <div key={mealIndex} className="mb-2 p-2 bg-muted/30 rounded text-xs">
-                                <span className="font-medium">{meal.meal_label || 'Unknown'}: </span>
-                                {meal.calories} cal, {Math.round(meal.protein * 10) / 10}g protein
+                          <div className="max-w-md space-y-3">
+                            {groupMealsByLabel(day.meals).map((group, groupIndex) => (
+                              <div key={groupIndex} className="p-3 bg-white border border-border/40 rounded-lg shadow-sm">
+                                {/* Grouped Meal Label */}
+                                <div className="font-semibold text-foreground mb-2 flex items-center gap-2">
+                                  <span className="text-blue-500">🍽️</span>
+                                  {group.meal_label}
+                                </div>
+
+                                {/* Collapsed Food Items (with counts) */}
+                                {group.food_items && group.food_items.length > 0 && (
+                                  <div className="mb-2 pl-4">
+                                    <div className="text-xs text-foreground/80 space-y-1">
+                                      {group.food_items.map((fi, fiIndex) => (
+                                        <div key={fiIndex} className="flex items-start gap-1">
+                                          <span className="text-green-600 mt-0.5">•</span>
+                                          <span className="flex-1">
+                                            {fi.name} {fi.count > 1 ? `x${fi.count}` : ''}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Aggregated Macros */}
+                                <div className="text-xs text-muted-foreground flex flex-wrap gap-2 pl-4">
+                                  <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded font-medium">
+                                    {group.calories} cal
+                                  </span>
+                                  <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded font-medium">
+                                    {Math.round(group.protein * 10) / 10}g protein
+                                  </span>
+                                  <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">
+                                    {Math.round(group.carbs * 10) / 10}g carbs
+                                  </span>
+                                  <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded font-medium">
+                                    {Math.round(group.fat * 10) / 10}g fat
+                                  </span>
+                                </div>
                               </div>
                             ))}
                           </div>
                         </td>
                       </tr>
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>

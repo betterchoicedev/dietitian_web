@@ -5814,7 +5814,7 @@ const MenuCreate = () => {
 
       const userTargetsData = {
 
-        calories: userData.daily_target_total_calories || 2000,
+        calories: userData.base_daily_total_calories || 2000,
 
         macros: {
 
