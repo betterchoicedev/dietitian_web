@@ -1094,7 +1094,13 @@ export default function Clients() {
 
     if (currentClient && currentClient.daily_target_total_calories && currentClient.base_daily_total_calories) {
 
-      return;
+      // Only skip if the formData already has these values populated
+
+      if (formData.base_daily_total_calories && formData.daily_target_total_calories) {
+
+        return;
+
+      }
 
     }
 
@@ -1206,9 +1212,11 @@ export default function Clients() {
 
       // Clear calories if we have some data but calculation failed
 
-      // Only clear if we don't have valid existing values for existing clients
+      // Only clear if we don't have valid existing values
 
-      if (!currentClient || (!currentClient.base_daily_total_calories && !currentClient.daily_target_total_calories)) {
+      const hasExistingValues = formData.base_daily_total_calories || formData.daily_target_total_calories;
+
+      if (!hasExistingValues && (!currentClient || (!currentClient.base_daily_total_calories && !currentClient.daily_target_total_calories))) {
 
         setFormData(prev => ({ 
 

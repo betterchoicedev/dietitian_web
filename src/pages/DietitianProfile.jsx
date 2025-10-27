@@ -151,16 +151,33 @@ export default function DietitianProfile() {
   const [weightLogsSortBy, setWeightLogsSortBy] = useState('measurement_date');
   const [weightLogsSortOrder, setWeightLogsSortOrder] = useState('desc');
   const [weightLogsSearchTerm, setWeightLogsSearchTerm] = useState('');
+  
+  // User Message Preferences state
+  const [userPreferences, setUserPreferences] = useState([]);
+  const [preferencesLoading, setPreferencesLoading] = useState(false);
+  const [editingPreference, setEditingPreference] = useState(null);
+  const [preferencesSearchTerm, setPreferencesSearchTerm] = useState('');
+  const [isSavingPreference, setIsSavingPreference] = useState(false);
+  const [preferencesPage, setPreferencesPage] = useState(1);
+  const [preferencesTotal, setPreferencesTotal] = useState(0);
+  const [hasMorePreferences, setHasMorePreferences] = useState(true);
+  const PREFERENCES_PER_PAGE = 5;
 
   useEffect(() => {
     loadCurrentUser();
     loadMessages();
-    loadDashboardData();
   }, []);
 
   useEffect(() => {
     applyFilters();
   }, [messages, searchTerm, filterType, filterPriority, filterStatus, showHistory]);
+  
+  // Load dashboard data when clients change (e.g., when role-based filtering is applied)
+  useEffect(() => {
+    if (clients && clients.length >= 0) {
+      loadDashboardData();
+    }
+  }, [clients]);
 
   const loadCurrentUser = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -192,21 +209,153 @@ export default function DietitianProfile() {
     }
   };
 
+  const loadUserPreferences = async (reset = false, searchTerm = null) => {
+    try {
+      setPreferencesLoading(true);
+      
+      // Use provided search term or fall back to state
+      const actualSearchTerm = searchTerm !== null ? searchTerm : preferencesSearchTerm;
+      
+      const currentPage = reset ? 1 : preferencesPage;
+      const from = (currentPage - 1) * PREFERENCES_PER_PAGE;
+      const to = from + PREFERENCES_PER_PAGE - 1;
+      
+      // Get list of user codes that this dietitian can see (already filtered by role in ClientContext)
+      const visibleUserCodes = clients.map(client => client.user_code);
+      
+      // If no visible clients, return empty
+      if (visibleUserCodes.length === 0) {
+        setUserPreferences([]);
+        setPreferencesTotal(0);
+        setHasMorePreferences(false);
+        setPreferencesLoading(false);
+        return;
+      }
+      
+      // Build query - only show preferences for visible clients
+      let query = supabase
+        .from('user_message_preferences')
+        .select('*', { count: 'exact' })
+        .in('user_code', visibleUserCodes)
+        .order('user_code', { ascending: true });
+      
+      // Apply search filter if present
+      if (actualSearchTerm && actualSearchTerm.trim()) {
+        const searchValue = actualSearchTerm.trim().toLowerCase();
+        
+        // Find matching user codes from visible clients by name or user_code
+        const matchingUserCodes = clients
+          .filter(client => 
+            client.user_code?.toLowerCase().includes(searchValue) ||
+            client.full_name?.toLowerCase().includes(searchValue)
+          )
+          .map(client => client.user_code);
+        
+        // If we found matching user codes, filter by them
+        if (matchingUserCodes.length > 0) {
+          query = query.in('user_code', matchingUserCodes);
+        } else {
+          // If no matches found, search will return empty
+          query = query.in('user_code', ['_no_match_']);
+        }
+      }
+      
+      query = query.range(from, to);
+      
+      const { data, error, count } = await query;
+      
+      if (error) throw error;
+      
+      if (reset) {
+        setUserPreferences(data || []);
+        setPreferencesPage(1);
+      } else {
+        setUserPreferences(prev => [...prev, ...(data || [])]);
+      }
+      
+      setPreferencesTotal(count || 0);
+      setHasMorePreferences(data && data.length === PREFERENCES_PER_PAGE);
+      
+    } catch (error) {
+      console.error('Error loading user preferences:', error);
+      alert(translations.failedToLoadPreferences || 'Failed to load user preferences');
+    } finally {
+      setPreferencesLoading(false);
+    }
+  };
+  
+  const loadMorePreferences = () => {
+    setPreferencesPage(prev => prev + 1);
+    loadUserPreferences(false);
+  };
+  
+  const searchPreferences = async () => {
+    setPreferencesPage(1);
+    await loadUserPreferences(true, preferencesSearchTerm);
+  };
+  
+  const saveUserPreference = async (preference) => {
+    try {
+      setIsSavingPreference(true);
+      const { error } = await supabase
+        .from('user_message_preferences')
+        .update(preference)
+        .eq('id', preference.id);
+      
+      if (error) throw error;
+      
+      // Update the preference in the local state instead of reloading all
+      setUserPreferences(prev => 
+        prev.map(p => p.id === preference.id ? preference : p)
+      );
+      setEditingPreference(null);
+      alert(translations.preferencesSavedSuccessfully || 'Preferences saved successfully!');
+    } catch (error) {
+      console.error('Error saving preference:', error);
+      alert(translations.failedToSavePreferences || 'Failed to save preferences');
+    } finally {
+      setIsSavingPreference(false);
+    }
+  };
+
   const loadDashboardData = async () => {
     try {
       console.log('🔄 Loading dietitian dashboard data...');
       
-      // Load all menus (we need all for stats calculation)
+      // Get list of user codes that this dietitian can see (already filtered by role in ClientContext)
+      const visibleUserCodes = clients.map(client => client.user_code);
+      console.log('👥 Visible user codes for this dietitian:', visibleUserCodes.length);
+      
+      // If no visible clients, return empty dashboard
+      if (visibleUserCodes.length === 0) {
+        setRecentMealPlans([]);
+        setRecentlyActivatedPlans([]);
+        setRecentMessages([]);
+        setClientActivity([]);
+        setRecentWeightLogs([]);
+        setDashboardStats({
+          totalClients: 0,
+          activeMealPlans: 0,
+          totalMessages: 0,
+          recentActivity: 0
+        });
+        return;
+      }
+      
+      // Load all menus but ONLY for visible clients
       const allMenus = await Menu.list();
-      const activeMealPlans = allMenus.filter(menu => menu.status === 'active');
+      const visibleMenus = allMenus.filter(menu => visibleUserCodes.includes(menu.user_code));
+      console.log('📋 Filtered menus:', visibleMenus.length, 'of', allMenus.length);
+      
+      const activeMealPlans = visibleMenus.filter(menu => menu.status === 'active');
       
       // Get recent meal plans (all created) - sorted for display
-      const recentPlans = [...allMenus]
+      const recentPlans = [...visibleMenus]
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
       setRecentMealPlans(recentPlans);
       
       // Get ALL recent status changes (activated, expired, drafted, etc.) - sorted for display
-      const statusChanges = [...allMenus]
+      const statusChanges = [...visibleMenus]
         .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
       setRecentlyActivatedPlans(statusChanges);
       
@@ -243,7 +392,7 @@ export default function DietitianProfile() {
       
       console.log('✅ Users loaded:', usersData?.length || 0, 'records');
       
-      // Get messages from all conversations
+      // Get messages from all conversations but ONLY for visible clients
       const allMessages = [];
       const conversationMap = {};
       const clientLastMessageMap = {};
@@ -255,6 +404,12 @@ export default function DietitianProfile() {
         
         if (!userCode) {
           console.warn('⚠️ No user_code found for conversation:', conv.id, 'user_id:', conv.user_id);
+          continue;
+        }
+        
+        // Skip if this client is not visible to this dietitian
+        if (!visibleUserCodes.includes(userCode)) {
+          console.log('🚫 Skipping conversation for non-visible client:', userCode);
           continue;
         }
         
@@ -293,37 +448,41 @@ export default function DietitianProfile() {
         }
       }
       
-      // Sort all messages by date and take the most recent (limit for performance)
-      const sortedMessages = allMessages
+      // Filter messages to only include those from visible clients, then sort by date
+      const visibleMessages = allMessages.filter(msg => visibleUserCodes.includes(msg.user_code));
+      const sortedMessages = visibleMessages
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
         .slice(0, 30); // Increased limit but still reasonable
       
       console.log('📋 Total messages loaded:', allMessages.length);
+      console.log('📋 Visible messages filtered:', visibleMessages.length);
       console.log('📋 Recent messages set:', sortedMessages.length);
       setRecentMessages(sortedMessages);
       
       // Skip chat activity section - removed per user request
       
-      // Load recent weight logs (limit to reasonable amount for performance)
+      // Load recent weight logs ONLY for visible clients
       try {
         const { data: weightLogs, error: weightError } = await supabase
           .from('weight_logs')
           .select('*')
+          .in('user_code', visibleUserCodes)
           .order('measurement_date', { ascending: false })
           .limit(50); // Load more but not all
         
         if (weightError) throw weightError;
+        console.log('📊 Weight logs loaded for visible clients:', weightLogs?.length || 0);
         setRecentWeightLogs(weightLogs || []);
       } catch (weightError) {
         console.warn('Error loading weight logs:', weightError);
         setRecentWeightLogs([]);
       }
       
-      // Calculate client activity
+      // Calculate client activity ONLY for visible clients
       const activityMap = {};
       
       // Add menu activity
-      allMenus.forEach(menu => {
+      visibleMenus.forEach(menu => {
         if (!activityMap[menu.user_code]) {
           activityMap[menu.user_code] = {
             user_code: menu.user_code,
@@ -338,8 +497,8 @@ export default function DietitianProfile() {
         }
       });
       
-      // Add message activity
-      allMessages.forEach(msg => {
+      // Add message activity (using visible messages only)
+      visibleMessages.forEach(msg => {
         if (!activityMap[msg.user_code]) {
           activityMap[msg.user_code] = {
             user_code: msg.user_code,
@@ -361,11 +520,11 @@ export default function DietitianProfile() {
       
       setClientActivity(activityArray);
       
-      // Update stats
+      // Update stats (using visible/filtered data)
       setDashboardStats({
         totalClients: clients.length,
         activeMealPlans: activeMealPlans.length,
-        totalMessages: allMessages.length,
+        totalMessages: visibleMessages.length,
         recentActivity: activityArray.length
       });
       
@@ -823,8 +982,17 @@ export default function DietitianProfile() {
       </div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3">
+      <Tabs value={activeTab} onValueChange={(value) => {
+        setActiveTab(value);
+        if (value === 'preferences') {
+          // Reset state and load first page with no search
+          setPreferencesPage(1);
+          setPreferencesSearchTerm('');
+          setUserPreferences([]);
+          loadUserPreferences(true, '');
+        }
+      }} className="space-y-4">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="dashboard" className="flex items-center space-x-2">
             <LayoutDashboard className="h-4 w-4" />
             <span>{translations.dashboard || 'Dashboard'}</span>
@@ -837,6 +1005,10 @@ export default function DietitianProfile() {
                 {activeMessages.length}
               </Badge>
             )}
+          </TabsTrigger>
+          <TabsTrigger value="preferences" className="flex items-center space-x-2">
+            <Bell className="h-4 w-4" />
+            <span>{translations.userPreferences || 'User Preferences'}</span>
           </TabsTrigger>
           <TabsTrigger value="profile" className="flex items-center space-x-2">
             <User className="h-4 w-4" />
@@ -2112,6 +2284,512 @@ export default function DietitianProfile() {
                     </TableBody>
                   </Table>
                 </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* User Preferences Tab */}
+        <TabsContent value="preferences" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>{translations.userMessagePreferences || 'User Message Preferences'}</CardTitle>
+                  <CardDescription>{translations.manageUserCommunicationPreferences || 'View and edit communication preferences for all users'}</CardDescription>
+                </div>
+                <Button onClick={() => {
+                  setPreferencesPage(1);
+                  loadUserPreferences(true, preferencesSearchTerm);
+                }} variant="outline" size="sm" disabled={preferencesLoading}>
+                  <Activity className="h-4 w-4 mr-2" />
+                  {translations.refresh || 'Refresh'}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {/* Search */}
+              <div className="mb-6">
+                <Label>{translations.search || 'Search'}</Label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input
+                      placeholder={translations.searchByUserCode || 'Search by user code or name...'}
+                      value={preferencesSearchTerm}
+                      onChange={(e) => setPreferencesSearchTerm(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter') {
+                          searchPreferences();
+                        }
+                      }}
+                      className="pl-10"
+                    />
+                  </div>
+                  <Button onClick={searchPreferences} disabled={preferencesLoading}>
+                    <Search className="h-4 w-4 mr-2" />
+                    {translations.search || 'Search'}
+                  </Button>
+                  {preferencesSearchTerm && (
+                    <Button 
+                      variant="outline" 
+                      onClick={() => {
+                        setPreferencesSearchTerm('');
+                        setPreferencesPage(1);
+                        loadUserPreferences(true, '');
+                      }}
+                      disabled={preferencesLoading}
+                    >
+                      <X className="h-4 w-4 mr-2" />
+                      {translations.clearFilters || 'Clear'}
+                    </Button>
+                  )}
+                </div>
+                {preferencesTotal > 0 && (
+                  <p className="text-sm text-gray-600 mt-2">
+                    {translations.showing || 'Showing'} {userPreferences.length} {translations.of || 'of'} {preferencesTotal} {translations.preferences || 'preferences'}
+                  </p>
+                )}
+              </div>
+
+              {/* Preferences Table */}
+              {preferencesLoading && userPreferences.length === 0 ? (
+                <div className="text-center py-12">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+                  <p className="mt-4 text-gray-600">{translations.loading || 'Loading preferences...'}</p>
+                </div>
+              ) : userPreferences.length === 0 ? (
+                <div className="text-center py-12">
+                  <Bell className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-600">{translations.noPreferencesFound || 'No preferences found'}</p>
+                  {preferencesSearchTerm && (
+                    <Button 
+                      variant="link" 
+                      onClick={() => {
+                        setPreferencesSearchTerm('');
+                        setPreferencesPage(1);
+                        loadUserPreferences(true, '');
+                      }}
+                      className="mt-2"
+                    >
+                      {translations.clearFilters || 'Clear search to see all'}
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <>
+                <div className="space-y-4">
+                  {userPreferences.map((pref) => (
+                      <Card key={pref.id} className="border-2">
+                        <CardHeader className="pb-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-10 w-10">
+                                <AvatarFallback className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
+                                  {getClientName(pref.user_code)?.[0]?.toUpperCase() || pref.user_code?.[0]?.toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <h3 className="font-semibold text-lg">{getClientName(pref.user_code)}</h3>
+                                <p className="text-sm text-gray-600">{pref.user_code}</p>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              {editingPreference?.id === pref.id ? (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => saveUserPreference(editingPreference)}
+                                    disabled={isSavingPreference}
+                                  >
+                                    {isSavingPreference ? translations.saving || 'Saving...' : translations.save || 'Save'}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => setEditingPreference(null)}
+                                    disabled={isSavingPreference}
+                                  >
+                                    {translations.cancel || 'Cancel'}
+                                  </Button>
+                                </>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setEditingPreference({...pref})}
+                                >
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  {translations.edit || 'Edit'}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          {editingPreference?.id === pref.id ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                              {/* Communication Style */}
+                              <div>
+                                <Label className="text-xs font-semibold">{translations.communicationStyle || 'Communication Style'}</Label>
+                                <Select
+                                  value={editingPreference.communication_style || 'balanced'}
+                                  onValueChange={(value) => setEditingPreference({...editingPreference, communication_style: value})}
+                                >
+                                  <SelectTrigger className="h-8 text-sm">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="balanced">{translations.balanced || 'Balanced'}</SelectItem>
+                                    <SelectItem value="casual">{translations.casual || 'Casual'}</SelectItem>
+                                    <SelectItem value="welcoming">{translations.welcoming || 'Welcoming'}</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              {/* Response Style */}
+                              <div>
+                                <Label className="text-xs font-semibold">{translations.responseStyle || 'Response Style'}</Label>
+                                <Select
+                                  value={editingPreference.response_style || 'balanced'}
+                                  onValueChange={(value) => setEditingPreference({...editingPreference, response_style: value})}
+                                >
+                                  <SelectTrigger className="h-8 text-sm">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="balanced">{translations.balanced || 'Balanced'}</SelectItem>
+                                    <SelectItem value="brief">{translations.brief || 'Brief'}</SelectItem>
+                                    <SelectItem value="detailed">{translations.detailed || 'Detailed'}</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              {/* Message Frequency */}
+                              <div>
+                                <Label className="text-xs font-semibold">{translations.messageFrequency || 'Message Frequency'}</Label>
+                                <Select
+                                  value={editingPreference.message_frequency || 'normal'}
+                                  onValueChange={(value) => setEditingPreference({...editingPreference, message_frequency: value})}
+                                >
+                                  <SelectTrigger className="h-8 text-sm">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="normal">{translations.normal || 'Normal'}</SelectItem>
+                                    <SelectItem value="frequent">{translations.frequent || 'Frequent'}</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              {/* Language Preference */}
+                              <div>
+                                <Label className="text-xs font-semibold">{translations.languagePreference || 'Language'}</Label>
+                                <Select
+                                  value={editingPreference.language_preference || 'en'}
+                                  onValueChange={(value) => setEditingPreference({...editingPreference, language_preference: value})}
+                                >
+                                  <SelectTrigger className="h-8 text-sm">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="en">English</SelectItem>
+                                    <SelectItem value="es">Español</SelectItem>
+                                    <SelectItem value="he">עברית</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              {/* Meal Plan Display Format */}
+                              <div>
+                                <Label className="text-xs font-semibold">{translations.mealPlanFormat || 'Meal Plan Format'}</Label>
+                                <Select
+                                  value={editingPreference.meal_plan_display_format || 'compact'}
+                                  onValueChange={(value) => setEditingPreference({...editingPreference, meal_plan_display_format: value})}
+                                >
+                                  <SelectTrigger className="h-8 text-sm">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="compact">{translations.compact || 'Compact'}</SelectItem>
+                                    <SelectItem value="detailed">{translations.detailed || 'Detailed'}</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              {/* Daily Calorie Target */}
+                              <div>
+                                <Label className="text-xs font-semibold">{translations.dailyCalorieTarget || 'Daily Calorie Target'}</Label>
+                                <Input
+                                  type="number"
+                                  className="h-8 text-sm"
+                                  value={editingPreference.daily_calorie_target || ''}
+                                  onChange={(e) => setEditingPreference({...editingPreference, daily_calorie_target: e.target.value ? parseInt(e.target.value) : null})}
+                                  placeholder="2000"
+                                />
+                              </div>
+
+                              {/* Show Meal Macros */}
+                              <div className="flex items-center space-x-2">
+                                <Switch
+                                  checked={editingPreference.show_meal_macros ?? true}
+                                  onCheckedChange={(checked) => setEditingPreference({...editingPreference, show_meal_macros: checked})}
+                                />
+                                <Label className="text-xs font-semibold">{translations.showMealMacros || 'Show Meal Macros'}</Label>
+                              </div>
+
+                              {/* Reminders Enabled */}
+                              <div className="flex items-center space-x-2">
+                                <Switch
+                                  checked={editingPreference.reminders_enabled ?? true}
+                                  onCheckedChange={(checked) => setEditingPreference({...editingPreference, reminders_enabled: checked})}
+                                />
+                                <Label className="text-xs font-semibold">{translations.remindersEnabled || 'Reminders Enabled'}</Label>
+                              </div>
+
+                              {/* Send Insight */}
+                              <div className="flex items-center space-x-2">
+                                <Switch
+                                  checked={editingPreference.send_insight ?? false}
+                                  onCheckedChange={(checked) => setEditingPreference({...editingPreference, send_insight: checked})}
+                                />
+                                <Label className="text-xs font-semibold">{translations.sendInsight || 'Send Daily Insights'}</Label>
+                              </div>
+
+                              {/* Insight Time */}
+                              <div>
+                                <Label className="text-xs font-semibold">{translations.insightTime || 'Insight Time'}</Label>
+                                <Input
+                                  type="time"
+                                  className="h-8 text-sm"
+                                  value={editingPreference.insight_time ? editingPreference.insight_time.substring(0, 5) : ''}
+                                  onChange={(e) => setEditingPreference({...editingPreference, insight_time: e.target.value ? `${e.target.value}:00+03` : null})}
+                                />
+                              </div>
+
+                              {/* Quiet Hours */}
+                              <div className="col-span-full">
+                                <Label className="text-xs font-semibold">{translations.quietHours || 'Quiet Hours (No Messages)'}</Label>
+                                <div className="grid grid-cols-2 gap-2 mt-1">
+                                  <div>
+                                    <Label className="text-xs text-gray-600">{translations.start || 'Start'}</Label>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      max="23"
+                                      className="h-8 text-sm"
+                                      value={editingPreference.quiet_hours?.start ?? 22}
+                                      onChange={(e) => setEditingPreference({
+                                        ...editingPreference, 
+                                        quiet_hours: {...(editingPreference.quiet_hours || {}), start: parseInt(e.target.value)}
+                                      })}
+                                      placeholder="22"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs text-gray-600">{translations.end || 'End'}</Label>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      max="23"
+                                      className="h-8 text-sm"
+                                      value={editingPreference.quiet_hours?.end ?? 6}
+                                      onChange={(e) => setEditingPreference({
+                                        ...editingPreference, 
+                                        quiet_hours: {...(editingPreference.quiet_hours || {}), end: parseInt(e.target.value)}
+                                      })}
+                                      placeholder="6"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Preferred Contact Window */}
+                              <div className="col-span-full">
+                                <Label className="text-xs font-semibold">{translations.preferredContactWindow || 'Preferred Contact Window'}</Label>
+                                <div className="grid grid-cols-2 gap-2 mt-1">
+                                  <div>
+                                    <Label className="text-xs text-gray-600">{translations.start || 'Start'}</Label>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      max="23"
+                                      className="h-8 text-sm"
+                                      value={editingPreference.preferred_contact_window?.start ?? 8}
+                                      onChange={(e) => setEditingPreference({
+                                        ...editingPreference, 
+                                        preferred_contact_window: {...(editingPreference.preferred_contact_window || {}), start: parseInt(e.target.value)}
+                                      })}
+                                      placeholder="8"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs text-gray-600">{translations.end || 'End'}</Label>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      max="23"
+                                      className="h-8 text-sm"
+                                      value={editingPreference.preferred_contact_window?.end ?? 20}
+                                      onChange={(e) => setEditingPreference({
+                                        ...editingPreference, 
+                                        preferred_contact_window: {...(editingPreference.preferred_contact_window || {}), end: parseInt(e.target.value)}
+                                      })}
+                                      placeholder="20"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Topics of Interest */}
+                              <div className="col-span-full">
+                                <Label className="text-xs font-semibold">{translations.topicsOfInterest || 'Topics of Interest'}</Label>
+                                <Textarea
+                                  className="text-sm mt-1"
+                                  rows={2}
+                                  value={Array.isArray(editingPreference.topics_of_interest) ? editingPreference.topics_of_interest.join(', ') : ''}
+                                  onChange={(e) => setEditingPreference({
+                                    ...editingPreference, 
+                                    topics_of_interest: e.target.value ? e.target.value.split(',').map(t => t.trim()) : []
+                                  })}
+                                  placeholder="meal planning, nutrition, weight tracking (comma separated)"
+                                />
+                              </div>
+
+                              {/* Avoided Topics */}
+                              <div className="col-span-full">
+                                <Label className="text-xs font-semibold">{translations.avoidedTopics || 'Avoided Topics'}</Label>
+                                <Textarea
+                                  className="text-sm mt-1"
+                                  rows={2}
+                                  value={Array.isArray(editingPreference.avoided_topics) ? editingPreference.avoided_topics.join(', ') : ''}
+                                  onChange={(e) => setEditingPreference({
+                                    ...editingPreference, 
+                                    avoided_topics: e.target.value ? e.target.value.split(',').map(t => t.trim()) : []
+                                  })}
+                                  placeholder="specific diet restrictions (comma separated)"
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+                              <div>
+                                <p className="text-xs text-gray-600 font-semibold">{translations.communicationStyle || 'Communication Style'}</p>
+                                <Badge variant="outline" className="mt-1">{pref.communication_style || 'balanced'}</Badge>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-600 font-semibold">{translations.responseStyle || 'Response Style'}</p>
+                                <Badge variant="outline" className="mt-1">{pref.response_style || 'balanced'}</Badge>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-600 font-semibold">{translations.messageFrequency || 'Message Frequency'}</p>
+                                <Badge variant="outline" className="mt-1">{pref.message_frequency || 'normal'}</Badge>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-600 font-semibold">{translations.languagePreference || 'Language'}</p>
+                                <Badge variant="outline" className="mt-1">
+                                  {pref.language_preference === 'en' ? 'English' : pref.language_preference === 'es' ? 'Español' : pref.language_preference === 'he' ? 'עברית' : pref.language_preference}
+                                </Badge>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-600 font-semibold">{translations.dailyCalorieTarget || 'Daily Calorie Target'}</p>
+                                <p className="text-sm mt-1">{pref.daily_calorie_target ? `${pref.daily_calorie_target} kcal` : '-'}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-600 font-semibold">{translations.mealPlanFormat || 'Meal Plan Format'}</p>
+                                <Badge variant="outline" className="mt-1">{pref.meal_plan_display_format || 'compact'}</Badge>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-600 font-semibold">{translations.showMealMacros || 'Show Macros'}</p>
+                                <Badge variant={pref.show_meal_macros ? "default" : "secondary"} className="mt-1">
+                                  {pref.show_meal_macros ? translations.yes || 'Yes' : translations.no || 'No'}
+                                </Badge>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-600 font-semibold">{translations.remindersEnabled || 'Reminders'}</p>
+                                <Badge variant={pref.reminders_enabled ? "default" : "secondary"} className="mt-1">
+                                  {pref.reminders_enabled ? translations.enabled || 'Enabled' : translations.disabled || 'Disabled'}
+                                </Badge>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-600 font-semibold">{translations.sendInsight || 'Daily Insights'}</p>
+                                <Badge variant={pref.send_insight ? "default" : "secondary"} className="mt-1">
+                                  {pref.send_insight ? translations.enabled || 'Enabled' : translations.disabled || 'Disabled'}
+                                </Badge>
+                              </div>
+                              {pref.insight_time && (
+                                <div>
+                                  <p className="text-xs text-gray-600 font-semibold">{translations.insightTime || 'Insight Time'}</p>
+                                  <p className="text-sm mt-1">{pref.insight_time.substring(0, 5)}</p>
+                                </div>
+                              )}
+                              <div>
+                                <p className="text-xs text-gray-600 font-semibold">{translations.quietHours || 'Quiet Hours'}</p>
+                                <p className="text-sm mt-1">
+                                  {pref.quiet_hours?.start ?? 22}:00 - {pref.quiet_hours?.end ?? 6}:00
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-600 font-semibold">{translations.preferredContactWindow || 'Contact Window'}</p>
+                                <p className="text-sm mt-1">
+                                  {pref.preferred_contact_window?.start ?? 8}:00 - {pref.preferred_contact_window?.end ?? 20}:00
+                                </p>
+                              </div>
+                              {pref.topics_of_interest && pref.topics_of_interest.length > 0 && (
+                                <div className="col-span-full">
+                                  <p className="text-xs text-gray-600 font-semibold mb-2">{translations.topicsOfInterest || 'Topics of Interest'}</p>
+                                  <div className="flex flex-wrap gap-1">
+                                    {pref.topics_of_interest.map((topic, idx) => (
+                                      <Badge key={idx} variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-xs">
+                                        {topic}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {pref.avoided_topics && pref.avoided_topics.length > 0 && (
+                                <div className="col-span-full">
+                                  <p className="text-xs text-gray-600 font-semibold mb-2">{translations.avoidedTopics || 'Avoided Topics'}</p>
+                                  <div className="flex flex-wrap gap-1">
+                                    {pref.avoided_topics.map((topic, idx) => (
+                                      <Badge key={idx} variant="outline" className="bg-red-50 text-red-700 border-red-200 text-xs">
+                                        {topic}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                </div>
+                
+                {/* Load More Button */}
+                {hasMorePreferences && (
+                  <div className="mt-6 text-center">
+                    <Button
+                      variant="outline"
+                      onClick={loadMorePreferences}
+                      disabled={preferencesLoading}
+                      className="w-full"
+                    >
+                      {preferencesLoading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
+                          {translations.loading || 'Loading...'}
+                        </>
+                      ) : (
+                        <>
+                          <ArrowRight className="h-4 w-4 mr-2 -rotate-90" />
+                          {translations.loadMore || 'Load More'}
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
+                </>
               )}
             </CardContent>
           </Card>

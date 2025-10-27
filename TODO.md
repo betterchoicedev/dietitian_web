@@ -1,3 +1,45 @@
+### 3. Training Management System
+- **Files**: `src/pages/TrainingManagement.jsx`, `src/api/client.js`, `src/contexts/LanguageContext.jsx`, `src/App.jsx`, `src/pages/Layout.jsx`
+- **Issue**: Implement comprehensive training/workout management for clients
+- **Status**: ✅ COMPLETED (October 21, 2025)
+- **Implementation**:
+  - ✅ Created Training API functions in src/api/client.js for all database operations
+    - TrainingPlans (create, read, update, delete)
+    - TrainingLogs (view and filter workout logs)
+    - TrainingAnalytics (progress tracking)
+    - TrainingReminders (reminder management)
+    - ExerciseLibrary (exercise database)
+  - ✅ Added training translations to LanguageContext.jsx (English & Hebrew)
+    - Full bilingual support for all training features
+    - RTL support for Hebrew
+  - ✅ Created TrainingManagement.jsx page with 4 tabs:
+    - Training Plans tab (create, view, manage plans)
+    - Training Logs tab (view client workouts with filtering)
+    - Training Analytics tab (progress overview - placeholder)
+    - Training Reminders tab (reminder management)
+  - ✅ Built pre-built training plan templates
+    - Beginner Strength Program (4-week, 3-day split: Push/Pull/Legs)
+    - 12 exercises with detailed sets, reps, and form notes
+  - ✅ Created UI components for creating/editing custom training plans
+    - Client selection
+    - Plan customization (name, goal, difficulty, duration)
+    - Template selection or custom creation
+  - ✅ Built training logs viewer with filtering and search
+    - Filter by client and date range
+    - View exercises, sets, reps, weights
+    - Session duration and perceived exertion
+  - ✅ Added Training route to App.jsx (/training, /training-management)
+  - ✅ Added navigation link in Layout.jsx sidebar with Dumbbell icon
+- **Documentation**:
+  - See `TRAINING_IMPLEMENTATION_SUMMARY.md` for full details
+  - See `TRAINING_QUICK_START.md` for quick reference guide
+- **Database Tables Used**:
+  - training_plans
+  - training_logs
+  - training_progress_analytics
+  - training_reminder_queue
+  - exercise_library
+
 ### 4. Weekly Tracking of Red Meat and Alcohol Consumption
 - **Files**: `src/pages/Users.jsx`, `src/pages/NutritionPlan.jsx`, `src/components/`, `src/api/`
 - **Issue**: Track weekly consumption of red meat and alcohol to ensure clients don't exceed their assigned limits
@@ -26,24 +68,11 @@
   - Add proper state management for ingredient changes in alternative meals
   - Ensure nutritional calculations update correctly when ingredients change
 
-### 7. Upgrade Dietitian Dashboard
-- **Files**: `src/pages/DietitianProfile.jsx`, `src/pages/`, `src/components/`
-- **Issue**: Dietitian dashboard needs significant improvements and new features
-- **Status**: Pending
-- **Implementation**:
-  - Analyze current dietitian dashboard functionality
-  - Add new features for better client management
-  - Improve UI/UX for dietitian workflow
-  - Add analytics and reporting capabilities
-  - Implement better client overview and tracking
-  - Add meal plan management tools
-  - Improve navigation and user experience
-  - Add real-time notifications and updates
 
 ### 8. Fix Chat Auto-Scroll on Refresh
 - **Files**: `src/pages/Chat.jsx`
 - **Issue**: When the chat refreshes, it should automatically scroll to the last message
-- **Status**: Pending
+- **Status**: Fixed
 - **Implementation**:
   - Add auto-scroll functionality to chat component on mount/refresh
   - Implement scrollToBottom function triggered after messages load
@@ -71,6 +100,33 @@
   - 🔄 Test with existing clients to ensure backward compatibility
   - 🔄 Verify meal plan generation uses correct calorie value
 
+### 10. Fix Search Logic
+- **Files**: TBD (to be determined based on search functionality location)
+- **Issue**: Fix search logic functionality onemocněníhe application
+- **Status**: Pending
+- **Implementation**:
+  - Identify where the search functionality is implemented
+  - Investigate current search logic issues
+  - Fix search query implementation
+  - Ensure proper filtering and results display
+  - Test search functionality across different scenarios
+  - Optimize search performance if needed
+
+### 11. Check/Review PDF Functionality
+- **Files**: `src/pages/MenuCreate.jsx`, `src/pages/MenuLoad.jsx`, `templates/menu_pdf.html`
+- **Issue**: Review and test PDF generation/download functionality for menu plans
+- **Status**: Pending
+- **Implementation**:
+  - Test PDF download in portrait mode
+  - Test PDF download in landscape mode
+  - Verify "Remove brand names from PDF" checkbox functionality
+  - Check PDF layout and formatting accuracy
+  - Ensure all meal information is correctly displayed in PDF
+  - Verify nutritional data displays correctly
+  - Test with different menu configurations
+  - Check RTL support for Hebrew menus in PDF
+  - Optimize PDF generation performance if needed
+  - Fix any layout or formatting issues found
 
 
 

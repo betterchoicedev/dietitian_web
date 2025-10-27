@@ -118,6 +118,10 @@ export default function UserWeightLogs() {
   const [selectedMetrics, setSelectedMetrics] = useState(['weight_kg']); // Show only weight by default
   const [chartType, setChartType] = useState('line');
   const [displayedLogsCount, setDisplayedLogsCount] = useState(5); // Show top 5 newest entries
+  const [exportDateRange, setExportDateRange] = useState('30'); // Export date range
+  const [customExportStart, setCustomExportStart] = useState('');
+  const [customExportEnd, setCustomExportEnd] = useState('');
+  const [showExportDialog, setShowExportDialog] = useState(false);
 
   // Form state for adding/editing measurements
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -608,11 +612,40 @@ export default function UserWeightLogs() {
     return null;
   };
 
-  // Export weight logs data as CSV
-  const handleExport = () => {
-    if (!filteredLogs.length) return;
+  // Get logs for export based on date range
+  const getLogsForExport = () => {
+    let logsToExport = weightLogs;
 
-    // Prepare CSV data
+    if (exportDateRange === 'custom') {
+      if (!customExportStart || !customExportEnd) {
+        return logsToExport;
+      }
+      const startDate = new Date(customExportStart);
+      const endDate = new Date(customExportEnd);
+      logsToExport = logsToExport.filter(log => {
+        if (!log.original_date) return false;
+        const logDate = new Date(log.original_date);
+        return logDate >= startDate && logDate <= endDate;
+      });
+    } else if (exportDateRange !== 'all') {
+      const daysAgo = new Date();
+      daysAgo.setDate(daysAgo.getDate() - parseInt(exportDateRange));
+      logsToExport = logsToExport.filter(log => {
+        if (!log.original_date) return false;
+        const logDate = new Date(log.original_date);
+        return logDate >= daysAgo;
+      });
+    }
+
+    return logsToExport;
+  };
+
+  // Export weight logs data as Excel
+  const handleExport = () => {
+    const logsToExport = getLogsForExport();
+    if (!logsToExport.length) return;
+
+    // Prepare Excel data
     const headers = [
       translations.date || 'Date',
       translations.weightKg || 'Weight (kg)',
@@ -621,36 +654,53 @@ export default function UserWeightLogs() {
       translations.neckCircumference || 'Neck (cm)',
       translations.waistCircumference || 'Waist (cm)',
       translations.hipCircumference || 'Hip (cm)',
-      translations.armCircumference || 'Arm (cm)'
+      translations.armCircumference || 'Arm (cm)',
+      'Notes'
     ];
 
-    const csvData = filteredLogs.map(log => [
+    const excelData = logsToExport.map(log => [
       log.measurement_date,
-      log.weight_kg,
-      log.height_cm,
+      log.weight_kg || '',
+      log.height_cm || '',
       log.calculated_body_fat || log.body_fat_percentage || '',
-      log.neck_circumference_cm,
-      log.waist_circumference_cm,
-      log.hip_circumference_cm,
-      log.arm_circumference_cm
+      log.neck_circumference_cm || '',
+      log.waist_circumference_cm || '',
+      log.hip_circumference_cm || '',
+      log.arm_circumference_cm || '',
+      log.notes || ''
     ]);
 
-    // Create CSV content
+    // Create Excel content (CSV format that Excel can open)
     const csvContent = [
       headers.join(','),
-      ...csvData.map(row => row.join(','))
+      ...excelData.map(row => row.map(cell => 
+        typeof cell === 'string' && cell.includes(',') ? `"${cell}"` : cell
+      ).join(','))
     ].join('\n');
 
     // Create and download file
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
+    
+    const dateRangeText = exportDateRange === 'custom' 
+      ? `${customExportStart}_to_${customExportEnd}`
+      : exportDateRange === 'all' 
+        ? 'all_time'
+        : `last_${exportDateRange}_days`;
+    
+    // Use client name instead of user code, sanitize filename
+    const clientName = selectedClient?.full_name?.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_') || 'client';
+    
     link.setAttribute('href', url);
-    link.setAttribute('download', `weight_logs_${selectedClient?.user_code || 'client'}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `weight_logs_${clientName}_${dateRangeText}_${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    
+    // Close dialog
+    setShowExportDialog(false);
   };
 
   // Form handling functions
@@ -1471,9 +1521,9 @@ export default function UserWeightLogs() {
                   {translations.refresh}
                 </Button>
 
-                <Button variant="outline" size="sm" onClick={handleExport}>
+                <Button variant="outline" size="sm" onClick={() => setShowExportDialog(true)}>
                   <Download className="w-4 h-4 mr-2" />
-                  {translations.export}
+                  {translations.export || 'Export to CSV'}
                 </Button>
               </div>
             </div>
@@ -1561,7 +1611,7 @@ export default function UserWeightLogs() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredLogs.slice(0, displayedLogsCount).map((log, index) => (
+                    {filteredLogs.slice(-displayedLogsCount).reverse().map((log, index) => (
                       <tr key={index} className="border-b border-border/20 hover:bg-muted/20 transition-colors duration-200">
                         <td className={`p-4 text-sm ${isRTL ? 'text-right' : 'text-left'} text-foreground/80`}>{log.measurement_date}</td>
                         <td className={`p-4 text-sm font-medium ${isRTL ? 'text-right' : 'text-left'}`}>{log.weight_kg}</td>
@@ -1852,6 +1902,95 @@ export default function UserWeightLogs() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Export Dialog */}
+      <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Download className="h-5 w-5" />
+              Export Weight Logs to CSV
+            </DialogTitle>
+            <DialogDescription>
+              Choose the date range for your weight logs export (CSV format compatible with Excel)
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Export Date Range</Label>
+              <Select value={exportDateRange} onValueChange={setExportDateRange}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="7">Last 7 days</SelectItem>
+                  <SelectItem value="30">Last 30 days</SelectItem>
+                  <SelectItem value="90">Last 90 days</SelectItem>
+                  <SelectItem value="365">Last year</SelectItem>
+                  <SelectItem value="all">All time</SelectItem>
+                  <SelectItem value="custom">Custom range</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {exportDateRange === 'custom' && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="customStart">Start Date</Label>
+                  <Input
+                    id="customStart"
+                    type="date"
+                    value={customExportStart}
+                    onChange={(e) => setCustomExportStart(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="customEnd">End Date</Label>
+                  <Input
+                    id="customEnd"
+                    type="date"
+                    value={customExportEnd}
+                    onChange={(e) => setCustomExportEnd(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center gap-2 text-blue-700 text-sm">
+                <Info className="h-4 w-4" />
+                <span>
+                  Exporting {getLogsForExport().length} measurements
+                  {exportDateRange === 'custom' && customExportStart && customExportEnd 
+                    ? ` from ${customExportStart} to ${customExportEnd}`
+                    : exportDateRange === 'all' 
+                      ? ' (all time)'
+                      : ` (last ${exportDateRange} days)`
+                  }
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowExportDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleExport}
+              disabled={getLogsForExport().length === 0}
+              className="gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Export to CSV
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

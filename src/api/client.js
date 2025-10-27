@@ -1367,6 +1367,404 @@ export const entities = {
       return data;
     },
   },
+  
+  // Training Management APIs
+  TrainingPlans: {
+    // Get all training plans for a user
+    getByUserCode: async (userCode) => {
+      try {
+        const { data, error } = await supabase
+          .from('training_plans')
+          .select('*')
+          .eq('user_code', userCode)
+          .order('created_at', { ascending: false });
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error fetching training plans:', err);
+        throw err;
+      }
+    },
+    
+    // Get all active training plans (for dashboard)
+    getAll: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('training_plans')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error fetching all training plans:', err);
+        throw err;
+      }
+    },
+    
+    // Get active training plan for a user
+    getActive: async (userCode) => {
+      try {
+        const { data, error } = await supabase
+          .from('training_plans')
+          .select('*')
+          .eq('user_code', userCode)
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        
+        if (error && error.code !== 'PGRST116') throw new Error(error.message);
+        return data || null;
+      } catch (err) {
+        console.error('❌ Error fetching active training plan:', err);
+        throw err;
+      }
+    },
+    
+    // Create new training plan
+    create: async (planData) => {
+      try {
+        // If setting as active, deactivate other plans for this user
+        if (planData.status === 'active') {
+          const { error: deactivateError } = await supabase
+            .from('training_plans')
+            .update({ status: 'archived' })
+            .eq('user_code', planData.user_code)
+            .eq('status', 'active');
+          
+          if (deactivateError) {
+            console.error('❌ Error deactivating existing plans:', deactivateError);
+          }
+        }
+        
+        const { data, error } = await supabase
+          .from('training_plans')
+          .insert([planData])
+          .select()
+          .single();
+        
+        if (error) throw new Error(error.message);
+        return data;
+      } catch (err) {
+        console.error('❌ Error creating training plan:', err);
+        throw err;
+      }
+    },
+    
+    // Update training plan
+    update: async (id, updates) => {
+      try {
+        const { data, error } = await supabase
+          .from('training_plans')
+          .update({ ...updates, updated_at: new Date().toISOString() })
+          .eq('id', id)
+          .select()
+          .single();
+        
+        if (error) throw new Error(error.message);
+        return data;
+      } catch (err) {
+        console.error('❌ Error updating training plan:', err);
+        throw err;
+      }
+    },
+    
+    // Delete training plan
+    delete: async (id) => {
+      try {
+        const { error } = await supabase
+          .from('training_plans')
+          .delete()
+          .eq('id', id);
+        
+        if (error) throw new Error(error.message);
+        return true;
+      } catch (err) {
+        console.error('❌ Error deleting training plan:', err);
+        throw err;
+      }
+    },
+  },
+  
+  TrainingLogs: {
+    // Get training logs for a user
+    getByUserCode: async (userCode, limit = 50) => {
+      try {
+        const { data, error } = await supabase
+          .from('training_logs')
+          .select('*')
+          .eq('user_code', userCode)
+          .order('session_date', { ascending: false })
+          .limit(limit);
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error fetching training logs:', err);
+        throw err;
+      }
+    },
+    
+    // Get training logs by date range
+    getByDateRange: async (userCode, startDate, endDate) => {
+      try {
+        const { data, error } = await supabase
+          .from('training_logs')
+          .select('*')
+          .eq('user_code', userCode)
+          .gte('session_date', startDate)
+          .lte('session_date', endDate)
+          .order('session_date', { ascending: false });
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error fetching training logs by date range:', err);
+        throw err;
+      }
+    },
+    
+    // Get training logs for all users (for analytics)
+    getAll: async (limit = 100) => {
+      try {
+        const { data, error } = await supabase
+          .from('training_logs')
+          .select('*')
+          .order('session_date', { ascending: false })
+          .limit(limit);
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error fetching all training logs:', err);
+        throw err;
+      }
+    },
+  },
+  
+  TrainingAnalytics: {
+    // Get progress analytics for a user
+    getByUserCode: async (userCode) => {
+      try {
+        const { data, error } = await supabase
+          .from('training_progress_analytics')
+          .select('*')
+          .eq('user_code', userCode)
+          .order('date_end', { ascending: false });
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error fetching training analytics:', err);
+        throw err;
+      }
+    },
+    
+    // Get analytics for specific exercise
+    getByExercise: async (userCode, exerciseName) => {
+      try {
+        const { data, error } = await supabase
+          .from('training_progress_analytics')
+          .select('*')
+          .eq('user_code', userCode)
+          .eq('exercise_name', exerciseName)
+          .order('date_end', { ascending: false });
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error fetching exercise analytics:', err);
+        throw err;
+      }
+    },
+  },
+  
+  TrainingReminders: {
+    // Get pending reminders
+    getPending: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('training_reminder_queue')
+          .select('*')
+          .eq('status', 'pending')
+          .order('scheduled_for', { ascending: true });
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error fetching pending reminders:', err);
+        throw err;
+      }
+    },
+    
+    // Get reminders for a user
+    getByUserCode: async (userCode) => {
+      try {
+        const { data, error } = await supabase
+          .from('training_reminder_queue')
+          .select('*')
+          .eq('user_code', userCode)
+          .order('scheduled_for', { ascending: false });
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error fetching user reminders:', err);
+        throw err;
+      }
+    },
+    
+    // Create reminder
+    create: async (reminderData) => {
+      try {
+        const { data, error } = await supabase
+          .from('training_reminder_queue')
+          .insert([reminderData])
+          .select()
+          .single();
+        
+        if (error) throw new Error(error.message);
+        return data;
+      } catch (err) {
+        console.error('❌ Error creating reminder:', err);
+        throw err;
+      }
+    },
+    
+    // Update reminder status
+    updateStatus: async (id, status, errorMessage = null) => {
+      try {
+        const updates = { status };
+        if (status === 'sent') {
+          updates.sent_at = new Date().toISOString();
+        }
+        if (errorMessage) {
+          updates.error_message = errorMessage;
+        }
+        
+        const { data, error } = await supabase
+          .from('training_reminder_queue')
+          .update(updates)
+          .eq('id', id)
+          .select()
+          .single();
+        
+        if (error) throw new Error(error.message);
+        return data;
+      } catch (err) {
+        console.error('❌ Error updating reminder status:', err);
+        throw err;
+      }
+    },
+    
+    // Delete reminder
+    delete: async (id) => {
+      try {
+        const { error } = await supabase
+          .from('training_reminder_queue')
+          .delete()
+          .eq('id', id);
+        
+        if (error) throw new Error(error.message);
+        return true;
+      } catch (err) {
+        console.error('❌ Error deleting reminder:', err);
+        throw err;
+      }
+    },
+  },
+  
+  ExerciseLibrary: {
+    // Get all exercises
+    getAll: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('exercise_library')
+          .select('*')
+          .eq('is_active', true)
+          .order('exercise_name', { ascending: true });
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error fetching exercise library:', err);
+        throw err;
+      }
+    },
+    
+    // Get exercises by category
+    getByCategory: async (category) => {
+      try {
+        const { data, error } = await supabase
+          .from('exercise_library')
+          .select('*')
+          .eq('category', category)
+          .eq('is_active', true)
+          .order('exercise_name', { ascending: true });
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error fetching exercises by category:', err);
+        throw err;
+      }
+    },
+    
+    // Search exercises
+    search: async (searchTerm) => {
+      try {
+        const { data, error } = await supabase
+          .from('exercise_library')
+          .select('*')
+          .ilike('exercise_name', `%${searchTerm}%`)
+          .eq('is_active', true)
+          .order('exercise_name', { ascending: true });
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error searching exercises:', err);
+        throw err;
+      }
+    },
+    
+    // Create exercise
+    create: async (exerciseData) => {
+      try {
+        const { data, error } = await supabase
+          .from('exercise_library')
+          .insert([exerciseData])
+          .select()
+          .single();
+        
+        if (error) throw new Error(error.message);
+        return data;
+      } catch (err) {
+        console.error('❌ Error creating exercise:', err);
+        throw err;
+      }
+    },
+    
+    // Update exercise
+    update: async (id, updates) => {
+      try {
+        const { data, error } = await supabase
+          .from('exercise_library')
+          .update({ ...updates, updated_at: new Date().toISOString() })
+          .eq('id', id)
+          .select()
+          .single();
+        
+        if (error) throw new Error(error.message);
+        return data;
+      } catch (err) {
+        console.error('❌ Error updating exercise:', err);
+        throw err;
+      }
+    },
+  },
 };
 
 // Azure OpenAI Configuration

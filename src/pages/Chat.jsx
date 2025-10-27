@@ -1589,17 +1589,6 @@ Your task is to respond to the user's message below, taking into account their s
               <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-green-400/10 to-blue-400/10 rounded-full blur-3xl"></div>
               
               <div className="relative z-10 flex-1 p-4 overflow-hidden">
-                {/* New Message Indicator */}
-                {hasNewMessages && userScrollPosition !== 'bottom' && (
-                  <div className="flex justify-center mb-3">
-                    <Button
-                      onClick={scrollToBottom}
-                      className="bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold py-2 px-4 rounded-xl shadow-lg hover:from-green-600 hover:to-emerald-700 hover:shadow-xl transition-all duration-300 animate-pulse"
-                    >
-                      📬 {translations.newMessagesClickToView || 'New messages - Click to view'}
-                    </Button>
-                  </div>
-                )}
                 
                 <ScrollArea 
                   className="h-full pr-3" 

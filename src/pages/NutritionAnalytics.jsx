@@ -28,6 +28,14 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   LineChart,
   Line,
   XAxis,
@@ -70,7 +78,8 @@ import {
   Flame,
   Beef,
   Cookie,
-  Droplets
+  Droplets,
+  Info
 } from 'lucide-react';
 
 // Color palette for charts
@@ -106,6 +115,10 @@ export default function NutritionAnalytics() {
   const [selectedMetrics, setSelectedMetrics] = useState(['total_calories', 'total_protein_g', 'total_carbs_g', 'total_fat_g']); // Show all macros by default
   const [chartType, setChartType] = useState('line');
   const [activeTab, setActiveTab] = useState('overview');
+  const [exportDateRange, setExportDateRange] = useState('30'); // Export date range
+  const [customExportStart, setCustomExportStart] = useState('');
+  const [customExportEnd, setCustomExportEnd] = useState('');
+  const [showExportDialog, setShowExportDialog] = useState(false);
 
   // Check if current language is Hebrew (RTL)
   const isRTL = language === 'he';
@@ -451,9 +464,38 @@ export default function NutritionAnalytics() {
     return null;
   };
 
+  // Get logs for export based on date range
+  const getLogsForExport = () => {
+    let logsToExport = foodLogs;
+
+    if (exportDateRange === 'custom') {
+      if (!customExportStart || !customExportEnd) {
+        return logsToExport;
+      }
+      const startDate = new Date(customExportStart);
+      const endDate = new Date(customExportEnd);
+      logsToExport = logsToExport.filter(log => {
+        if (!log.original_date) return false;
+        const logDate = new Date(log.original_date);
+        return logDate >= startDate && logDate <= endDate;
+      });
+    } else if (exportDateRange !== 'all') {
+      const daysAgo = new Date();
+      daysAgo.setDate(daysAgo.getDate() - parseInt(exportDateRange));
+      logsToExport = logsToExport.filter(log => {
+        if (!log.original_date) return false;
+        const logDate = new Date(log.original_date);
+        return logDate >= daysAgo;
+      });
+    }
+
+    return logsToExport;
+  };
+
   // Export nutrition data as CSV
   const handleExport = () => {
-    if (!filteredLogs.length) return;
+    const logsToExport = getLogsForExport();
+    if (!logsToExport.length) return;
 
     const headers = [
       translations.date || 'Date',
@@ -461,32 +503,61 @@ export default function NutritionAnalytics() {
       translations.calories || 'Calories',
       translations.protein || 'Protein (g)',
       translations.carbohydrates || 'Carbs (g)',
-      translations.fat || 'Fat (g)'
+      translations.fat || 'Fat (g)',
+      'Food Items'
     ];
 
-    const csvData = filteredLogs.map(log => [
-      log.display_date,
-      log.meal_label || 'Unknown',
-      log.total_calories,
-      log.total_protein_g,
-      log.total_carbs_g,
-      log.total_fat_g
-    ]);
+    const csvData = logsToExport.map(log => {
+      const foodItems = log.food_items && Array.isArray(log.food_items) 
+        ? log.food_items.map(item => {
+            if (typeof item === 'string') return item;
+            if (typeof item === 'object') {
+              return item.food_name || item.name || item.title || item.product_name || item.label || JSON.stringify(item);
+            }
+            return String(item);
+          }).join('; ')
+        : '';
+
+      return [
+        log.display_date,
+        log.meal_label || 'Unknown',
+        log.total_calories || '',
+        log.total_protein_g || '',
+        log.total_carbs_g || '',
+        log.total_fat_g || '',
+        foodItems
+      ];
+    });
 
     const csvContent = [
       headers.join(','),
-      ...csvData.map(row => row.join(','))
+      ...csvData.map(row => row.map(cell => 
+        typeof cell === 'string' && cell.includes(',') ? `"${cell}"` : cell
+      ).join(','))
     ].join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
+    
+    const dateRangeText = exportDateRange === 'custom' 
+      ? `${customExportStart}_to_${customExportEnd}`
+      : exportDateRange === 'all' 
+        ? 'all_time'
+        : `last_${exportDateRange}_days`;
+    
+    // Use client name instead of user code, sanitize filename
+    const clientName = selectedClient?.full_name?.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_') || 'client';
+    
     link.setAttribute('href', url);
-    link.setAttribute('download', `nutrition_logs_${selectedClient?.user_code || 'client'}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `nutrition_logs_${clientName}_${dateRangeText}_${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    
+    // Close dialog
+    setShowExportDialog(false);
   };
 
   // Render chart based on type
@@ -937,9 +1008,9 @@ export default function NutritionAnalytics() {
                   {translations.refresh}
                 </Button>
 
-                <Button variant="outline" size="sm" onClick={handleExport}>
+                <Button variant="outline" size="sm" onClick={() => setShowExportDialog(true)}>
                   <Download className="w-4 h-4 mr-2" />
-                  {translations.export}
+                  {translations.export || 'Export to CSV'}
                 </Button>
               </div>
             </div>
@@ -1016,7 +1087,7 @@ export default function NutritionAnalytics() {
                     </tr>
                   </thead>
                   <tbody>
-                    {chartData.slice(0, 10).map((day, index) => (
+                    {chartData.slice(-10).reverse().map((day, index) => (
                       <React.Fragment key={index}>
                         {index > 0 && (
                           <tr>
@@ -1094,6 +1165,95 @@ export default function NutritionAnalytics() {
           </Card>
         </section>
       )}
+
+      {/* Export Dialog */}
+      <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Download className="h-5 w-5" />
+              Export Nutrition Logs to CSV
+            </DialogTitle>
+            <DialogDescription>
+              Choose the date range for your nutrition logs export (CSV format compatible with Excel)
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Export Date Range</Label>
+              <Select value={exportDateRange} onValueChange={setExportDateRange}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="7">Last 7 days</SelectItem>
+                  <SelectItem value="30">Last 30 days</SelectItem>
+                  <SelectItem value="90">Last 90 days</SelectItem>
+                  <SelectItem value="365">Last year</SelectItem>
+                  <SelectItem value="all">All time</SelectItem>
+                  <SelectItem value="custom">Custom range</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {exportDateRange === 'custom' && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="customStart">Start Date</Label>
+                  <Input
+                    id="customStart"
+                    type="date"
+                    value={customExportStart}
+                    onChange={(e) => setCustomExportStart(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="customEnd">End Date</Label>
+                  <Input
+                    id="customEnd"
+                    type="date"
+                    value={customExportEnd}
+                    onChange={(e) => setCustomExportEnd(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center gap-2 text-blue-700 text-sm">
+                <Info className="h-4 w-4" />
+                <span>
+                  Exporting {getLogsForExport().length} nutrition entries
+                  {exportDateRange === 'custom' && customExportStart && customExportEnd 
+                    ? ` from ${customExportStart} to ${customExportEnd}`
+                    : exportDateRange === 'all' 
+                      ? ' (all time)'
+                      : ` (last ${exportDateRange} days)`
+                  }
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowExportDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleExport}
+              disabled={getLogsForExport().length === 0}
+              className="gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Export to CSV
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
