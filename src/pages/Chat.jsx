@@ -11,10 +11,11 @@ import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Image as ImageIcon, Send, Loader2, MessageSquare, InfoIcon, RefreshCw, Users, X, CheckCircle } from 'lucide-react';
+import { Image as ImageIcon, Send, Loader2, MessageSquare, InfoIcon, RefreshCw, Users, X, CheckCircle, Clock, Calendar } from 'lucide-react';
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/lib/supabase';
+import { uploadFile, validateFile, getFileCategory, formatFileSize } from '@/utils/storage';
 
 export default function Chat() {
   const { language, translations } = useLanguage();
@@ -47,6 +48,12 @@ export default function Chat() {
   const [toastMessage, setToastMessage] = useState(''); // Toast message content
   const [toastType, setToastType] = useState('success'); // Toast type (success, error, etc.)
   const [messageType, setMessageType] = useState('dietitian'); // Message type: 'dietitian', 'system_reminder'
+  
+  // Scheduling state
+  const [isScheduled, setIsScheduled] = useState(false); // Toggle between immediate and scheduled
+  const [scheduledDate, setScheduledDate] = useState(''); // Date for scheduled message (YYYY-MM-DD)
+  const [scheduledTime, setScheduledTime] = useState(''); // Time for scheduled message (HH:MM)
+  const [showScheduleDialog, setShowScheduleDialog] = useState(false); // Show schedule dialog
   
   // Scroll position tracking for auto-refresh
   const [userScrollPosition, setUserScrollPosition] = useState('bottom'); // 'bottom', 'middle', 'top'
@@ -351,12 +358,7 @@ export default function Chat() {
     };
   }, []);
 
-  const toBase64 = file =>
-    new Promise(resolve => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-    });
+  // Removed toBase64 function - now using Supabase Storage instead
 
   // Function to handle image click and open modal
   const handleImageClick = (imageUrl) => {
@@ -390,6 +392,20 @@ export default function Chat() {
         messageType = 'unknown';
       }
 
+      // Determine scheduled_for timestamp
+      let scheduledFor;
+      let triggerType;
+      
+      if (queueData.scheduled_for) {
+        // Use provided scheduled time
+        scheduledFor = queueData.scheduled_for;
+        triggerType = 'scheduled';
+      } else {
+        // Immediate delivery
+        scheduledFor = new Date().toISOString();
+        triggerType = 'immediate';
+      }
+
       const { data, error } = await supabase
         .from('user_message_queue')
         .insert({
@@ -398,10 +414,10 @@ export default function Chat() {
           message_type: messageType,
           message_content: queueData.content,
           message_priority: queueData.priority || 5,
-          scheduled_for: new Date().toISOString(),
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          optimal_delivery_window: { start_hour: 8, end_hour: 20 },
-          trigger_type: 'immediate',
+          scheduled_for: scheduledFor,
+          timezone: queueData.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+          optimal_delivery_window: queueData.optimal_delivery_window || { start_hour: 8, end_hour: 20 },
+          trigger_type: triggerType,
           context_data: {
             conversation_id: queueData.conversation_id,
             dietitian_id: queueData.dietitian_id,
@@ -652,6 +668,64 @@ export default function Chat() {
         // Dietitian is sending a message - send directly to new queue
         console.log('👨‍⚕️ Dietitian sending message directly...');
         
+        // Handle file upload if selected (for dietitian messages)
+        let fileUrl = null;
+        let fileType = null;
+        let fileAttachments = null;
+        
+        if (imageFile instanceof File) {
+          try {
+            console.log('📤 Uploading file to Supabase Storage...');
+            const uploadResult = await uploadFile(imageFile, `chat/${selectedClient.user_code}`);
+            
+            if (uploadResult.error) {
+              throw new Error(uploadResult.error);
+            }
+            
+            fileUrl = uploadResult.url;
+            fileType = getFileCategory(imageFile.type);
+            
+            fileAttachments = { 
+              file_url: fileUrl,
+              file_type: fileType,
+              file_name: imageFile.name,
+              file_size: imageFile.size,
+              mime_type: imageFile.type
+            };
+            
+            console.log('✅ File uploaded to storage:', fileUrl);
+          } catch (uploadError) {
+            console.error("Error uploading file:", uploadError);
+            setError(translations.failedToUpload || 'Failed to upload file');
+            showToast(`❌ ${translations.failedToUpload || 'Failed to upload file'}`, 'error');
+            setIsLoading(false);
+            return;
+          }
+        }
+        
+        // Validate scheduling if enabled
+        let scheduledForTimestamp = null;
+        if (isScheduled) {
+          if (!scheduledDate || !scheduledTime) {
+            setError('Please select both date and time for scheduled message');
+            setIsLoading(false);
+            return;
+          }
+          
+          // Combine date and time into ISO timestamp
+          const scheduleDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
+          
+          // Validate that scheduled time is in the future
+          if (scheduleDateTime <= new Date()) {
+            setError('Scheduled time must be in the future');
+            setIsLoading(false);
+            return;
+          }
+          
+          scheduledForTimestamp = scheduleDateTime.toISOString();
+          console.log('📅 Scheduling message for:', scheduledForTimestamp);
+        }
+        
         let queueData;
         let tempMessage;
         
@@ -665,7 +739,9 @@ export default function Chat() {
             content: message,
             role: 'assistant',
             priority: 1,
-            isSystemReminder: true
+            isSystemReminder: true,
+            scheduled_for: scheduledForTimestamp,
+            attachments: fileAttachments
           };
           
           tempMessage = {
@@ -673,8 +749,9 @@ export default function Chat() {
             role: 'assistant',
             content: message,
             conversation_id: conversationId,
-            created_at: new Date().toISOString(),
-            isSystemReminder: true // Flag to identify system reminder messages
+            created_at: scheduledForTimestamp || new Date().toISOString(),
+            isSystemReminder: true, // Flag to identify system reminder messages
+            attachments: fileAttachments
           };
         } else {
           // Regular dietitian message with name
@@ -709,7 +786,9 @@ export default function Chat() {
             user_code: selectedClient.user_code,
             content: `${dietitianName}: ${message}`,
             role: 'assistant',
-            priority: 1
+            priority: 1,
+            scheduled_for: scheduledForTimestamp,
+            attachments: fileAttachments
           };
           
           tempMessage = {
@@ -717,33 +796,65 @@ export default function Chat() {
             role: 'assistant',
             content: `${dietitianName}: ${message}`,
             conversation_id: conversationId,
-            created_at: new Date().toISOString(),
-            isDietitianMessage: true // Flag to identify dietitian messages for special styling
+            created_at: scheduledForTimestamp || new Date().toISOString(),
+            isDietitianMessage: true, // Flag to identify dietitian messages for special styling
+            attachments: fileAttachments
           };
+        }
+        
+        // Store the message in chat_messages table for immediate display
+        try {
+          const chatMessage = await ChatMessage.create({
+            role: tempMessage.role,
+            message: tempMessage.content, // Use 'message' column, not 'content'
+            content: tempMessage.content, // Also include content for compatibility
+            conversation_id: conversationId,
+            created_at: tempMessage.created_at,
+            attachments: fileAttachments
+          });
+          console.log('✅ Dietitian message stored in chat_messages:', chatMessage);
+          
+          // Update tempMessage with the actual stored message
+          tempMessage = chatMessage;
+        } catch (chatError) {
+          console.error('Error storing message in chat:', chatError);
+          // Continue anyway - message is in queue
         }
         
         await addToUserMessageQueue(queueData);
         console.log(`✅ ${messageType === 'system_reminder' ? 'System reminder' : 'Dietitian'} message added to new queue`);
         
-        // Update local state with the temporary message
-        setMessages(prev => [tempMessage, ...prev]);
+        // Only update local state if message is immediate (not scheduled)
+        if (!isScheduled) {
+          setMessages(prev => [tempMessage, ...prev]);
+        }
         
         // Clear form
         setMessage('');
         setImageFile(null);
+        setIsScheduled(false);
+        setScheduledDate('');
+        setScheduledTime('');
         if (fileInputRef.current) fileInputRef.current.value = '';
         
-        // Always scroll to bottom after sending message
-        setTimeout(() => {
-          chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-          setUserScrollPosition('bottom');
-          setHasNewMessages(false);
-        }, 100);
+        // Always scroll to bottom after sending message (only if immediate)
+        if (!isScheduled) {
+          setTimeout(() => {
+            chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            setUserScrollPosition('bottom');
+            setHasNewMessages(false);
+          }, 100);
+        }
         
         // Show success toast
-        showToast(`✅ ${messageType === 'system_reminder' ? 'System reminder' : 'Message'} sent to ${selectedClient.full_name}!`, 'success');
+        if (isScheduled) {
+          const scheduleDate = new Date(scheduledForTimestamp);
+          showToast(`📅 ${messageType === 'system_reminder' ? 'System reminder' : 'Message'} scheduled for ${scheduleDate.toLocaleString()} to ${selectedClient.full_name}!`, 'success');
+        } else {
+          showToast(`✅ ${messageType === 'system_reminder' ? 'System reminder' : 'Message'} sent to ${selectedClient.full_name}!`, 'success');
+        }
         
-        console.log(`✅ ${messageType === 'system_reminder' ? 'System reminder' : 'Dietitian'} message sent successfully`);
+        console.log(`✅ ${messageType === 'system_reminder' ? 'System reminder' : 'Dietitian'} message ${isScheduled ? 'scheduled' : 'sent'} successfully`);
         return;
       }
 
@@ -756,15 +867,34 @@ export default function Chat() {
         created_at: new Date().toISOString()
       };
 
-      let base64Image = null;
-      // Handle image upload if selected
+      let fileUrl = null;
+      let fileType = null;
+      // Handle file upload if selected
       if (imageFile instanceof File) {
         try {
-          base64Image = await toBase64(imageFile);
-          userMessage.attachments = { image_url: `data:image/jpeg;base64,${base64Image}` };
+          console.log('📤 Uploading file to Supabase Storage...');
+          const uploadResult = await uploadFile(imageFile, `chat/${selectedClient.user_code}`);
+          
+          if (uploadResult.error) {
+            throw new Error(uploadResult.error);
+          }
+          
+          fileUrl = uploadResult.url;
+          fileType = getFileCategory(imageFile.type);
+          
+          userMessage.attachments = { 
+            file_url: fileUrl,
+            file_type: fileType,
+            file_name: imageFile.name,
+            file_size: imageFile.size,
+            mime_type: imageFile.type
+          };
+          
+          console.log('✅ File uploaded to storage:', fileUrl);
         } catch (uploadError) {
-          console.error("Error uploading image:", uploadError);
-          setError(translations.failedToUpload);
+          console.error("Error uploading file:", uploadError);
+          setError(translations.failedToUpload || 'Failed to upload file');
+          showToast(`❌ ${translations.failedToUpload || 'Failed to upload file'}`, 'error');
           setIsLoading(false);
           return;
         }
@@ -913,14 +1043,14 @@ You can ask me specific questions about any meal, ingredient, nutrition values, 
 Your task is to respond to the user's message below, taking into account their specific dietary needs, health goals, allergies, limitations, nutrition targets, and their current meal plan. You can provide detailed information about their meals, suggest modifications, explain nutrition values, and answer any questions about their personalized meal plan.
 `;
 
-      if (base64Image) {
-        aiPrompt = `${instruction}The user has sent an image and a message. Analyze them and provide a helpful response.\nUSER MESSAGE: "${message}"`;
+      if (fileUrl) {
+        aiPrompt = `${instruction}The user has sent a ${fileType} file and a message. ${fileType === 'image' ? 'Analyze the image and' : ''} Provide a helpful response.\nFILE URL: ${fileUrl}\nUSER MESSAGE: "${message}"`;
       } else {
         aiPrompt = `${instruction}The user has sent a message. Provide a helpful response.\nUSER MESSAGE: "${message}"`;
       }
 
       // Default fallback response in case AI fails
-      let aiResponse = `Hi ${selectedClient.full_name.split(' ')[0]}! Thank you for your message${base64Image ? ' and the food image' : ''}. \n\n`;
+      let aiResponse = `Hi ${selectedClient.full_name.split(' ')[0]}! Thank you for your message${fileUrl ? ` and the ${fileType}` : ''}. \n\n`;
 
       // Include previous chat context if available
       if (clientProfile.user_context) {
@@ -1011,11 +1141,15 @@ Your task is to respond to the user's message below, taking into account their s
         }
       }
 
-      if (base64Image) {
-        aiResponse += `\n\nRegarding the food in your image:\n`;
+      if (fileUrl && fileType === 'image') {
+        aiResponse += `\n\nRegarding the image you've shared:\n`;
         aiResponse += `- This appears to be a meal you've shared for analysis\n`;
         aiResponse += `- Consider how it fits into your daily nutrition goals\n`;
         aiResponse += `- Feel free to ask specific questions about the nutritional content\n`;
+      } else if (fileUrl && fileType === 'video') {
+        aiResponse += `\n\nRegarding the video you've shared:\n`;
+        aiResponse += `- Thank you for sharing this video\n`;
+        aiResponse += `- I can provide guidance based on your description\n`;
       }
 
       aiResponse += `\n\nWould you like more specific advice about your meal plan or nutrition goals?`;
@@ -1025,7 +1159,7 @@ Your task is to respond to the user's message below, taking into account their s
         const response = await InvokeLLM({
           prompt: aiPrompt,
           add_context_from_internet: false,
-          base64Image: base64Image || undefined
+          imageUrl: fileUrl && fileType === 'image' ? fileUrl : undefined
         });
         if (response) {
           aiResponse = response;
@@ -1082,7 +1216,12 @@ Your task is to respond to the user's message below, taking into account their s
         content: aiResponse,
         conversation_id: conversationId,
         created_at: new Date().toISOString(),
-        attachments: base64Image ? { image_url: `data:image/jpeg;base64,${base64Image}` } : null
+        attachments: fileUrl ? { 
+          file_url: fileUrl,
+          file_type: fileType,
+          file_name: imageFile?.name,
+          mime_type: imageFile?.type
+        } : null
       };
 
       // Update local state with the temporary AI message
@@ -1117,9 +1256,25 @@ Your task is to respond to the user's message below, taking into account their s
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
       if (file instanceof File) {
+        // Validate file before setting
+        const validation = validateFile(file);
+        if (!validation.valid) {
+          setError(validation.error);
+          showToast(`❌ ${validation.error}`, 'error');
+          if (fileInputRef.current) fileInputRef.current.value = '';
+          return;
+        }
+        
         setImageFile(file);
+        console.log('✅ File selected:', {
+          name: file.name,
+          size: formatFileSize(file.size),
+          type: file.type,
+          category: getFileCategory(file.type)
+        });
       } else {
         console.error("Selected file is not a valid File object.");
+        setError("Invalid file selected");
       }
     }
   };
@@ -1268,42 +1423,99 @@ Your task is to respond to the user's message below, taking into account their s
 
   // Function to check if message is from dietitian
   const isDietitianMessage = (msg) => {
+    // Support both 'message' and 'content' fields
+    const messageText = msg.content || msg.message || '';
     // Check if message has dietitian flag or contains dietitian name pattern
     return msg.isDietitianMessage ||
-           (msg.role === 'assistant' && msg.content && (
-             msg.content.startsWith('Dr. ') ||
-             msg.content.match(/^[A-Z][a-z]+: /) // Matches "Name: " pattern
+           (msg.role === 'assistant' && messageText && (
+             messageText.startsWith('Dr. ') ||
+             messageText.match(/^[A-Z][a-z]+: /) // Matches "Name: " pattern
            ));
   };
 
 
-  // Function to render message content with images
+  // Function to render message content with files (images, videos, etc.)
   const renderMessageContent = (msg) => {
-    const { text, imageUrl } = extractImageFromContent(msg.content);
-    const hasDirectImage = msg.attachments?.image_url;
+    // Support both 'message' (database column) and 'content' (local state) fields
+    const messageText = msg.content || msg.message || '';
+    const { text, imageUrl } = extractImageFromContent(messageText);
+    const fileUrl = msg.attachments?.file_url || msg.attachments?.image_url; // Support both new and old format
+    const fileType = msg.attachments?.file_type || (msg.attachments?.image_url ? 'image' : null);
+    const fileName = msg.attachments?.file_name || 'Attached file';
     const hasContentImage = imageUrl;
     const isFromDietitian = isDietitianMessage(msg);
 
     return (
       <>
-        {/* Show direct image first (from image upload) */}
-        {hasDirectImage && (
+        {/* Show file attachment (image, video, etc.) */}
+        {fileUrl && fileType === 'image' && (
           <div className="mb-3">
             <img
-              src={hasDirectImage}
-              alt={translations.uploadedFood || 'Uploaded food image'}
+              src={fileUrl}
+              alt={fileName}
               className="rounded-lg max-w-full max-h-64 object-cover shadow-sm border border-gray-200 cursor-pointer hover:opacity-90 transition-opacity duration-200"
-              onClick={() => handleImageClick(hasDirectImage)}
+              onClick={() => handleImageClick(fileUrl)}
               onError={(e) => {
                 e.target.style.display = 'none';
-                console.error('Failed to load direct image:', hasDirectImage);
+                console.error('Failed to load image:', fileUrl);
               }}
             />
           </div>
         )}
 
-        {/* Show image from content */}
-        {hasContentImage && !hasDirectImage && (
+        {/* Show video attachment */}
+        {fileUrl && fileType === 'video' && (
+          <div className="mb-3">
+            <video
+              src={fileUrl}
+              controls
+              className="rounded-lg max-w-full max-h-64 shadow-sm border border-gray-200"
+              onError={(e) => {
+                e.target.style.display = 'none';
+                console.error('Failed to load video:', fileUrl);
+              }}
+            >
+              Your browser does not support the video tag.
+            </video>
+          </div>
+        )}
+
+        {/* Show audio attachment */}
+        {fileUrl && fileType === 'audio' && (
+          <div className="mb-3">
+            <audio
+              src={fileUrl}
+              controls
+              className="w-full max-w-md"
+              onError={(e) => {
+                e.target.style.display = 'none';
+                console.error('Failed to load audio:', fileUrl);
+              }}
+            >
+              Your browser does not support the audio tag.
+            </audio>
+          </div>
+        )}
+
+        {/* Show document/other file types */}
+        {fileUrl && !['image', 'video', 'audio'].includes(fileType) && (
+          <div className="mb-3 p-3 bg-slate-100 rounded-lg border border-slate-200">
+            <a
+              href={fileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 text-blue-600 hover:text-blue-800 transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span className="font-medium">{fileName}</span>
+            </a>
+          </div>
+        )}
+
+        {/* Show image from content (legacy support) */}
+        {hasContentImage && !fileUrl && (
           <div className="mb-3">
             <img
               src={hasContentImage}
@@ -1705,11 +1917,67 @@ Your task is to respond to the user's message below, taking into account their s
                   </div>
                 )}
                 
+                {/* Scheduling Options - only show for dietitians */}
+                {currentDietitian?.id && clientId && messages.length > 0 && (
+                  <div className="mb-3">
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => setIsScheduled(!isScheduled)}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-200 ${
+                          isScheduled
+                            ? 'bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-lg'
+                            : 'bg-gradient-to-r from-slate-100 to-slate-200 text-slate-700 hover:from-slate-200 hover:to-slate-300'
+                        }`}
+                      >
+                        <Clock className="h-4 w-4" />
+                        <span className="text-sm font-medium">
+                          {isScheduled ? 'Scheduled' : 'Send Now'}
+                        </span>
+                      </button>
+                      
+                      {isScheduled && (
+                        <div className="flex items-center gap-2 flex-1">
+                          <div className="flex items-center gap-2 bg-white/60 backdrop-blur-sm border border-purple-200 rounded-lg px-3 py-2">
+                            <Calendar className="h-4 w-4 text-purple-600" />
+                            <input
+                              type="date"
+                              value={scheduledDate}
+                              onChange={(e) => setScheduledDate(e.target.value)}
+                              min={new Date().toISOString().split('T')[0]}
+                              className="text-sm bg-transparent border-none outline-none text-slate-700"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2 bg-white/60 backdrop-blur-sm border border-purple-200 rounded-lg px-3 py-2">
+                            <Clock className="h-4 w-4 text-purple-600" />
+                            <input
+                              type="time"
+                              value={scheduledTime}
+                              onChange={(e) => setScheduledTime(e.target.value)}
+                              className="text-sm bg-transparent border-none outline-none text-slate-700"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {isScheduled && scheduledDate && scheduledTime && (
+                      <div className="mt-2 p-2 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-lg">
+                        <div className="flex items-center gap-2 text-purple-700 text-xs">
+                          <Clock className="h-4 w-4" />
+                          <span className="font-medium">
+                            Scheduled for: {new Date(`${scheduledDate}T${scheduledTime}`).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
                 <div className="flex gap-3">
                   <input
                     type="file"
                     ref={fileInputRef}
-                    accept="image/*"
+                    accept="image/*,video/*,audio/*,.pdf"
                     className="hidden"
                     onChange={handleFileChange}
                   />
@@ -1733,9 +2001,9 @@ Your task is to respond to the user's message below, taking into account their s
                         ? (translations.waitingForClientMessage || 'Waiting for client to start conversation...')
                         : (currentDietitian?.id && clientId 
                             ? (messageType === 'system_reminder' 
-                                ? `${translations.sendSystemReminder} ${selectedClient.full_name}...` 
-                                : `${translations.messageClient} ${selectedClient.full_name}...`)
-                            : `${translations.messageClient} ${selectedClient.full_name}...`)
+                                ? `${translations.sendSystemReminder || 'Send system reminder to'} ${selectedClient.full_name}...` 
+                                : `${translations.messageClient || 'Message'} ${selectedClient.full_name}...`)
+                            : `${translations.messageClient || 'Message'} ${selectedClient.full_name}...`)
                     }
                     disabled={isLoading || messages.length === 0}
                     className={`flex-1 h-10 bg-white/60 backdrop-blur-sm border border-white/20 rounded-lg shadow-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500/40 transition-all duration-300 text-sm ${
@@ -1744,13 +2012,15 @@ Your task is to respond to the user's message below, taking into account their s
                   />
                   <Button
                     onClick={handleSend}
-                    disabled={(!message.trim() && !imageFile) || isLoading || messages.length === 0}
+                    disabled={(!message.trim() && !imageFile) || isLoading || messages.length === 0 || (isScheduled && (!scheduledDate || !scheduledTime))}
                     className={`w-10 h-10 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 ${
                       messages.length === 0 ? 'opacity-50 cursor-not-allowed' : ''
                     }`}
                   >
                     {isLoading ? (
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                    ) : isScheduled ? (
+                      <Clock className="h-4 w-4" />
                     ) : (
                       <Send className="h-4 w-4" />
                     )}
@@ -1762,7 +2032,7 @@ Your task is to respond to the user's message below, taking into account their s
                       <div className="w-5 h-5 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-md flex items-center justify-center">
                         <ImageIcon className="h-3 w-3 text-white" />
                       </div>
-                      <span className="font-medium">{translations.imageSelected}: {imageFile.name}</span>
+                      <span className="font-medium">{translations.imageSelected || 'Image selected'}: {imageFile.name}</span>
                     </div>
                   </div>
                 )}
