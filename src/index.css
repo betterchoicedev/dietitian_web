@@ -325,6 +325,12 @@
   }
 }
 
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-8px); }
+  20%, 40%, 60%, 80% { transform: translateX(8px); }
+}
+
 @layer utilities {
   /* Animation Utilities */
   .animate-float-gentle {
@@ -350,6 +356,10 @@
   .animate-shimmer {
     background-size: 200% 100%;
     animation: shimmer-premium 2s infinite;
+  }
+
+  .animate-shake {
+    animation: shake 0.5s ease-in-out;
   }
 
   /* Premium Glass Effects */

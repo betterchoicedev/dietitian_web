@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 
-import { ArrowLeft, Loader, Save, Clock, Utensils, CalendarRange, ArrowRight, RefreshCw, Plus, ArrowUp, ArrowDown, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, Loader, Save, Clock, Utensils, CalendarRange, ArrowRight, RefreshCw, Plus, ArrowUp, ArrowDown, X, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
@@ -3075,7 +3075,7 @@ const MenuCreate = () => {
 
   const navigate = useNavigate();
 
-  const { language, translations } = useLanguage();
+  const { language, translations, dir } = useLanguage();
 
   const [generatingAlt, setGeneratingAlt] = useState({});
 
@@ -3230,6 +3230,38 @@ const MenuCreate = () => {
   const [hasUnsavedMealPlanChanges, setHasUnsavedMealPlanChanges] = useState(false);
 
   const [savedMealPlanStructure, setSavedMealPlanStructure] = useState(null);
+
+  const [updatingMealDescriptions, setUpdatingMealDescriptions] = useState(false);
+
+  // Meal template states
+  const [mealTemplates, setMealTemplates] = useState([]);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [showTemplateManager, setShowTemplateManager] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState(null);
+  const [templateFormData, setTemplateFormData] = useState({ name: '', tags: [] });
+  const [showTemplateLimitationDialog, setShowTemplateLimitationDialog] = useState(false);
+  const [pendingTemplateSave, setPendingTemplateSave] = useState(null);
+  const [currentDietitian, setCurrentDietitian] = useState(null);
+
+  // Get emoji for template based on name
+  const getTemplateEmoji = (templateName) => {
+    const name = templateName?.toLowerCase() || '';
+    if (name.includes('balanced')) return '⚖️';
+    if (name.includes('dairy')) return '🥛';
+    if (name.includes('family')) return '👨‍👩‍👧‍👦';
+    if (name.includes('gluten') && name.includes('free')) return '🌾';
+    if (name.includes('high-protein')) return '💪';
+    if (name.includes('kosher')) return '✡️';
+    if (name.includes('lactose') && name.includes('free')) return '🧀';
+    if (name.includes('meat')) return '🥩';
+    if (name.includes('mediterranean')) return '🍋';
+    if (name.includes('nut') && name.includes('free')) return '🥜';
+    if (name.includes('quick') || name.includes('simple')) return '⚡';
+    if (name.includes('vegan')) return '🌱';
+    if (name.includes('vegetarian')) return '🥗';
+    return '📋';
+  };
 
   const [mealPlanStructure, setMealPlanStructure] = useState(() => {
 
@@ -6693,6 +6725,16 @@ const MenuCreate = () => {
 
     setMealPlanStructure(updatedStructure);
 
+    // Immediately reflect in Number of Meals section
+    setNumberOfMeals(updatedStructure.length);
+    try {
+      if (selectedClient?.user_code) {
+        entities?.ChatUser?.update && entities.ChatUser.update(selectedClient.user_code, { number_of_meals: updatedStructure.length });
+      }
+    } catch (e) {
+      console.warn('Failed to persist number_of_meals after add:', e);
+    }
+
   };
 
 
@@ -6712,6 +6754,15 @@ const MenuCreate = () => {
     if (totalCalories === 0) {
 
       setMealPlanStructure(updatedStructure);
+      // Immediately reflect in Number of Meals section
+      setNumberOfMeals(updatedStructure.length);
+      try {
+        if (selectedClient?.user_code) {
+          entities?.ChatUser?.update && entities.ChatUser.update(selectedClient.user_code, { number_of_meals: updatedStructure.length });
+        }
+      } catch (e) {
+        console.warn('Failed to persist number_of_meals after remove:', e);
+      }
 
       return;
 
@@ -6878,6 +6929,15 @@ const MenuCreate = () => {
     
 
     setMealPlanStructure(rebalancedStructure);
+    // Immediately reflect in Number of Meals section
+    setNumberOfMeals(rebalancedStructure.length);
+    try {
+      if (selectedClient?.user_code) {
+        entities?.ChatUser?.update && entities.ChatUser.update(selectedClient.user_code, { number_of_meals: rebalancedStructure.length });
+      }
+    } catch (e) {
+      console.warn('Failed to persist number_of_meals after remove:', e);
+    }
 
   };
 
@@ -6941,6 +7001,552 @@ const MenuCreate = () => {
 
     setMealPlanStructure(updatedStructure);
 
+  };
+
+
+
+  // Meal Template Functions
+  
+  // Fetch meal templates from database with variant information
+  const fetchMealTemplates = async () => {
+    try {
+      setLoadingTemplates(true);
+      
+      // Get current user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (user) {
+        setCurrentDietitian(user.id);
+        console.log('👤 Current dietitian:', user.id);
+      }
+      
+      // Fetch all meal templates with their variants
+      const { data: templates, error: templatesError } = await supabase
+        .from('meal_templates')
+        .select(`
+          *,
+          variants:meal_template_variants(meals_per_day)
+        `)
+        .order('name');
+      
+      if (templatesError) throw templatesError;
+      
+      // Process templates to include available meal counts and ownership
+      const processedTemplates = templates?.map(template => ({
+        ...template,
+        availableMealCounts: template.variants?.map(v => v.meals_per_day).sort((a, b) => a - b) || [],
+        isOwnedByCurrentUser: user ? template.dietitian_id === user.id : false
+      })) || [];
+      
+      console.log('✅ Fetched meal templates with variants:', processedTemplates);
+      setMealTemplates(processedTemplates);
+      
+    } catch (err) {
+      console.error('❌ Error fetching meal templates:', err);
+      alert(`Failed to load meal templates: ${err.message}`);
+    } finally {
+      setLoadingTemplates(false);
+    }
+  };
+  
+  // Fetch meals for a specific template variant
+  const fetchTemplateVariant = async (templateId, mealsPerDay) => {
+    try {
+      // Find the variant for this template with the specified meals_per_day
+      const { data: variants, error: variantError } = await supabase
+        .from('meal_template_variants')
+        .select('id')
+        .eq('template_id', templateId)
+        .eq('meals_per_day', mealsPerDay)
+        .single();
+      
+      if (variantError) throw variantError;
+      
+      if (!variants) {
+        console.warn(`No variant found for template ${templateId} with ${mealsPerDay} meals`);
+        return null;
+      }
+      
+      // Fetch all meals for this variant
+      const { data: meals, error: mealsError } = await supabase
+        .from('meal_template_meals')
+        .select('*')
+        .eq('variant_id', variants.id)
+        .order('position');
+      
+      if (mealsError) throw mealsError;
+      
+      return meals;
+    } catch (err) {
+      console.error('❌ Error fetching template variant:', err);
+      return null;
+    }
+  };
+  
+  // Apply template to meal plan structure
+  const applyMealTemplate = async (template) => {
+    try {
+      if (!template) {
+        alert('Please select a template first');
+        return;
+      }
+      
+      const mealsPerDay = numberOfMeals || selectedClient?.number_of_meals || 4;
+      
+      console.log(`📋 Applying template "${template.name}" with ${mealsPerDay} meals per day`);
+      
+      // Fetch the template variant and its meals
+      const meals = await fetchTemplateVariant(template.id, mealsPerDay);
+      
+      if (!meals || meals.length === 0) {
+        alert(`No meals found for template "${template.name}" with ${mealsPerDay} meals per day.\nPlease select a different template or adjust the number of meals.`);
+        return;
+      }
+      
+      // Convert template meals to meal plan structure format
+      const totalCalories = userTargets?.calories_per_day || userTargets?.calories || 0;
+      const caloriesPerMeal = totalCalories > 0 ? Math.round(totalCalories / meals.length) : 0;
+      const percentagePerMeal = meals.length > 0 ? Math.round((100 / meals.length) * 10) / 10 : 0;
+      
+      const newMealPlanStructure = meals.map((meal, index) => ({
+        key: `meal_${index + 1}`,
+        meal: meal.name,
+        description: meal.example || '',
+        calories: caloriesPerMeal,
+        calories_pct: percentagePerMeal,
+        locked: false
+      }));
+      
+      setMealPlanStructure(newMealPlanStructure);
+      setSelectedTemplate(template);
+      setHasUnsavedMealPlanChanges(true);
+      
+      console.log('✅ Applied meal template successfully:', newMealPlanStructure);
+      
+    } catch (err) {
+      console.error('❌ Error applying meal template:', err);
+      alert(`Failed to apply meal template: ${err.message}`);
+    }
+  };
+  
+  // Load templates on component mount
+  useEffect(() => {
+    fetchMealTemplates();
+  }, []);
+  
+  // Save current meal plan as a template - initial validation
+  const saveAsTemplate = async () => {
+    const currentMealsPerDay = mealPlanStructure.length;
+    
+    // Validate that all meals have descriptions
+    const mealsWithDescriptions = mealPlanStructure.filter(meal => 
+      meal.description && meal.description.trim() !== ''
+    ).length;
+    
+    if (mealsWithDescriptions < currentMealsPerDay) {
+      alert(
+        `❌ ${translations.cannotSaveIncompleteTemplate || 'Cannot Save Incomplete Template'}\n\n` +
+        `You must fill in descriptions for ALL ${currentMealsPerDay} meals before saving as a template.\n\n` +
+        `Current progress: ${mealsWithDescriptions}/${currentMealsPerDay} meals filled\n\n` +
+        `Please complete all meal descriptions and try again.`
+      );
+      return;
+    }
+    
+    // Show limitation dialog if less than 6 meals, otherwise proceed directly
+    if (currentMealsPerDay < 6) {
+      setPendingTemplateSave({ currentMealsPerDay });
+      setShowTemplateLimitationDialog(true);
+    } else {
+      // 6 meals - proceed directly
+      await continueTemplateSave();
+    }
+  };
+  
+  // Continue with template save after confirmation
+  const continueTemplateSave = async () => {
+    try {
+      const currentMealsPerDay = mealPlanStructure.length;
+      
+      const templateName = prompt('Enter a name for this meal plan template:');
+      if (!templateName || templateName.trim() === '') {
+        return;
+      }
+      
+      const templateTags = prompt('Enter tags for this template (comma-separated, optional):');
+      const tags = templateTags ? templateTags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0) : [];
+      
+      console.log('💾 Saving meal plan as template:', templateName);
+      
+      // Get the current authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !user) {
+        console.error('❌ Authentication error:', authError);
+        alert('You must be logged in to create templates');
+        return;
+      }
+      
+      console.log('👤 Creating template for dietitian:', user.id);
+      
+      // Create the meal template with dietitian_id
+      const { data: template, error: templateError } = await supabase
+        .from('meal_templates')
+        .insert({
+          name: templateName,
+          tags: tags,
+          dietitian_id: user.id
+        })
+        .select()
+        .single();
+      
+      if (templateError) throw templateError;
+      
+      console.log('✅ Created template:', template);
+      
+      // Only allow creating variants for meal counts <= current
+      const possibleVariants = [3, 4, 5, 6].filter(count => count <= currentMealsPerDay && count !== currentMealsPerDay);
+      
+      let createVariants = false;
+      if (possibleVariants.length > 0) {
+        createVariants = window.confirm(
+          `Would you like to create variants for FEWER meals?\n\n` +
+          `Current: ${currentMealsPerDay} meals\n` +
+          `Available variants: ${possibleVariants.join(', ')} meals\n\n` +
+          `Click OK to create all smaller variants (recommended)\n` +
+          `Click Cancel to only save the ${currentMealsPerDay}-meal version`
+        );
+      }
+      
+      const mealCountsToCreate = createVariants ? possibleVariants : [];
+      
+      // Always create the current variant first
+      const allMealCounts = [currentMealsPerDay, ...mealCountsToCreate];
+      
+      for (const mealsPerDay of allMealCounts) {
+        // Create the variant
+        const { data: variant, error: variantError } = await supabase
+          .from('meal_template_variants')
+          .insert({
+            template_id: template.id,
+            meals_per_day: mealsPerDay
+          })
+          .select()
+          .single();
+        
+        if (variantError) throw variantError;
+        
+        console.log(`✅ Created variant for ${mealsPerDay} meals:`, variant);
+        
+        // Always take first N meals from current structure (can only reduce, not expand)
+        const mealsToSave = mealPlanStructure.slice(0, mealsPerDay).map((meal, index) => ({
+          variant_id: variant.id,
+          position: index + 1,
+          name: meal.meal,
+          example: meal.description || null
+        }));
+        
+        // Insert meals for this variant
+        const { error: mealsError } = await supabase
+          .from('meal_template_meals')
+          .insert(mealsToSave);
+        
+        if (mealsError) throw mealsError;
+        
+        console.log(`✅ Created ${mealsToSave.length} meals for ${mealsPerDay}-meal variant`);
+      }
+      
+      const variantText = createVariants 
+        ? ` with variants for ${allMealCounts.join(', ')} meals`
+        : ` for ${currentMealsPerDay} meals`;
+      
+      alert(`Template "${templateName}" saved successfully${variantText}!`);
+      
+      // Refresh the templates list
+      await fetchMealTemplates();
+      
+    } catch (err) {
+      console.error('❌ Error saving template:', err);
+      alert(`Failed to save template: ${err.message}`);
+    }
+  };
+
+  // Render a template card (helper function for template manager)
+  const renderTemplateCard = (template) => {
+    return (
+      <div key={template.id} className={`border rounded-lg p-4 hover:shadow-md transition-shadow ${
+        template.isOwnedByCurrentUser 
+          ? 'border-purple-300 bg-purple-50/30' 
+          : 'border-gray-200 bg-white'
+      }`}>
+        <div className="flex items-start justify-between">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-2xl">{getTemplateEmoji(template.name)}</span>
+              <h4 className="font-semibold text-gray-900 text-lg">{template.name}</h4>
+              {template.isOwnedByCurrentUser && (
+                <Badge variant="outline" className="bg-purple-100 border-purple-400 text-purple-800 text-xs font-semibold">
+                  👤 {translations.yourTemplate || 'Your Template'}
+                </Badge>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1 mb-2">
+              {template.tags && template.tags.length > 0 && template.tags.map((tag, idx) => (
+                <Badge key={idx} variant="outline" className="bg-purple-50 border-purple-200 text-purple-700 text-xs">
+                  {tag}
+                </Badge>
+              ))}
+              <Badge variant="outline" className="bg-blue-50 border-blue-300 text-blue-700 text-xs font-semibold">
+                🍽️ Variants: {template.availableMealCounts?.map(count => {
+                  const isCurrent = count === (numberOfMeals || 4);
+                  return (
+                    <span key={count} className={isCurrent ? 'font-bold text-green-700' : ''}>
+                      {count}
+                    </span>
+                  );
+                }).reduce((prev, curr, idx) => [prev, idx > 0 ? ', ' : '', curr]) || 'none'}
+              </Badge>
+              {template.availableMealCounts?.includes(numberOfMeals || 4) && (
+                <Badge variant="outline" className="bg-green-50 border-green-300 text-green-700 text-xs">
+                  ✓ {translations.compatible || 'Compatible'}
+                </Badge>
+              )}
+              {!template.availableMealCounts?.includes(numberOfMeals || 4) && (
+                <Badge variant="outline" className="bg-amber-50 border-amber-300 text-amber-700 text-xs">
+                  ⚠️ {translations.needsVariant || `Needs ${numberOfMeals}-meal variant`}
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-gray-500">
+              Created: {new Date(template.created_at).toLocaleDateString()}
+            </p>
+          </div>
+          
+          <div className="flex gap-2">
+            {(() => {
+              const currentMealCount = numberOfMeals || 4;
+              const hasCurrentVariant = template.availableMealCounts?.includes(currentMealCount);
+              const canAddVariant = currentMealCount <= Math.max(...(template.availableMealCounts || [0]));
+              
+              if (hasCurrentVariant) {
+                // Template is compatible - show Apply button
+                return (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      await applyMealTemplate(template);
+                      setShowTemplateManager(false);
+                    }}
+                    className="text-green-600 border-green-300 hover:bg-green-50"
+                    title={translations.apply || 'Apply Template'}
+                  >
+                    ✓ {translations.apply || 'Apply'}
+                  </Button>
+                );
+              } else if (canAddVariant) {
+                // Can add a variant from existing larger variant
+                return (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      const addVariant = window.confirm(
+                        `This template doesn't have a ${currentMealCount}-meal variant yet.\n\n` +
+                        `Would you like to create a ${currentMealCount}-meal variant?\n\n` +
+                        `It will be created from the largest existing variant (${Math.max(...template.availableMealCounts)}-meal).\n\n` +
+                        `Available variants: ${template.availableMealCounts?.join(', ') || 'none'}`
+                      );
+                      
+                      if (addVariant) {
+                        try {
+                          // Get the largest variant
+                          const largestMealCount = Math.max(...template.availableMealCounts);
+                          const sourceMeals = await fetchTemplateVariant(template.id, largestMealCount);
+                          
+                          if (!sourceMeals) {
+                            throw new Error('Could not fetch source variant meals');
+                          }
+                          
+                          // Create new variant
+                          const { data: variant, error: variantError } = await supabase
+                            .from('meal_template_variants')
+                            .insert({
+                              template_id: template.id,
+                              meals_per_day: currentMealCount
+                            })
+                            .select()
+                            .single();
+                          
+                          if (variantError) throw variantError;
+                          
+                          // Create meals from source (take first N)
+                          const meals = sourceMeals.slice(0, currentMealCount).map((meal, index) => ({
+                            variant_id: variant.id,
+                            position: index + 1,
+                            name: meal.name,
+                            example: meal.example
+                          }));
+                          
+                          const { error: mealsError } = await supabase
+                            .from('meal_template_meals')
+                            .insert(meals);
+                          
+                          if (mealsError) throw mealsError;
+                          
+                          alert(`${currentMealCount}-meal variant created successfully!`);
+                          await fetchMealTemplates();
+                        } catch (err) {
+                          alert(`Failed to add variant: ${err.message}`);
+                        }
+                      }
+                    }}
+                    className="text-amber-600 border-amber-300 hover:bg-amber-50"
+                    title={translations.addVariant || 'Add Variant'}
+                  >
+                    ➕ {translations.addVariant || 'Add Variant'}
+                  </Button>
+                );
+              } else {
+                // Cannot add variant - need larger base template
+                return (
+                  <Badge variant="outline" className="bg-gray-100 border-gray-300 text-gray-600 text-xs">
+                    {translations.incompatible || 'Incompatible'}
+                  </Badge>
+                );
+              }
+            })()}
+            {template.isOwnedByCurrentUser ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setEditingTemplate(template);
+                    setTemplateFormData({
+                      name: template.name,
+                      tags: template.tags || []
+                    });
+                  }}
+                  className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                  title={translations.edit || 'Edit'}
+                >
+                  ✏️
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    if (window.confirm(translations.confirmDeleteTemplate || `Are you sure you want to delete the template "${template.name}"? This action cannot be undone.`)) {
+                      try {
+                        await deleteTemplate(template.id);
+                        alert(translations.templateDeleted || 'Template deleted successfully!');
+                      } catch (err) {
+                        alert(`Failed to delete template: ${err.message}`);
+                      }
+                    }
+                  }}
+                  className="text-red-600 border-red-300 hover:bg-red-50"
+                  title={translations.delete || 'Delete'}
+                >
+                  🗑️
+                </Button>
+              </>
+            ) : (
+              <Badge variant="outline" className="bg-gray-100 border-gray-300 text-gray-600 text-xs px-3">
+                🔒 {translations.readOnly || 'Read Only'}
+              </Badge>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Delete a template
+  const deleteTemplate = async (templateId) => {
+    try {
+      console.log('🗑️ Deleting template:', templateId);
+      
+      // First, get all variants for this template
+      const { data: variants, error: variantsError } = await supabase
+        .from('meal_template_variants')
+        .select('id')
+        .eq('template_id', templateId);
+      
+      if (variantsError) throw variantsError;
+      
+      // Delete all meals for each variant
+      if (variants && variants.length > 0) {
+        for (const variant of variants) {
+          const { error: mealsError } = await supabase
+            .from('meal_template_meals')
+            .delete()
+            .eq('variant_id', variant.id);
+          
+          if (mealsError) throw mealsError;
+        }
+        
+        // Delete all variants
+        const { error: deleteVariantsError } = await supabase
+          .from('meal_template_variants')
+          .delete()
+          .eq('template_id', templateId);
+        
+        if (deleteVariantsError) throw deleteVariantsError;
+      }
+      
+      // Finally, delete the template
+      const { error: templateError } = await supabase
+        .from('meal_templates')
+        .delete()
+        .eq('id', templateId);
+      
+      if (templateError) throw templateError;
+      
+      console.log('✅ Template deleted successfully');
+      
+      // If the deleted template was selected, clear the selection
+      if (selectedTemplate?.id === templateId) {
+        setSelectedTemplate(null);
+      }
+      
+      // Refresh the templates list
+      await fetchMealTemplates();
+      
+    } catch (err) {
+      console.error('❌ Error deleting template:', err);
+      throw err;
+    }
+  };
+
+  // Update an existing template
+  const updateTemplate = async (templateId, newName, newTags) => {
+    try {
+      console.log('✏️ Updating template:', templateId);
+      
+      const { error } = await supabase
+        .from('meal_templates')
+        .update({
+          name: newName,
+          tags: newTags
+        })
+        .eq('id', templateId);
+      
+      if (error) throw error;
+      
+      console.log('✅ Template updated successfully');
+      
+      // Refresh the templates list
+      await fetchMealTemplates();
+      
+    } catch (err) {
+      console.error('❌ Error updating template:', err);
+      throw err;
+    }
   };
 
 
@@ -7240,6 +7846,120 @@ const MenuCreate = () => {
       console.error('❌ Error in saveMealPlanStructure:', err);
 
       alert(`Failed to save meal plan structure: ${err.message}`);
+
+    }
+
+  };
+
+
+
+  const updateMealPlanDescriptionsWithAI = async () => {
+
+    if (!selectedClient?.user_code) {
+
+      alert('No client selected. Please select a client first.');
+
+      return;
+
+    }
+
+
+
+    setUpdatingMealDescriptions(true);
+
+
+
+    try {
+
+      console.log('🤖 Updating meal plan descriptions with AI for user:', selectedClient.user_code);
+
+
+      const response = await fetch('https://dietitian-be.azurewebsites.net/api/update-meal-plan-descriptions', {
+        // const response = await fetch('http://127.0.0.1:8000/api/update-meal-plan-descriptions', {
+
+        method: 'POST',
+
+        headers: {
+
+          'Content-Type': 'application/json',
+
+        },
+
+        body: JSON.stringify({
+
+          user_code: selectedClient.user_code
+
+        })
+
+      });
+
+
+
+      if (!response.ok) {
+
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+
+      }
+
+
+
+      const data = await response.json();
+
+
+
+      if (data.error) {
+
+        throw new Error(data.error);
+
+      }
+
+
+
+      if (data.meal_plan_structure && Array.isArray(data.meal_plan_structure)) {
+
+        // Update meal plan structure with AI-generated descriptions
+
+        // Preserve the locked property if it exists
+
+        const updatedStructure = data.meal_plan_structure.map((meal, index) => ({
+
+          ...meal,
+
+          locked: mealPlanStructure[index]?.locked || false
+
+        }));
+
+
+
+        setMealPlanStructure(updatedStructure);
+
+        setHasUnsavedMealPlanChanges(true);
+
+
+
+        console.log('✅ Meal plan descriptions updated successfully:', data);
+
+        alert('Meal plan descriptions updated successfully based on client\'s eating habits!');
+
+      } else {
+
+        throw new Error('Invalid response format from server');
+
+      }
+
+
+
+    } catch (err) {
+
+      console.error('❌ Error updating meal plan descriptions:', err);
+
+      alert(`Failed to update meal descriptions: ${err.message}`);
+
+    } finally {
+
+      setUpdatingMealDescriptions(false);
 
     }
 
@@ -7815,9 +8535,9 @@ const MenuCreate = () => {
 
 
 
-      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
 
-      // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+      const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
 
         method: "POST",
 
@@ -8009,9 +8729,9 @@ const MenuCreate = () => {
 
 
 
-      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
 
-      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
 
         method: "POST",
 
@@ -8241,23 +8961,133 @@ const MenuCreate = () => {
 
 
 
-    // Check if meal plan structure is empty or all meals have empty descriptions
+    // Check meal plan structure validation
 
     const hasEmptyMealPlan = !mealPlanStructure || mealPlanStructure.length === 0;
 
-    const allMealsEmpty = mealPlanStructure && mealPlanStructure.every(meal => 
+    
 
-      !meal.description || meal.description.trim() === ''
+    // If no template is selected, check meal descriptions
 
-    );
+    if (!selectedTemplate) {
 
+      // Count meals with and without descriptions
 
+      const mealsWithDescriptions = mealPlanStructure.filter(meal => 
 
-    if (hasEmptyMealPlan || allMealsEmpty) {
+        meal.description && meal.description.trim() !== ''
 
-      setShowEmptyMealPlanDialog(true);
+      ).length;
 
-      return; // Don't proceed until user confirms
+      const totalMeals = mealPlanStructure.length;
+
+      
+
+      // All meals are empty
+
+      if (mealsWithDescriptions === 0) {
+
+        setError(translations.mustSelectTemplateOrFillDescriptions || 
+
+          'You must either select a meal template OR fill in descriptions for all meals before generating.');
+
+        
+
+        // Expand the Meal Plan Structure section and scroll to it
+
+        setIsMealPlanMinimized(false);
+
+        setTimeout(() => {
+
+          const mealPlanSection = document.querySelector('[data-meal-plan-section]');
+
+          if (mealPlanSection) {
+
+            mealPlanSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            // Add a pulsing highlight effect with shake animation
+
+            mealPlanSection.classList.add('ring-4', 'ring-amber-400', 'animate-pulse');
+
+            
+
+            // Add shake effect
+
+            mealPlanSection.style.animation = 'shake 0.5s ease-in-out';
+
+            
+
+            setTimeout(() => {
+
+              mealPlanSection.classList.remove('ring-4', 'ring-amber-400', 'animate-pulse');
+
+              mealPlanSection.style.animation = '';
+
+            }, 2500);
+
+          }
+
+        }, 100);
+
+        
+
+        return;
+
+      }
+
+      
+
+      // Some meals are filled but not all (partial)
+
+      if (mealsWithDescriptions > 0 && mealsWithDescriptions < totalMeals) {
+
+        setError(translations.mustFillAllMealDescriptions || 
+
+          `You have filled ${mealsWithDescriptions} out of ${totalMeals} meals. Please fill in descriptions for ALL meals or select a template.`);
+
+        
+
+        // Expand the Meal Plan Structure section and scroll to it
+
+        setIsMealPlanMinimized(false);
+
+        setTimeout(() => {
+
+          const mealPlanSection = document.querySelector('[data-meal-plan-section]');
+
+          if (mealPlanSection) {
+
+            mealPlanSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            // Add a pulsing highlight effect with shake animation
+
+            mealPlanSection.classList.add('ring-4', 'ring-amber-400', 'animate-pulse');
+
+            
+
+            // Add shake effect
+
+            mealPlanSection.style.animation = 'shake 0.5s ease-in-out';
+
+            
+
+            setTimeout(() => {
+
+              mealPlanSection.classList.remove('ring-4', 'ring-amber-400', 'animate-pulse');
+
+              mealPlanSection.style.animation = '';
+
+            }, 2500);
+
+          }
+
+        }, 100);
+
+        
+
+        return;
+
+      }
 
     }
 
@@ -8405,9 +9235,9 @@ const MenuCreate = () => {
 
 
 
-      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
 
-      // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+      const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
 
         method: "POST",
 
@@ -8563,9 +9393,9 @@ const MenuCreate = () => {
 
 
 
-      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
 
-      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
 
         method: "POST",
 
@@ -11645,6 +12475,13 @@ const MenuCreate = () => {
                         });
                       }
 
+                      // Refresh the Nutrition Targets tab by re-fetching latest targets/macros
+                      try {
+                        await fetchUserTargets(selectedClient.user_code);
+                      } catch (e) {
+                        console.warn('⚠️ Failed to refresh user targets after save:', e);
+                      }
+
                       // Update the saved meal plan structure to reflect the changes
                       setSavedMealPlanStructure(saveData.meal_plan_structure);
                       setHasUnsavedMealPlanChanges(false);
@@ -11685,7 +12522,7 @@ const MenuCreate = () => {
 
       {selectedClient && userTargets && (
 
-        <Card className="border-blue-200 bg-blue-50/30 mb-6" data-meal-plan-section>
+        <Card className="border-blue-200 bg-blue-50/30 mb-6 transition-all duration-500 rounded-lg" data-meal-plan-section>
 
           <CardHeader>
 
@@ -11731,7 +12568,7 @@ const MenuCreate = () => {
 
           {!isMealPlanMinimized && (
 
-            <CardContent>
+            <CardContent className="animate-in slide-in-from-top-2 duration-300">
 
               <div className="space-y-3">
 
@@ -11744,6 +12581,38 @@ const MenuCreate = () => {
                   </p>
 
                   <div className="flex gap-2">
+
+                    <Button
+
+                      type="button"
+
+                      variant="outline"
+
+                      size="sm"
+
+                      onClick={updateMealPlanDescriptionsWithAI}
+
+                      disabled={updatingMealDescriptions}
+
+                      className="text-purple-600 border-purple-600 hover:bg-purple-50 disabled:opacity-50"
+
+                      title="Use AI to update meal descriptions based on client's eating habits"
+
+                    >
+
+                      {updatingMealDescriptions ? (
+
+                        <Loader className={`h-4 w-4 ${dir === 'rtl' ? 'ml-1' : 'mr-1'} animate-spin`} />
+
+                      ) : (
+
+                        <Sparkles className={`h-4 w-4 ${dir === 'rtl' ? 'ml-1' : 'mr-1'}`} />
+
+                      )}
+
+                      {updatingMealDescriptions ? (translations.updating || 'Updating...') : (translations.aiUpdate || 'AI Update')}
+
+                    </Button>
 
                     <Button
 
@@ -11775,13 +12644,51 @@ const MenuCreate = () => {
 
                       size="sm"
 
+                      onClick={saveAsTemplate}
+
+                      className="text-purple-600 border-purple-600 hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed"
+
+                      title={
+
+                        mealPlanStructure.some(meal => !meal.description || meal.description.trim() === '')
+
+                          ? translations.fillAllMealsFirst || 'Fill all meal descriptions first'
+
+                          : translations.saveCurrentAsReusableTemplate || 'Save current meal plan as a reusable template'
+
+                      }
+
+                      disabled={
+
+                        mealPlanStructure.length === 0 || 
+
+                        mealPlanStructure.some(meal => !meal.description || meal.description.trim() === '')
+
+                      }
+
+                    >
+
+                      <Save className={`h-4 w-4 ${dir === 'rtl' ? 'ml-1' : 'mr-1'}`} />
+
+                      {translations.saveAsTemplate || 'Save as Template'}
+
+                    </Button>
+
+                    <Button
+
+                      type="button"
+
+                      variant="outline"
+
+                      size="sm"
+
                       onClick={addMealToPlan}
 
                       className="text-green-600 border-green-600 hover:bg-green-50"
 
                     >
 
-                      <Plus className="h-4 w-4 mr-1" />
+                      <Plus className={`h-4 w-4 ${dir === 'rtl' ? 'ml-1' : 'mr-1'}`} />
 
                       {translations.addMeal || 'Add Meal'}
 
@@ -11791,7 +12698,157 @@ const MenuCreate = () => {
 
                 </div>
 
-
+                {/* Meal Template Selector */}
+                <div className="border border-blue-200 rounded-lg p-3 bg-gradient-to-br from-blue-50 to-white mb-4 shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <div className={`flex items-center gap-2 flex-shrink-0 ${dir === 'rtl' ? 'flex-row-reverse' : ''}`}>
+                      <span className="text-lg">📝</span>
+                      <label className="text-sm font-semibold text-gray-800 whitespace-nowrap">
+                        {translations.mealTemplate || 'Meal Template'}:
+                      </label>
+                    </div>
+                    <div className="flex-1">
+                      <Select
+                        value={selectedTemplate?.id || ''}
+                        onValueChange={(value) => {
+                          const template = mealTemplates.find(t => t.id === value);
+                          if (template) {
+                            applyMealTemplate(template);
+                          }
+                        }}
+                        disabled={loadingTemplates}
+                      >
+                        <SelectTrigger className="w-full bg-white border-blue-200 hover:border-blue-300 focus:ring-blue-500 focus:border-blue-500 transition-colors">
+                          <SelectValue placeholder={loadingTemplates ? 'Loading templates...' : (translations.selectTemplate || 'Select a template (optional)')} />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[400px]">
+                          {mealTemplates.map(template => {
+                            const currentMealCount = numberOfMeals || 4;
+                            const hasMatchingVariant = template.availableMealCounts?.includes(currentMealCount);
+                            const isDisabled = !hasMatchingVariant;
+                            
+                            return (
+                              <SelectItem 
+                                key={template.id} 
+                                value={template.id}
+                                disabled={isDisabled}
+                                className={`cursor-pointer ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-50 focus:bg-blue-50'}`}
+                              >
+                                <div className="flex items-center justify-between gap-3 py-1 w-full">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">{getTemplateEmoji(template.name)}</span>
+                                    <span className="font-medium">{template.name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    {template.tags && template.tags.length > 0 && (
+                                      <span className="text-xs text-gray-500">({template.tags.join(', ')})</span>
+                                    )}
+                                    <Badge 
+                                      variant="outline" 
+                                      className={`text-xs ${hasMatchingVariant ? 'bg-green-50 border-green-300 text-green-700' : 'bg-red-50 border-red-300 text-red-700'}`}
+                                    >
+                                      {template.availableMealCounts?.join(', ') || '?'} meals
+                                    </Badge>
+                                  </div>
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowTemplateManager(true)}
+                      className="text-purple-600 border-purple-300 hover:bg-purple-50 whitespace-nowrap"
+                      title={translations.manageTemplates || 'Manage Templates'}
+                    >
+                      <span className={dir === 'rtl' ? 'ml-1' : 'mr-1'}>⚙️</span> {translations.manage || 'Manage'}
+                    </Button>
+                    {selectedTemplate && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          // Clear the template selection
+                          setSelectedTemplate(null);
+                          
+                          // Also clear all meal descriptions from the structure
+                          setMealPlanStructure(prev => prev.map(meal => ({
+                            ...meal,
+                            description: ''
+                          })));
+                          
+                          // Mark as having unsaved changes
+                          setHasUnsavedMealPlanChanges(true);
+                        }}
+                        className="text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md flex-shrink-0 h-8 w-8 p-0"
+                        title="Clear template selection and meal descriptions"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                  {selectedTemplate && (
+                    <div className="mt-2 flex items-start gap-2 bg-blue-100/50 border border-blue-200 rounded-md p-2">
+                      <span className="text-blue-600">ℹ️</span>
+                      <p className="text-xs text-blue-800">
+                        <span className="font-medium">{translations.templateApplied || 'Template applied'}:</span> <span className="text-base">{getTemplateEmoji(selectedTemplate.name)}</span> {selectedTemplate.name}
+                        <span className="ml-2 text-blue-600">({numberOfMeals} meals)</span>
+                      </p>
+                    </div>
+                  )}
+                  {!selectedTemplate && mealTemplates.length > 0 && (() => {
+                    const currentMealCount = numberOfMeals || 4;
+                    const compatibleCount = mealTemplates.filter(t => t.availableMealCounts?.includes(currentMealCount)).length;
+                    const totalCount = mealTemplates.length;
+                    
+                    return (
+                      <div className={`mt-2 flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-md p-2 ${dir === 'rtl' ? 'flex-row-reverse' : ''}`}>
+                        <span className="text-blue-600">💡</span>
+                        <div className="flex-1">
+                          <p className="text-xs text-blue-700">
+                            {(translations.templateFilterInfo || `Showing templates for ${currentMealCount} meals:`).replace('{count}', currentMealCount)}
+                          </p>
+                          <p className="text-xs text-blue-600 font-medium mt-0.5">
+                            {compatibleCount} {translations.compatibleTemplates || 'compatible'}, {totalCount - compatibleCount} {translations.incompatibleDisabled || 'incompatible (disabled)'}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {(() => {
+                    // Only show warning if no template AND meals are not all filled
+                    const mealsWithDescriptions = mealPlanStructure.filter(meal => 
+                      meal.description && meal.description.trim() !== ''
+                    ).length;
+                    const totalMeals = mealPlanStructure.length;
+                    const allMealsFilled = mealsWithDescriptions === totalMeals;
+                    
+                    if (!selectedTemplate && !allMealsFilled) {
+                      return (
+                        <div className={`mt-2 flex items-start gap-2 bg-amber-50 border border-amber-300 rounded-md p-3 ${dir === 'rtl' ? 'flex-row-reverse' : ''}`}>
+                          <span className="text-amber-600 text-lg">⚠️</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-amber-900 mb-1">
+                              {translations.noTemplateSelected || 'No template selected'}
+                            </p>
+                            <p className="text-xs text-amber-800">
+                              {translations.mustFillAllDescriptions || 'You must fill in descriptions for ALL meals below, or select a template above. Partial descriptions are not allowed.'}
+                            </p>
+                            <p className="text-xs text-amber-700 mt-1 font-medium">
+                              {translations.currentProgress || 'Progress'}: {(translations.mealsFilledProgress || '{filled}/{total} meals filled').replace('{filled}', mealsWithDescriptions).replace('{total}', totalMeals)}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
 
                 <div className="border rounded-lg overflow-hidden">
 
@@ -11847,17 +12904,33 @@ const MenuCreate = () => {
 
                         <div className="col-span-2">
 
-                          <Input
+                          <div className="relative">
 
-                            value={meal.description}
+                            <Input
 
-                            onChange={(e) => updateMealInPlan(index, 'description', e.target.value)}
+                              value={meal.description}
 
-                            className="text-sm"
+                              onChange={(e) => updateMealInPlan(index, 'description', e.target.value)}
 
-                            placeholder={translations.mealDescriptionShort || translations.descriptionPlaceholder || 'Optional description'}
+                              className={`text-sm ${!selectedTemplate && (!meal.description || meal.description.trim() === '') ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200' : ''}`}
 
-                          />
+                              placeholder={!selectedTemplate ? (translations.required || 'Required') : (translations.mealDescriptionShort || translations.descriptionPlaceholder || 'Optional description')}
+
+                            />
+
+                            {!selectedTemplate && (!meal.description || meal.description.trim() === '') && (
+
+                              <span className="absolute -right-2 -top-2 flex h-3 w-3">
+
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+
+                                <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+
+                              </span>
+
+                            )}
+
+                          </div>
 
                         </div>
 
@@ -12160,6 +13233,88 @@ const MenuCreate = () => {
                     {translations.scalingFormula || 'Formula: Scaling Factor = (Daily Target - Locked Calories - Edited Meal) ÷ Other Unlocked Total'}
 
                   </p>
+
+                  
+
+                  {/* Validation Status Indicator */}
+
+                  {(() => {
+
+                    const mealsWithDescriptions = mealPlanStructure.filter(meal => 
+
+                      meal.description && meal.description.trim() !== ''
+
+                    ).length;
+
+                    const totalMeals = mealPlanStructure.length;
+
+                    const hasTemplate = !!selectedTemplate;
+
+                    const isValid = hasTemplate || mealsWithDescriptions === totalMeals;
+
+                    const isPartial = !hasTemplate && mealsWithDescriptions > 0 && mealsWithDescriptions < totalMeals;
+
+                    
+
+                    return (
+
+                      <div className={`mt-4 p-3 rounded-lg border-2 ${
+
+                        isValid 
+
+                          ? 'bg-green-50 border-green-300' 
+
+                          : isPartial
+
+                          ? 'bg-amber-50 border-amber-400'
+
+                          : 'bg-red-50 border-red-300'
+
+                      }`}>
+
+                        <div className="flex items-center gap-2">
+
+                          <span className="text-lg">
+
+                            {isValid ? '✅' : isPartial ? '⚠️' : '❌'}
+
+                          </span>
+
+                          <div className="flex-1">
+
+                            <p className={`text-sm font-semibold ${
+
+                              isValid ? 'text-green-800' : isPartial ? 'text-amber-800' : 'text-red-800'
+
+                            }`}>
+
+                              {isValid 
+
+                                ? (hasTemplate 
+
+                                  ? (translations.templateSelectedReady || `Template selected: Ready to generate!`) 
+
+                                  : ((translations.allMealsFilledReady || `All ${totalMeals} meals filled: Ready to generate!`).replace('{count}', totalMeals)))
+
+                                : isPartial
+
+                                ? ((translations.partialMealsWarning || `${mealsWithDescriptions}/${totalMeals} meals filled - Complete all or select a template`).replace('{filled}', mealsWithDescriptions).replace('{total}', totalMeals))
+
+                                : (translations.noMealsFilledWarning || 'No meals filled - Fill all meals or select a template')
+
+                              }
+
+                            </p>
+
+                          </div>
+
+                        </div>
+
+                      </div>
+
+                    );
+
+                  })()}
 
                 </div>
 
@@ -14225,108 +15380,550 @@ const MenuCreate = () => {
 
         </DialogContent>
 
-        </Dialog>
+      </Dialog>
 
-        {/* Unsaved Changes Warning Dialog */}
+      {/* Unsaved Changes Warning Dialog */}
 
-        <Dialog open={showUnsavedChangesDialog} onOpenChange={setShowUnsavedChangesDialog}>
+      <Dialog open={showUnsavedChangesDialog} onOpenChange={setShowUnsavedChangesDialog}>
 
-          <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md">
 
-            <DialogHeader>
+          <DialogHeader>
 
-              <DialogTitle className="flex items-center gap-2 text-orange-600">
+            <DialogTitle className="flex items-center gap-2 text-orange-600">
 
-                <span className="text-2xl">💾</span>
+              <span className="text-2xl">💾</span>
 
-                {translations.unsavedChangesWarning || 'Unsaved Changes'}
+              {translations.unsavedChangesWarning || 'Unsaved Changes'}
 
-              </DialogTitle>
+            </DialogTitle>
 
-              <DialogDescription className="text-gray-600 pt-2">
+            <DialogDescription className="text-gray-600 pt-2">
 
-                {translations.unsavedChangesMessage || 'You have unsaved changes to the meal plan structure. Please save your changes before generating a menu.'}
+              {translations.unsavedChangesMessage || 'You have unsaved changes to the meal plan structure. Please save your changes before generating a menu.'}
 
-              </DialogDescription>
+            </DialogDescription>
 
-            </DialogHeader>
+          </DialogHeader>
 
-            
+          
 
-            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 my-4">
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 my-4">
 
-              <div className="flex items-start gap-3">
+            <div className="flex items-start gap-3">
 
-                <div className="text-orange-600 text-lg">⚠️</div>
+              <div className="text-orange-600 text-lg">⚠️</div>
 
-                <div>
+              <div>
 
-                  <h4 className="font-medium text-orange-800 mb-1">
+                <h4 className="font-medium text-orange-800 mb-1">
 
-                    {translations.whatYouNeedToDo || 'What you need to do:'}
+                  {translations.whatYouNeedToDo || 'What you need to do:'}
 
-                  </h4>
+                </h4>
 
-                  <p className="text-sm text-orange-700">
+                <p className="text-sm text-orange-700">
 
-                    {translations.saveMealPlanFirst || 'Go to the "Meal Plan Structure" section and click "Save Plan" to save your changes before generating the menu.'}
+                  {translations.saveMealPlanFirst || 'Go to the "Meal Plan Structure" section and click "Save Plan" to save your changes before generating the menu.'}
 
-                  </p>
-
-                </div>
+                </p>
 
               </div>
 
             </div>
 
+          </div>
+
+          
+
+          <DialogFooter className="flex gap-3 sm:gap-3">
+
+            <Button
+
+              variant="outline"
+
+              onClick={() => setShowUnsavedChangesDialog(false)}
+
+              className="flex-1 border-gray-300 text-gray-700 hover:bg-gray-50"
+
+            >
+
+              {translations.cancel || 'Cancel'}
+
+            </Button>
+
+            <Button
+
+              onClick={() => {
+
+                setShowUnsavedChangesDialog(false);
+
+                // Scroll to meal plan structure section
+
+                const mealPlanSection = document.querySelector('[data-meal-plan-section]');
+
+                if (mealPlanSection) {
+
+                  mealPlanSection.scrollIntoView({ behavior: 'smooth' });
+
+                }
+
+              }}
+
+              className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
+
+            >
+
+              {translations.goToMealPlan || 'Go to Meal Plan'}
+
+            </Button>
+
+          </DialogFooter>
+
+        </DialogContent>
+
+      </Dialog>
+
+      {/* Template Limitation Warning Dialog */}
+      <Dialog open={showTemplateLimitationDialog} onOpenChange={setShowTemplateLimitationDialog}>
+        <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-amber-600">
+                <span className="text-2xl">⚠️</span>
+                {translations.templateLimitationWarning || 'Template Limitation'}
+              </DialogTitle>
+              <DialogDescription className="text-gray-600 pt-2">
+                {translations.templateLimitationMessage || `You are creating a template with ${pendingTemplateSave?.currentMealsPerDay || mealPlanStructure.length} meals.`}
+              </DialogDescription>
+            </DialogHeader>
             
+            <div className="space-y-4 my-4">
+              {/* Main Explanation */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <div className="text-blue-600 text-lg">ℹ️</div>
+                  <div>
+                    <h4 className="font-medium text-blue-800 mb-2">
+                      {translations.howTemplatesWork || 'How Templates Work:'}
+                    </h4>
+                    <p className="text-sm text-blue-700 mb-2">
+                      {translations.templateReductionExplanation || 'Templates can only be reduced to FEWER meals, not expanded to MORE meals.'}
+                    </p>
+                    <div className="space-y-1">
+                      <div className="flex items-start gap-2 text-sm">
+                        <span className="text-green-600">✅</span>
+                        <p className="text-green-700">
+                          <span className="font-semibold">{translations.canDo || 'You CAN'}:</span> {translations.canCreateVariants || 'Create variants for'} {pendingTemplateSave?.currentMealsPerDay || mealPlanStructure.length} {translations.mealsOrFewer || 'meals or fewer'}
+                        </p>
+                      </div>
+                      <div className="flex items-start gap-2 text-sm">
+                        <span className="text-red-600">❌</span>
+                        <p className="text-red-700">
+                          <span className="font-semibold">{translations.cannotDo || 'You CANNOT'}:</span> {translations.cannotCreateVariants || 'Create variants for'} {(translations.moreThanMeals || 'more than {count} meals').replace('{count}', pendingTemplateSave?.currentMealsPerDay || mealPlanStructure.length)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Recommendation Box */}
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <div className="text-purple-600 text-lg">💡</div>
+                  <div>
+                    <h4 className="font-medium text-purple-800 mb-1">
+                      {translations.recommendation || 'Recommendation:'}
+                    </h4>
+                    <p className="text-sm text-purple-700">
+                      {translations.createSixMealTemplateRecommendation || 'Create a 6-meal template first to get all possible variants (3, 4, 5, and 6 meals). This gives you maximum flexibility for all clients.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <DialogFooter className="flex gap-3 sm:gap-3">
-
               <Button
-
                 variant="outline"
-
-                onClick={() => setShowUnsavedChangesDialog(false)}
-
-                className="flex-1 border-gray-300 text-gray-700 hover:bg-gray-50"
-
-              >
-
-                {translations.cancel || 'Cancel'}
-
-              </Button>
-
-              <Button
-
                 onClick={() => {
-
-                  setShowUnsavedChangesDialog(false);
-
-                  // Scroll to meal plan structure section
-
-                  const mealPlanSection = document.querySelector('[data-meal-plan-section]');
-
-                  if (mealPlanSection) {
-
-                    mealPlanSection.scrollIntoView({ behavior: 'smooth' });
-
-                  }
-
+                  setShowTemplateLimitationDialog(false);
+                  setPendingTemplateSave(null);
                 }}
-
-                className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
-
+                className="flex-1 border-gray-300 text-gray-700 hover:bg-gray-50"
               >
-
-                {translations.goToMealPlan || 'Go to Meal Plan'}
-
+                {translations.cancel || 'Cancel'}
               </Button>
-
+              <Button
+                onClick={async () => {
+                  setShowTemplateLimitationDialog(false);
+                  await continueTemplateSave();
+                  setPendingTemplateSave(null);
+                }}
+                className="flex-1 bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                {translations.continueAnyway || 'Continue Anyway'}
+              </Button>
             </DialogFooter>
-
           </DialogContent>
+        </Dialog>
 
+        {/* Template Manager Dialog */}
+        <Dialog open={showTemplateManager} onOpenChange={setShowTemplateManager}>
+          <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-purple-600">
+                <span className="text-2xl">📋</span>
+                {translations.templateManager || 'Template Manager'}
+              </DialogTitle>
+              <DialogDescription className="text-gray-600 pt-2">
+                {translations.createEditManageTemplates || 'Create, edit, and manage your meal plan templates'}
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-6 py-4">
+              {/* Create New Template Section */}
+              <div className="border border-green-200 rounded-lg p-4 bg-green-50/30">
+                <h3 className="text-lg font-semibold text-green-800 mb-3 flex items-center gap-2">
+                  <Plus className="h-5 w-5" />
+                  {translations.createNewTemplate || 'Create New Template'}
+                </h3>
+                <p className="text-sm text-green-700 mb-3">
+                  {translations.createTemplateFromCurrent || 'Save your current meal plan structure as a reusable template'}
+                </p>
+                
+                {/* Current Structure Info */}
+                <div className={`border rounded-md p-3 mb-3 ${
+                  mealPlanStructure.every(meal => meal.description && meal.description.trim() !== '')
+                    ? 'bg-white border-green-200'
+                    : 'bg-amber-50 border-amber-300'
+                }`}>
+                  <div className="flex items-center gap-2 text-sm mb-2">
+                    <span className="font-semibold text-gray-800">{translations.currentStructure || 'Current structure'}:</span>
+                    <Badge variant="outline" className="bg-green-50 border-green-300 text-green-700">
+                      {mealPlanStructure.length} {translations.meals || 'meals'}
+                    </Badge>
+                    <Badge variant="outline" className={
+                      mealPlanStructure.every(meal => meal.description && meal.description.trim() !== '')
+                        ? 'bg-green-50 border-green-300 text-green-700'
+                        : 'bg-amber-50 border-amber-300 text-amber-700'
+                    }>
+                      {(translations.mealsFilledProgress || '{filled}/{total} filled').replace('{filled}', mealPlanStructure.filter(m => m.description && m.description.trim() !== '').length).replace('{total}', mealPlanStructure.length)}
+                    </Badge>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-green-600">
+                      ✅ {translations.canCreateVariants || 'Can create variants for'}:
+                      <span className="font-semibold ml-1">
+                        {mealPlanStructure.length} {translations.mealsOrFewer || 'meals or fewer'}
+                      </span>
+                    </p>
+                    {mealPlanStructure.length < 6 && (
+                      <p className="text-xs text-red-600">
+                        ❌ {translations.cannotCreateVariants || 'Cannot create variants for'}:
+                        <span className="font-semibold ml-1">
+                          {(translations.moreThanMeals || 'more than {count} meals').replace('{count}', mealPlanStructure.length)}
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Important Notice */}
+                {mealPlanStructure.length === 6 ? (
+                  <div className="bg-green-50 border-2 border-green-300 rounded-md p-3 mb-4">
+                    <div className="flex items-start gap-2">
+                      <span className="text-lg">🎉</span>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-green-900 mb-1">
+                          {translations.perfectForTemplate || 'Perfect for Template Creation!'}
+                        </p>
+                        <p className="text-xs text-green-800">
+                          {translations.sixMealOptimal || 'Your 6-meal structure is optimal! You can create variants for all meal counts (3, 4, 5, and 6 meals).'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-amber-50 border-2 border-amber-300 rounded-md p-3 mb-4">
+                    <div className="flex items-start gap-2">
+                      <span className="text-lg">⚠️</span>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-amber-900 mb-1">
+                          {translations.templateLimitation || 'Template Limitation'}
+                        </p>
+                        <p className="text-xs text-amber-800 mb-2">
+                          {translations.templateLimitationExplanation || 'Templates can only be reduced to FEWER meals, not expanded to MORE meals.'}
+                        </p>
+                        <div className="bg-white border border-amber-300 rounded p-2 mb-2">
+                          <p className="text-xs text-amber-900 font-semibold mb-1">
+                            📊 {translations.yourCurrentTemplate || 'Your current template'}:
+                          </p>
+                          <p className="text-xs text-green-700">
+                            ✅ {translations.willWorkFor || 'Will work for'}: {mealPlanStructure.length} {translations.mealsOrFewer || 'meals or fewer'}
+                          </p>
+                          <p className="text-xs text-red-700">
+                            ❌ {translations.wontWorkFor || 'Won\'t work for'}: {(translations.moreThanMeals || 'more than {count} meals').replace('{count}', mealPlanStructure.length)}
+                          </p>
+                        </div>
+                        <p className="text-xs text-amber-900 font-semibold bg-amber-100 border border-amber-400 rounded p-2">
+                          💡 {translations.createSixMealRecommendation || `To support ALL meal counts (3-6), create a 6-meal template. Or save now for limited compatibility.`}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Validation Message */}
+                {mealPlanStructure.some(meal => !meal.description || meal.description.trim() === '') && (
+                  <div className="bg-red-50 border border-red-300 rounded-md p-3 mb-4">
+                    <div className="flex items-start gap-2">
+                      <span className="text-lg">❌</span>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-red-900 mb-1">
+                          {translations.incompleteMealDescriptions || 'Incomplete Meal Descriptions'}
+                        </p>
+                        <p className="text-xs text-red-800">
+                          {(translations.mustFillAllDescriptionsToSave || `You must fill in descriptions for ALL meals before saving as a template. Currently ${mealPlanStructure.filter(m => m.description && m.description.trim() !== '').length} out of ${mealPlanStructure.length} meals are filled.`).replace('{filled}', mealPlanStructure.filter(m => m.description && m.description.trim() !== '').length).replace('{total}', mealPlanStructure.length)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                <Button
+                  type="button"
+                  onClick={async () => {
+                    // Close the manager first
+                    setShowTemplateManager(false);
+                    // Then start the save process (which may show the limitation dialog)
+                    await saveAsTemplate();
+                  }}
+                  className="bg-green-600 hover:bg-green-700 text-white w-full disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  disabled={
+                    mealPlanStructure.length === 0 || 
+                    mealPlanStructure.some(meal => !meal.description || meal.description.trim() === '')
+                  }
+                  title={
+                    mealPlanStructure.some(meal => !meal.description || meal.description.trim() === '')
+                      ? translations.fillAllMealsFirst || 'Fill all meal descriptions first'
+                      : ''
+                  }
+                >
+                  <Save className="h-4 w-4 mr-2" />
+                  {translations.saveCurrentAsTemplate || 'Save Current Meal Plan as Template'}
+                  {mealPlanStructure.some(meal => !meal.description || meal.description.trim() === '') && (
+                    <span className="ml-2 text-xs">
+                      ({mealPlanStructure.filter(m => m.description && m.description.trim() !== '').length}/{mealPlanStructure.length})
+                    </span>
+                  )}
+                </Button>
+              </div>
+
+              {/* Existing Templates List */}
+              <div>
+                <div className="flex flex-col gap-2 mb-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-purple-800 flex items-center gap-2">
+                      <span>📝</span>
+                      {translations.existingTemplates || 'Existing Templates'}
+                    </h3>
+                    {mealTemplates.length > 0 && (() => {
+                      const currentMealCount = numberOfMeals || 4;
+                      const yourCount = mealTemplates.filter(t => t.isOwnedByCurrentUser).length;
+                      const sharedCount = mealTemplates.filter(t => !t.isOwnedByCurrentUser).length;
+                      const compatible = mealTemplates.filter(t => t.availableMealCounts?.includes(currentMealCount)).length;
+                      
+                      return (
+                        <div className="flex gap-2">
+                          <Badge variant="outline" className="bg-purple-100 border-purple-300 text-purple-700 font-semibold">
+                            👤 {yourCount} {translations.yours || 'yours'}
+                          </Badge>
+                          <Badge variant="outline" className="bg-gray-100 border-gray-300 text-gray-700 font-semibold">
+                            🌐 {sharedCount} {translations.shared || 'shared'}
+                          </Badge>
+                          <Badge variant="outline" className="bg-blue-50 border-blue-300 text-blue-700 font-semibold">
+                            {(translations.compatibleCount || '{compatible}/{total} compatible').replace('{compatible}', compatible).replace('{total}', mealTemplates.length)}
+                          </Badge>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  
+                  {/* Current Client Info */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-blue-700 font-medium">{translations.currentClient || 'Current client'}:</span>
+                      <Badge variant="outline" className="bg-white border-blue-300 text-blue-700 font-semibold">
+                        🍽️ {numberOfMeals || 4} {translations.mealsPerDay || 'meals per day'}
+                      </Badge>
+                      <span className="text-xs text-blue-600">
+                        {(translations.onlyTemplatesWithVariants || '(Only templates with {count}-meal variants can be applied)').replace('{count}', numberOfMeals || 4)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                
+                {loadingTemplates ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader className="animate-spin h-6 w-6 text-purple-600" />
+                  </div>
+                ) : mealTemplates.length > 0 ? (
+                  <div className="space-y-4">
+                    {/* Your Templates Section */}
+                    {(() => {
+                      const yourTemplates = mealTemplates.filter(t => t.isOwnedByCurrentUser);
+                      if (yourTemplates.length === 0) return null;
+                      
+                      return (
+                        <div>
+                          <h4 className="text-md font-semibold text-purple-900 mb-2 flex items-center gap-2">
+                            <span>👤</span>
+                            {translations.yourTemplates || 'Your Templates'}
+                            <Badge variant="outline" className="bg-purple-100 border-purple-300 text-purple-700">
+                              {yourTemplates.length}
+                            </Badge>
+                          </h4>
+                          <div className="space-y-3">
+                            {yourTemplates.map(template => renderTemplateCard(template))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    
+                    {/* Shared Templates Section */}
+                    {(() => {
+                      const sharedTemplates = mealTemplates.filter(t => !t.isOwnedByCurrentUser);
+                      if (sharedTemplates.length === 0) return null;
+                      
+                      return (
+                        <div>
+                          <h4 className="text-md font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                            <span>🌐</span>
+                            {translations.sharedTemplates || 'Shared Templates'}
+                            <Badge variant="outline" className="bg-gray-100 border-gray-300 text-gray-700">
+                              {sharedTemplates.length}
+                            </Badge>
+                          </h4>
+                          <div className="space-y-3">
+                            {sharedTemplates.map(template => renderTemplateCard(template))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <div className="text-4xl mb-2">📋</div>
+                    <p className="text-sm">{translations.noTemplatesFound || 'No templates found'}</p>
+                    <p className="text-xs mt-1">{translations.createFirstTemplate || 'Create your first template using the button above'}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowTemplateManager(false);
+                  setEditingTemplate(null);
+                  setTemplateFormData({ name: '', tags: [] });
+                }}
+                className="border-gray-300 text-gray-700 hover:bg-gray-50"
+              >
+                {translations.close || 'Close'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Template Dialog */}
+        <Dialog open={!!editingTemplate} onOpenChange={(open) => {
+          if (!open) {
+            setEditingTemplate(null);
+            setTemplateFormData({ name: '', tags: [] });
+          }
+        }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-blue-600">
+                <span className="text-2xl">✏️</span>
+                {translations.editTemplate || 'Edit Template'}
+              </DialogTitle>
+              <DialogDescription className="text-gray-600 pt-2">
+                {translations.editTemplateDescription || 'Update the template name and tags'}
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4 py-4">
+              <div>
+                <Label htmlFor="template_name" className="text-sm font-medium text-gray-700">
+                  {translations.templateName || 'Template Name'} *
+                </Label>
+                <Input
+                  id="template_name"
+                  value={templateFormData.name}
+                  onChange={(e) => setTemplateFormData(prev => ({ ...prev, name: e.target.value }))}
+                  className="mt-1"
+                  placeholder={translations.templateNamePlaceholder || 'e.g., High-Protein Plan'}
+                  required
+                />
+              </div>
+              
+              <div>
+                <Label htmlFor="template_tags" className="text-sm font-medium text-gray-700">
+                  {translations.tags || 'Tags'} ({translations.optional || 'optional'})
+                </Label>
+                <Input
+                  id="template_tags"
+                  value={templateFormData.tags.join(', ')}
+                  onChange={(e) => {
+                    const tags = e.target.value.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0);
+                    setTemplateFormData(prev => ({ ...prev, tags }));
+                  }}
+                  className="mt-1"
+                  placeholder={translations.tagsPlaceholder || 'e.g., vegetarian, gluten-free'}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  {translations.tagsHint || 'Separate multiple tags with commas'}
+                </p>
+              </div>
+            </div>
+            
+            <DialogFooter className="flex gap-3 sm:gap-3">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setEditingTemplate(null);
+                  setTemplateFormData({ name: '', tags: [] });
+                }}
+                className="flex-1 border-gray-300 text-gray-700 hover:bg-gray-50"
+              >
+                {translations.cancel || 'Cancel'}
+              </Button>
+              <Button
+                onClick={async () => {
+                  if (!templateFormData.name.trim()) {
+                    alert(translations.pleaseEnterTemplateName || 'Please enter a template name');
+                    return;
+                  }
+                  
+                  try {
+                    await updateTemplate(editingTemplate.id, templateFormData.name, templateFormData.tags);
+                    alert(translations.templateUpdated || 'Template updated successfully!');
+                    setEditingTemplate(null);
+                    setTemplateFormData({ name: '', tags: [] });
+                  } catch (err) {
+                    alert(`Failed to update template: ${err.message}`);
+                  }
+                }}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {translations.save || 'Save'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
         </Dialog>
 
       </div>
@@ -14490,6 +16087,8 @@ async function translateMenu(menu, targetLang = 'he') {
 
 
 export default MenuCreate;
+
+
 
 
 

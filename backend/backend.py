@@ -5386,6 +5386,497 @@ Guidelines
 
 
 
+@app.route("/api/update-meal-plan-descriptions", methods=["POST"])
+
+def api_update_meal_plan_descriptions():
+
+    """
+
+    Analyze food habits and update meal plan descriptions based on what the client actually eats.
+
+    Gets the meal plan structure from Supabase and updates only the description fields.
+
+    """
+
+    try:
+
+        data = request.get_json()
+
+        user_code = data.get("user_code")
+
+        
+
+        if not user_code:
+
+            return jsonify({"error": "user_code is required"}), 400
+
+            
+
+        logger.info(f"🔍 Updating meal plan descriptions for user_code: {user_code}")
+
+        
+
+        # Load user preferences to get meal plan structure
+
+        try:
+
+            preferences = load_user_preferences(user_code)
+
+            meal_plan_structure = preferences.get("meal_plan_structure", [])
+
+            
+
+            if not meal_plan_structure:
+
+                return jsonify({"error": "No meal plan structure found for this user"}), 404
+
+                
+
+        except Exception as e:
+
+            logger.error(f"Error loading user preferences: {str(e)}")
+
+            return jsonify({"error": f"Failed to load user preferences: {str(e)}"}), 500
+
+        
+
+        # Get food logs for the user (reuse logic from analyze_eating_habits)
+
+        food_logs = []
+
+        try:
+
+            user_response = supabase.table('chat_users').select('id').eq('user_code', user_code).single().execute()
+
+            if user_response.data:
+
+                user_id = user_response.data['id']
+
+                logs_response = supabase.table('food_logs').select('*').eq('user_id', user_id).order('log_date', desc=True).execute()
+
+                food_logs = logs_response.data or []
+
+                
+
+        except Exception as e:
+
+            logger.error(f"Error fetching food logs: {e}")
+
+            return jsonify({"error": "Failed to fetch food logs"}), 500
+
+        
+
+        if not food_logs:
+
+            return jsonify({"error": "No food logs found for this user. Cannot personalize meal descriptions."}), 404
+
+            
+
+        # Analyze eating habits by meal category
+
+        meal_categories = {
+
+            'breakfast': [],
+
+            'lunch': [],
+
+            'dinner': [],
+
+            'snack': [],
+
+            'snacks': [],
+
+            'morning snack': [],
+
+            'afternoon snack': [],
+
+            'evening snack': [],
+
+            'other': []
+
+        }
+
+        
+
+        # Process each food log
+
+        for log in food_logs:
+
+            meal_label = log.get('meal_label', '').lower()
+
+            food_items = log.get('food_items', [])
+
+            
+
+            # Determine meal category
+
+            category = 'other'
+
+            if 'breakfast' in meal_label:
+
+                category = 'breakfast'
+
+            elif 'lunch' in meal_label:
+
+                category = 'lunch'
+
+            elif 'dinner' in meal_label:
+
+                category = 'dinner'
+
+            elif 'snack' in meal_label:
+
+                if 'morning' in meal_label:
+
+                    category = 'morning snack'
+
+                elif 'afternoon' in meal_label:
+
+                    category = 'afternoon snack'
+
+                elif 'evening' in meal_label:
+
+                    category = 'evening snack'
+
+                else:
+
+                    category = 'snack'
+
+            
+
+            # Extract food items
+
+            if isinstance(food_items, list):
+
+                for item in food_items:
+
+                    if isinstance(item, dict) and item.get('name'):
+
+                        meal_categories[category].append(item['name'].lower().strip())
+
+            elif isinstance(food_items, dict) and food_items.get('name'):
+
+                meal_categories[category].append(food_items['name'].lower().strip())
+
+        
+
+        # Get top 5 most frequent foods for each meal category
+
+        top_foods_by_meal = {}
+
+        for category, foods in meal_categories.items():
+
+            if foods:
+
+                food_counts = {}
+
+                for food in foods:
+
+                    food_counts[food] = food_counts.get(food, 0) + 1
+
+                sorted_foods = sorted(food_counts.items(), key=lambda x: x[1], reverse=True)
+
+                top_foods_by_meal[category] = sorted_foods[:5]
+
+        
+
+        # Normalize meal names for matching (e.g., "Snacks" -> "snack")
+
+        def normalize_meal_name(meal_name):
+
+            meal_lower = meal_name.lower().strip()
+
+            if 'breakfast' in meal_lower:
+
+                return 'breakfast'
+
+            elif 'lunch' in meal_lower:
+
+                return 'lunch'
+
+            elif 'dinner' in meal_lower:
+
+                return 'dinner'
+
+            elif 'snack' in meal_lower:
+
+                if 'morning' in meal_lower:
+
+                    return 'morning snack'
+
+                elif 'afternoon' in meal_lower:
+
+                    return 'afternoon snack'
+
+                elif 'evening' in meal_lower:
+
+                    return 'evening snack'
+
+                else:
+
+                    return 'snack'
+
+            return meal_lower
+
+        
+
+        # Extract dietary restrictions and recommendations from preferences
+        allergies = preferences.get("allergies", [])
+        limitations = preferences.get("limitations", [])
+        recommendations = preferences.get("recommendations", [])
+        
+        # Format allergies and limitations for display
+        allergies_text = ", ".join(allergies) if allergies else "None"
+        limitations_text = ", ".join(limitations) if limitations else "None"
+        recommendations_text = ", ".join(recommendations) if recommendations else "None"
+        
+
+        # Build system prompt for updating descriptions
+
+        system_prompt = """You are a professional dietitian AI that personalizes meal plan descriptions based on a client's actual eating habits.
+
+**TASK:**
+
+Update ONLY the "description" field for each meal. Do NOT modify meal names, calories, or calories_pct.
+
+**CRITICAL RULES:**
+
+* **NEVER include foods from allergies list** - This is life-threatening
+
+* **NEVER include foods from limitations list** - Strictly avoid (e.g., if kosher: no meat+dairy mixing)
+
+* **Each meal appears ONCE** - Do not repeat the same meal in the output
+
+* **English only** - All descriptions must be in English
+
+* **Keep it short** - 1-3 food items, max 5-6 words
+
+* Use the client's frequently consumed foods for each meal type
+
+* Consider recommendations when creating descriptions
+
+**OUTPUT:**
+
+Return ONLY a valid JSON array with the same structure:
+
+[{"meal": "Breakfast", "calories": 875, "description": "Updated description", "calories_pct": 30}, ...]
+
+Return ALL meals from the input - do not omit any."""
+
+        
+
+        # Prepare eating habits summary for the prompt
+
+        habits_summary = {}
+
+        for meal in meal_plan_structure:
+
+            meal_name = meal.get("meal", "")
+
+            normalized = normalize_meal_name(meal_name)
+
+            # Try exact match first, then variations
+
+            if normalized in top_foods_by_meal:
+
+                habits_summary[meal_name] = top_foods_by_meal[normalized]
+
+            elif 'snack' in normalized and 'snack' in top_foods_by_meal:
+
+                habits_summary[meal_name] = top_foods_by_meal['snack']
+
+            elif 'snack' in normalized and 'snacks' in top_foods_by_meal:
+
+                habits_summary[meal_name] = top_foods_by_meal['snacks']
+
+            else:
+
+                habits_summary[meal_name] = []
+
+        
+
+        # Build user prompt with meal plan and habits
+
+        habits_text = "\n".join([
+
+            f"- {meal}: {', '.join([f'{food} ({count}x)' for food, count in foods[:3]])}" 
+
+            if foods else f"- {meal}: No data available"
+
+            for meal, foods in habits_summary.items()
+
+        ])
+
+        
+
+        user_prompt = f"""Update meal plan descriptions based on client's eating habits.
+
+**CURRENT MEAL PLAN:**
+
+{json.dumps(meal_plan_structure, indent=2, ensure_ascii=False)}
+
+**EATING HABITS:**
+
+{habits_text}
+
+**RESTRICTIONS:**
+
+* Allergies: {allergies_text}
+
+* Limitations: {limitations_text}
+
+* Recommendations: {recommendations_text}
+
+**REQUIREMENTS:**
+
+* Update ONLY the "description" field
+
+* NEVER use foods from allergies or limitations lists
+
+* Use frequently consumed foods for each meal
+
+* Each meal appears once - do not duplicate"""
+
+        
+
+        # Call Azure OpenAI
+
+        try:
+
+            logger.info("🧠 Sending meal plan update request to OpenAI")
+
+            
+
+            response = client.chat.completions.create(
+
+                model=deployment,
+
+                messages=[
+
+                    {"role": "system", "content": system_prompt},
+
+                    {"role": "user", "content": user_prompt}
+
+                ],
+
+                temperature=0.7,
+
+                max_tokens=800
+
+            )
+
+            
+
+            result_text = response.choices[0].message.content
+
+            logger.info(f"✅ Received response from OpenAI: {result_text}")
+
+            
+
+            # Parse JSON response
+
+            try:
+
+                # Strip markdown code fences if present
+
+                cleaned_result = _strip_markdown_fences(result_text)
+
+                updated_meal_plan = json.loads(cleaned_result)
+
+                
+
+                # Validate structure
+
+                if not isinstance(updated_meal_plan, list):
+
+                    return jsonify({"error": "Invalid response format: expected array"}), 500
+
+                
+
+                # Ensure all required fields are present and validate
+
+                for i, meal in enumerate(updated_meal_plan):
+
+                    if not all(key in meal for key in ["meal", "calories", "description", "calories_pct"]):
+
+                        return jsonify({"error": f"Meal at index {i} missing required fields"}), 500
+
+                    
+
+                    # Validate that structure matches (except description)
+
+                    original_meal = meal_plan_structure[i] if i < len(meal_plan_structure) else None
+
+                    if original_meal:
+
+                        if meal["meal"] != original_meal["meal"]:
+
+                            logger.warning(f"Meal name mismatch: expected {original_meal['meal']}, got {meal['meal']}")
+
+                        if meal["calories"] != original_meal["calories"]:
+
+                            logger.warning(f"Calories changed for {meal['meal']}: expected {original_meal['calories']}, got {meal['calories']}")
+
+                            # Restore original calories
+
+                            meal["calories"] = original_meal["calories"]
+
+                        if meal["calories_pct"] != original_meal["calories_pct"]:
+
+                            logger.warning(f"Calories_pct changed for {meal['meal']}: expected {original_meal['calories_pct']}, got {meal['calories_pct']}")
+
+                            # Restore original calories_pct
+
+                            meal["calories_pct"] = original_meal["calories_pct"]
+
+                
+
+                logger.info("✅ Successfully updated meal plan descriptions")
+
+                return jsonify({
+
+                    "meal_plan_structure": updated_meal_plan,
+
+                    "updated_descriptions": True,
+
+                    "original_count": len(meal_plan_structure),
+
+                    "updated_count": len(updated_meal_plan)
+
+                })
+
+                
+
+            except json.JSONDecodeError as e:
+
+                logger.error(f"❌ Failed to parse JSON response: {result_text}")
+
+                logger.error(f"JSON error: {str(e)}")
+
+                return jsonify({"error": "Failed to parse AI response as JSON", "raw": result_text}), 500
+
+            
+
+        except Exception as e:
+
+            logger.error(f"Error calling OpenAI: {e}")
+
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+            return jsonify({"error": f"Failed to generate updated descriptions: {str(e)}"}), 500
+
+        
+
+    except Exception as e:
+
+        logger.error(f"❌ Exception in /api/update-meal-plan-descriptions: {str(e)}")
+
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
+        return jsonify({"error": f"Failed to update meal plan descriptions: {str(e)}"}), 500
+
+
+
 @app.route("/api/update-user-profile", methods=["POST"])
 
 def api_update_user_profile():
