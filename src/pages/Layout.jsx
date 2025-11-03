@@ -450,6 +450,12 @@ export default function Layout() {
                 <span className="font-medium">{translations.users}</span>
               </Button>
             </Link>
+            <Link to="/training" onClick={() => setSidebarOpen(false)}>
+              <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-orange/8 hover:text-orange transition-all duration-300 group">
+                <Dumbbell className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+                <span className="font-medium">{translations.trainingManagement || 'Training Management'}</span>
+              </Button>
+            </Link>
           </div>
 
           {/* Divider */}
@@ -500,12 +506,6 @@ export default function Layout() {
               <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-emerald/8 hover:text-emerald transition-all duration-300 group">
                 <Apple className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
                 <span className="font-medium">{translations.nutritionAnalytics || 'Nutrition Analytics'}</span>
-              </Button>
-            </Link>
-            <Link to="/training" onClick={() => setSidebarOpen(false)}>
-              <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-orange/8 hover:text-orange transition-all duration-300 group">
-                <Dumbbell className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
-                <span className="font-medium">{translations.trainingManagement || 'Training Management'}</span>
               </Button>
             </Link>
             <Link to="/menuload" onClick={() => setSidebarOpen(false)}>

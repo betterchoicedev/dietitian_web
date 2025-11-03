@@ -286,6 +286,68 @@ const cleanExpiredCache = () => {
 
 
 
+// Function to clear all translation cache (useful when generating new menu)
+
+const clearAllTranslationCache = () => {
+
+  try {
+
+    let cleanedCount = 0;
+
+    const keysToRemove = [];
+
+    
+
+    // Collect all cache keys first (to avoid issues with removing while iterating)
+
+    for (let i = 0; i < localStorage.length; i++) {
+
+      const key = localStorage.key(i);
+
+      if (key && key.startsWith(CACHE_PREFIX)) {
+
+        keysToRemove.push(key);
+
+      }
+
+    }
+
+    
+
+    // Remove all cache keys
+
+    keysToRemove.forEach(key => {
+
+      localStorage.removeItem(key);
+
+      cleanedCount++;
+
+    });
+
+    
+
+    if (cleanedCount > 0) {
+
+      console.log(`🧹 Cleared ${cleanedCount} translation cache entries`);
+
+    }
+
+    
+
+    return cleanedCount;
+
+  } catch (error) {
+
+    console.error('Failed to clear translation cache:', error);
+
+    return 0;
+
+  }
+
+};
+
+
+
 // Function to convert measurements using AI
 
 const convertMeasurementWithAI = async (ingredient, fromMeasurement, toType, targetLang = 'en', client = { region: 'israel' }) => {
@@ -2813,6 +2875,12 @@ const MenuCreate = () => {
 
   
 
+  // Ref to always have the latest originalMenu for translation
+
+  const originalMenuRef = React.useRef(null);
+
+  
+
   // Undo/Redo system
 
   const [undoStack, setUndoStack] = useState([]);
@@ -2969,6 +3037,8 @@ const MenuCreate = () => {
 
       console.log('📋 Loaded originalMenu from localStorage with', parsed.meals.length, 'meals');
 
+      originalMenuRef.current = parsed; // Update ref with restored value
+
       return parsed;
 
     } catch (err) {
@@ -2982,6 +3052,18 @@ const MenuCreate = () => {
     }
 
   });
+
+  
+
+  // Keep ref in sync with originalMenu state
+
+  useEffect(() => {
+
+    originalMenuRef.current = originalMenu;
+
+    console.log('🔄 Updated originalMenuRef with latest menu');
+
+  }, [originalMenu]);
 
 
 
@@ -4178,8 +4260,6 @@ const MenuCreate = () => {
 
         .page {
 
-            min-height: 100vh;
-
             display: flex;
 
             flex-direction: column;
@@ -4192,7 +4272,7 @@ const MenuCreate = () => {
 
             background: #e8f5e8;
 
-            padding: 8px;
+            padding: 4px 8px;
 
             text-align: center;
 
@@ -4229,13 +4309,13 @@ const MenuCreate = () => {
 
         .main-title {
 
-            font-size: 16px;
+            font-size: 14px;
 
             font-weight: 700;
 
             color: #333;
 
-            margin: 0 0 2px 0;
+            margin: 0;
 
         }
 
@@ -4243,15 +4323,15 @@ const MenuCreate = () => {
 
             position: absolute;
 
-            top: 8px;
+            top: 4px;
 
             left: 50%;
 
             transform: translateX(-50%);
 
-            width: 20px;
+            width: 16px;
 
-            height: 20px;
+            height: 16px;
 
             background: #4CAF50;
 
@@ -4267,13 +4347,13 @@ const MenuCreate = () => {
 
             font-weight: bold;
 
-            font-size: 10px;
+            font-size: 8px;
 
         }
 
         .date {
 
-            font-size: 10px;
+            font-size: 8px;
 
             font-weight: 500;
 
@@ -4287,7 +4367,7 @@ const MenuCreate = () => {
 
         .user-name {
 
-            font-size: 12px;
+            font-size: 10px;
 
             font-weight: 600;
 
@@ -4306,7 +4386,7 @@ const MenuCreate = () => {
 
             flex: 1;
 
-            padding: 20px;
+            padding: 10px 15px;
 
         }
 
@@ -4314,7 +4394,7 @@ const MenuCreate = () => {
 
         .meal-section {
 
-            margin-bottom: 12px;
+            margin-bottom: 8px;
 
             page-break-inside: avoid;
 
@@ -4330,7 +4410,7 @@ const MenuCreate = () => {
 
         .meal-title {
 
-            font-size: 20px;
+            font-size: 24px;
 
             font-weight: 700;
 
@@ -4338,17 +4418,17 @@ const MenuCreate = () => {
 
             text-align: ${hasHebrewContent ? 'right' : 'left'};
 
-            margin-bottom: 12px;
+            margin-bottom: 6px;
 
-            padding-bottom: 6px;
+            padding-bottom: 3px;
 
-            border-bottom: 2px solid #4CAF50;
+            border-bottom: 1.5px solid #4CAF50;
 
             background-color: #f0f8f0;
 
-            padding: 8px 12px;
+            padding: 5px 8px;
 
-            border-radius: 6px;
+            border-radius: 4px;
 
         }
 
@@ -4356,7 +4436,7 @@ const MenuCreate = () => {
 
         .meal-subtitle {
 
-            font-size: 14px;
+            font-size: 20px;
 
             font-weight: 600;
 
@@ -4364,7 +4444,7 @@ const MenuCreate = () => {
 
             text-align: ${hasHebrewContent ? 'right' : 'left'};
 
-            margin-bottom: 8px;
+            margin-bottom: 4px;
 
         }
 
@@ -4380,15 +4460,15 @@ const MenuCreate = () => {
 
         .meal-option {
 
-            margin-bottom: 8px;
+            margin-bottom: 4px;
 
-            font-size: 14px;
+            font-size: 20px;
 
-            line-height: 1.4;
+            line-height: 1.3;
 
-            padding-left: 15px;
+            padding-left: 14px;
 
-            padding-right: 15px;
+            padding-right: 14px;
 
             position: relative;
 
@@ -4410,7 +4490,7 @@ const MenuCreate = () => {
 
             top: 0;
 
-            font-size: 16px;
+            font-size: 14px;
 
         }
 
@@ -4420,7 +4500,7 @@ const MenuCreate = () => {
 
             padding-left: 0;
 
-            padding-right: 15px;
+            padding-right: 14px;
 
         }
 
@@ -4462,9 +4542,9 @@ const MenuCreate = () => {
 
             color: #4CAF50;
 
-            font-size: 14px;
+            font-size: 20px;
 
-            margin-bottom: 4px;
+            margin-bottom: 2px;
 
             text-decoration: underline;
 
@@ -4486,9 +4566,9 @@ const MenuCreate = () => {
 
             background: #e8f5e8;
 
-            padding: 15px;
+            padding: 8px 15px;
 
-            text-align: right;
+            text-align: center;
 
         }
 
@@ -4498,11 +4578,21 @@ const MenuCreate = () => {
 
             color: #333;
 
-            font-size: 14px;
+            font-size: 10px;
 
-            line-height: 1.8;
+            line-height: 1.4;
 
-            text-align: ${hasHebrewContent ? 'right' : 'left'};
+            text-align: center;
+
+            display: flex;
+
+            justify-content: center;
+
+            align-items: center;
+
+            gap: 20px;
+
+            flex-wrap: wrap;
 
         }
 
@@ -4510,7 +4600,9 @@ const MenuCreate = () => {
 
         .contact-info div {
 
-            margin-bottom: 5px;
+            margin: 0;
+
+            white-space: nowrap;
 
         }
 
@@ -4550,13 +4642,15 @@ const MenuCreate = () => {
 
             ${version === 'portrait' ? `
 
-            /* Portrait-specific: Footer at bottom of last page */
+            /* Portrait-specific: Fixed footer at bottom of first page */
 
             .page {
 
                 display: block !important;
 
                 min-height: auto !important;
+
+                position: relative;
 
             }
 
@@ -4567,6 +4661,8 @@ const MenuCreate = () => {
                 display: block !important;
 
                 page-break-after: auto;
+
+                padding-bottom: 30px !important;
 
             }
 
@@ -4588,23 +4684,13 @@ const MenuCreate = () => {
 
             }
 
-            
-
-            /* Ensure content doesn't overlap with fixed footer */
-
-            .content {
-
-                margin-bottom: 80px;
-
-            }
-
             ` : ''}
 
             
 
             .header {
 
-                padding: 20px;
+                padding: 6px 8px;
 
             }
 
@@ -4612,13 +4698,15 @@ const MenuCreate = () => {
 
             .logo {
 
-                width: 50px;
+                width: 18px;
 
-                height: 50px;
+                height: 18px;
 
-                font-size: 20px;
+                font-size: 9px;
 
-                margin-bottom: 15px;
+                margin-bottom: 0;
+
+                top: 6px;
 
             }
 
@@ -4626,9 +4714,9 @@ const MenuCreate = () => {
 
             .main-title {
 
-                font-size: 28px;
+                font-size: 16px;
 
-                margin-bottom: 8px;
+                margin-bottom: 2px;
 
             }
 
@@ -4636,9 +4724,9 @@ const MenuCreate = () => {
 
             .user-name {
 
-                font-size: 20px;
+                font-size: 12px;
 
-                margin-bottom: 8px;
+                margin-bottom: 2px;
 
             }
 
@@ -4646,9 +4734,9 @@ const MenuCreate = () => {
 
             .date {
 
-                font-size: 16px;
+                font-size: 10px;
 
-                margin-bottom: 8px;
+                margin-bottom: 0;
 
             }
 
@@ -4656,7 +4744,7 @@ const MenuCreate = () => {
 
             .content {
 
-                padding: ${version === 'landscape' ? '6px 15px' : '20px'};
+                padding: ${version === 'landscape' ? '6px 15px' : '8px 12px'};
 
                 ${version === 'landscape' ? 'display: flex; flex-wrap: wrap; gap: 12px;' : ''}
 
@@ -4666,9 +4754,11 @@ const MenuCreate = () => {
 
             .meal-title {
 
-                font-size: 18px;
+                font-size: 20px;
 
-                margin-bottom: 12px;
+                margin-bottom: 3px;
+
+                padding: 3px 6px;
 
             }
 
@@ -4676,9 +4766,9 @@ const MenuCreate = () => {
 
             .meal-subtitle {
 
-                font-size: 14px;
+                font-size: 11px;
 
-                margin-bottom: 8px;
+                margin-bottom: 2px;
 
             }
 
@@ -4686,13 +4776,15 @@ const MenuCreate = () => {
 
             .meal-option {
 
-                font-size: 14px;
+                font-size: 11px;
 
-                margin-bottom: 6px;
+                margin-bottom: 2px;
 
-                padding-left: 15px;
+                padding-left: 12px;
 
-                padding-right: 15px;
+                padding-right: 12px;
+
+                line-height: 1.25;
 
             }
 
@@ -4702,7 +4794,15 @@ const MenuCreate = () => {
 
                 padding-left: 0;
 
-                padding-right: 15px;
+                padding-right: 12px;
+
+            }
+
+            
+
+            .meal-option::before {
+
+                font-size: 17px;
 
             }
 
@@ -4720,7 +4820,7 @@ const MenuCreate = () => {
 
             .footer {
 
-                padding: 15px;
+                padding: 4px 10px;
 
             }
 
@@ -4728,7 +4828,19 @@ const MenuCreate = () => {
 
             .contact-info {
 
+                font-size: 8px;
+
+                gap: 12px;
+
+            }
+
+            
+
+            .meal-dish-title {
+
                 font-size: 12px;
+
+                margin-bottom: 1px;
 
             }
 
@@ -4746,7 +4858,7 @@ const MenuCreate = () => {
 
                 page-break-after: avoid;
 
-                margin-bottom: 15px;
+                margin-bottom: 5px;
 
                 ${version === 'landscape' ? 'flex: 1 1 calc(50% - 6px); min-width: 280px; margin-bottom: 12px;' : ''}
 
@@ -5251,7 +5363,7 @@ const MenuCreate = () => {
 
                 <div>${hasHebrewContent ? 'כתובת: משכית 10, הרצליה' : 'Address: Maskit 10, Herzliya'}</div>
 
-                <div>${hasHebrewContent ? 'לקביעת תור: 054-3066442' : 'To schedule an appointment: 054-3066442'}</div>
+                <div>${hasHebrewContent ? 'מספר טלפון: 054-3066442' : 'Phone Number: 054-3066442'}</div>
 
                 <div>${hasHebrewContent ? 'א"ל: galbecker106@gmail.com' : 'Email: galbecker106@gmail.com'}</div>
 
@@ -6101,7 +6213,7 @@ const MenuCreate = () => {
 
       const missingFields = [];
 
-      if (!userData.dailyTotalCalories) missingFields.push('dailyTotalCalories');
+      if (!userData.daily_target_total_calories && !userData.base_daily_total_calories) missingFields.push('daily_target_total_calories or base_daily_total_calories');
 
       if (!userData.macros) missingFields.push('macros');
 
@@ -8409,6 +8521,24 @@ const MenuCreate = () => {
 
     setError(null);
 
+    
+
+    // Clear the old menu immediately when starting new generation
+
+    console.log('🧹 Clearing old originalMenu before generating new one');
+
+    setOriginalMenu(null);
+
+    setMenu(null);
+
+    
+
+    // Clear translation cache to prevent old translations from showing
+
+    console.log('🧹 Clearing translation cache');
+
+    clearAllTranslationCache();
+
 
 
     // Refresh nutrition targets like when selecting a user
@@ -8535,9 +8665,9 @@ const MenuCreate = () => {
 
 
 
-      // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
 
-      const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+      // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
 
         method: "POST",
 
@@ -8729,9 +8859,9 @@ const MenuCreate = () => {
 
 
 
-      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
 
-      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
 
         method: "POST",
 
@@ -8821,7 +8951,9 @@ const MenuCreate = () => {
 
       // Step 3: Show menu immediately, then enrich with UPC codes in background
 
-      setMenu(menuData);
+      // IMPORTANT: Always update originalMenu with the new menuData first
+
+      console.log('🔄 Setting new originalMenu:', menuData);
 
       setOriginalMenu(menuData);
 
@@ -8842,6 +8974,10 @@ const MenuCreate = () => {
         const translatedMenu = await translateMenu(menuData, 'he');
 
         setMenu(translatedMenu);
+
+      } else {
+
+        setMenu(menuData);
 
       }
 
@@ -8958,6 +9094,24 @@ const MenuCreate = () => {
       return;
 
     }
+
+    
+
+    // Clear the old menu immediately when starting new generation
+
+    console.log('🧹 Clearing old originalMenu before generating new one (fetchMenu)');
+
+    setOriginalMenu(null);
+
+    setMenu(null);
+
+    
+
+    // Clear translation cache to prevent old translations from showing
+
+    console.log('🧹 Clearing translation cache');
+
+    clearAllTranslationCache();
 
 
 
@@ -9235,9 +9389,9 @@ const MenuCreate = () => {
 
 
 
-      // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
 
-      const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+      // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
 
         method: "POST",
 
@@ -9393,9 +9547,9 @@ const MenuCreate = () => {
 
 
 
-      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
 
-      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
 
         method: "POST",
 
@@ -9485,7 +9639,9 @@ const MenuCreate = () => {
 
       // Step 3: Show menu immediately, then enrich with UPC codes in background
 
-      setMenu(menuData);
+      // IMPORTANT: Always update originalMenu with the new menuData first
+
+      console.log('🔄 Setting new originalMenu:', menuData);
 
       setOriginalMenu(menuData);
 
@@ -9506,6 +9662,10 @@ const MenuCreate = () => {
         const translatedMenu = await translateMenu(menuData, 'he');
 
         setMenu(translatedMenu);
+
+      } else {
+
+        setMenu(menuData);
 
       }
 
@@ -9848,6 +10008,10 @@ const MenuCreate = () => {
     console.log('🔥 SAVE BUTTON CLICKED!');
 
     console.log('📋 Original Menu:', originalMenu);
+
+    console.log('📋 Current Menu (displayed):', menu);
+
+    console.log('🔍 Are they the same?', originalMenu === menu ? 'YES (same reference)' : 'NO (different references)');
 
 
 
@@ -10403,7 +10567,13 @@ const MenuCreate = () => {
 
   const handleLanguageChange = useCallback(async (lang) => {
 
-    console.log('🌐 Language change requested:', lang, 'Current originalMenu:', !!originalMenu, 'Loading:', loading);
+    // IMPORTANT: Use ref to get the LATEST originalMenu, not the closure value
+
+    const currentOriginalMenu = originalMenuRef.current;
+
+    
+
+    console.log('🌐 Language change requested:', lang, 'Current originalMenu:', !!currentOriginalMenu, 'Loading:', loading);
 
     
 
@@ -10419,7 +10589,7 @@ const MenuCreate = () => {
 
     
 
-    if (!originalMenu) {
+    if (!currentOriginalMenu) {
 
       console.log('❌ No originalMenu available for translation');
 
@@ -10435,7 +10605,7 @@ const MenuCreate = () => {
 
       console.log('✅ Switching to English, using originalMenu directly');
 
-      setMenu(originalMenu);
+      setMenu(currentOriginalMenu);
 
       return;
 
@@ -10455,10 +10625,6 @@ const MenuCreate = () => {
 
     try {
 
-      // Create a local copy to ensure we're using the current state
-
-      const currentOriginalMenu = originalMenu;
-
       console.log('📋 Translating menu with', currentOriginalMenu.meals?.length, 'meals');
 
       
@@ -10475,7 +10641,7 @@ const MenuCreate = () => {
 
       setError('Failed to translate menu.');
 
-      setMenu(originalMenu); // Fallback to original on error
+      setMenu(currentOriginalMenu); // Fallback to original on error
 
     } finally {
 
@@ -10483,7 +10649,7 @@ const MenuCreate = () => {
 
     }
 
-  }, [originalMenu, loading]); // Include loading in dependencies to prevent changes during generation
+  }, [loading]); // Include loading in dependencies to prevent changes during generation
 
 
 

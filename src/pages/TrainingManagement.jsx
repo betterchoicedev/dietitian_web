@@ -950,16 +950,68 @@ const TrainingManagement = () => {
                 </div>
               )}
 
-              {/* Plan Structure */}
-              {selectedPlan.plan_structure?.days && (
+              {/* Plan Structure - Weeks format */}
+              {selectedPlan.plan_structure?.weeks && Array.isArray(selectedPlan.plan_structure.weeks) && (
                 <div>
                   <Label className="text-muted-foreground mb-2 block">{translations.planStructure}</Label>
                   <div className="space-y-4">
-                    {selectedPlan.plan_structure.days.map((day, idx) => (
+                    {selectedPlan.plan_structure.weeks.map((week, weekIdx) => (
+                      <div key={weekIdx} className="border border-blue-200 rounded-lg p-4 bg-blue-50">
+                        <h4 className="font-semibold text-blue-800 mb-3">
+                          {translations.week || 'Week'} {week.week_number}
+                          {week.focus && <span className="text-sm font-normal text-blue-600 ml-2">- {week.focus}</span>}
+                        </h4>
+                        <div className="space-y-3">
+                          {week.days?.map((day, dayIdx) => (
+                            <Card key={dayIdx}>
+                              <CardHeader className="pb-3">
+                                <CardTitle className="text-base">
+                                  {day.day_name || `Day ${day.day_number || dayIdx + 1}`}
+                                </CardTitle>
+                              </CardHeader>
+                              <CardContent>
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead>Exercise</TableHead>
+                                      <TableHead className="text-center">Sets</TableHead>
+                                      <TableHead className="text-center">Reps</TableHead>
+                                      <TableHead className="text-center">Rest (s)</TableHead>
+                                      <TableHead>Notes</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {day.exercises?.map((exercise, exIdx) => (
+                                      <TableRow key={exIdx}>
+                                        <TableCell className="font-medium">{exercise.exercise_name || exercise.name}</TableCell>
+                                        <TableCell className="text-center">{exercise.sets}</TableCell>
+                                        <TableCell className="text-center">{exercise.reps}</TableCell>
+                                        <TableCell className="text-center">{exercise.rest_seconds || exercise.rest}</TableCell>
+                                        <TableCell className="text-sm text-muted-foreground">{exercise.notes}</TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Plan Structure - Legacy formats (days or trainingDays) */}
+              {!selectedPlan.plan_structure?.weeks && selectedPlan.plan_structure && (selectedPlan.plan_structure.days || selectedPlan.plan_structure.trainingDays) && (
+                <div>
+                  <Label className="text-muted-foreground mb-2 block">{translations.planStructure}</Label>
+                  <div className="space-y-4">
+                    {(selectedPlan.plan_structure.days || selectedPlan.plan_structure.trainingDays)?.map((day, idx) => (
                       <Card key={idx}>
                         <CardHeader>
                           <CardTitle className="text-base">
-                            {language === 'he' ? day.name_he : day.name}
+                            {language === 'he' ? (day.name_he || day.name || day.day_name) : (day.name || day.day_name || day.name_he)}
                           </CardTitle>
                         </CardHeader>
                         <CardContent>
@@ -976,10 +1028,10 @@ const TrainingManagement = () => {
                             <TableBody>
                               {day.exercises?.map((exercise, exIdx) => (
                                 <TableRow key={exIdx}>
-                                  <TableCell className="font-medium">{exercise.name}</TableCell>
+                                  <TableCell className="font-medium">{exercise.exercise_name || exercise.name}</TableCell>
                                   <TableCell className="text-center">{exercise.sets}</TableCell>
                                   <TableCell className="text-center">{exercise.reps}</TableCell>
-                                  <TableCell className="text-center">{exercise.rest}</TableCell>
+                                  <TableCell className="text-center">{exercise.rest_seconds || exercise.rest}</TableCell>
                                   <TableCell className="text-sm text-muted-foreground">{exercise.notes}</TableCell>
                                 </TableRow>
                               ))}
@@ -988,6 +1040,42 @@ const TrainingManagement = () => {
                         </CardContent>
                       </Card>
                     ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Display progression if available */}
+              {selectedPlan.plan_structure?.progression && (
+                <div>
+                  <Label className="text-muted-foreground mb-2 block">{translations.progression || 'Progression'}</Label>
+                  <div className="space-y-2">
+                    {Object.entries(selectedPlan.plan_structure.progression).map(([key, value]) => (
+                      <div key={key} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <p className="text-sm font-medium text-gray-700 capitalize">
+                          {key.replace(/_/g, ' ')}
+                        </p>
+                        <p className="text-sm text-gray-600 mt-1">
+                          {typeof value === 'object' ? (
+                            <span>
+                              {value.sets && `${value.sets} sets`}
+                              {value.notes && ` - ${value.notes}`}
+                            </span>
+                          ) : (
+                            String(value)
+                          )}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Display message if no structured data */}
+              {selectedPlan.plan_structure && !selectedPlan.plan_structure.weeks && !selectedPlan.plan_structure.days && !selectedPlan.plan_structure.trainingDays && (
+                <div>
+                  <Label className="text-muted-foreground mb-2 block">{translations.additionalInfo || 'Additional Information'}</Label>
+                  <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <p className="text-sm text-gray-500">{translations.customStructure || 'Custom training structure defined'}</p>
                   </div>
                 </div>
               )}
