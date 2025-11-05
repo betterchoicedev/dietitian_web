@@ -59,7 +59,7 @@
 ### 6. Fix Ingredient Changes After Generating Alternative Meal
 - **Files**: `src/pages/MenuCreate.jsx`
 - **Issue**: When generating alternative meals, ingredient changes are not properly handled or saved
-- **Status**: Pending
+- **Status**: FIxed
 - **Implementation**:
   - Investigate alternative meal generation logic in MenuCreate.jsx
   - Fix ingredient modification handling during alternative meal creation
@@ -103,7 +103,7 @@
 ### 10. Fix Search Logic
 - **Files**: TBD (to be determined based on search functionality location)
 - **Issue**: Fix search logic functionality onemocněníhe application
-- **Status**: Pending
+- **Status**: Fixed
 - **Implementation**:
   - Identify where the search functionality is implemented
   - Investigate current search logic issues
@@ -127,6 +127,72 @@
   - Check RTL support for Hebrew menus in PDF
   - Optimize PDF generation performance if needed
   - Fix any layout or formatting issues found
+
+### 12. WhatsApp Bot Registration Link with Pre-filled Phone Number - (CLIENTS WEBSITE)
+- **Files**: `src/App.jsx`, `src/pages/Register.jsx`
+- **Issue**: Create registration link for WhatsApp bot integration that auto-fills phone number
+- **Status**: Pending
+- **Use Case**: 
+  - Non-client texts the WhatsApp bot
+  - Bot detects user wants to register
+  - Bot sends registration link with phone number embedded: `yourwebsite.com/+972555555555`
+  - User clicks link and phone number is already pre-filled from WhatsApp
+- **Implementation**:
+  - Create dynamic route that accepts phone number in URL path (e.g., `/register/+972555555555` or `/+972555555555`)
+  - Extract phone number from URL path in Register.jsx
+  - Pre-fill the phone number field in the registration form
+  - Support international phone number formats (e.g., +972, +1, etc.)
+  - Validate phone number format from URL
+  - Handle edge cases (invalid numbers, missing numbers, etc.)
+  - Auto-focus to next field after phone number is pre-filled
+  - Test with various phone number formats
+  - Add routing logic in App.jsx to handle phone number parameter
+  - Make phone number field read-only when pre-filled from URL (or clearly indicate it's from WhatsApp)
+  - Add visual indicator showing "Phone number from WhatsApp" for user clarity
+  - Document URL format for WhatsApp bot team to use
+
+### 13. Website Accessibility Improvements - (ALSO TO THE CLIENTS WEBSITE)
+- **Files**: All pages, components, and UI elements across the application
+- **Issue**: Improve website accessibility (a11y) to meet WCAG standards and support users with disabilities
+- **Status**: Pending
+- **Implementation**:
+  - **Keyboard Navigation**:
+    - Ensure all interactive elements are keyboard accessible (Tab, Enter, Escape)
+    - Add visible focus indicators for all focusable elements
+    - Implement proper tab order and skip-to-content links
+    - Add keyboard shortcuts for common actions
+  - **Screen Reader Support**:
+    - Add ARIA labels to all buttons, inputs, and interactive elements
+    - Add ARIA live regions for dynamic content updates
+    - Add ARIA descriptions for complex components
+    - Ensure proper heading hierarchy (h1 → h2 → h3)
+    - Add alt text to all images and icons
+  - **Visual Accessibility**:
+    - Ensure sufficient color contrast (minimum 4.5:1 for text)
+    - Don't rely on color alone to convey information
+    - Add text labels alongside color indicators
+    - Ensure text is resizable without breaking layout
+    - Add high contrast mode option
+  - **Forms & Inputs**:
+    - Add proper label associations for all form fields
+    - Add error messages with ARIA announcements
+    - Add helpful placeholder text and field descriptions
+    - Group related form fields with fieldset/legend
+  - **Navigation**:
+    - Add skip navigation links
+    - Ensure consistent navigation structure
+    - Add breadcrumbs where appropriate
+    - Add clear page titles for each route
+  - **Multimedia**:
+    - Add captions/transcripts for any video content
+    - Add text alternatives for audio content
+    - Ensure media players have keyboard controls
+  - **Testing**:
+    - Test with screen readers (NVDA, JAWS, VoiceOver)
+    - Test keyboard-only navigation
+    - Run automated accessibility audits (Lighthouse, axe)
+    - Test with browser zoom (up to 200%)
+    - Get feedback from users with disabilities
 
 
 

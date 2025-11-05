@@ -1765,6 +1765,186 @@ export const entities = {
       }
     },
   },
+  
+  TrainingPlanTemplates: {
+    // Get all templates (own + public)
+    getAll: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('training_plan_templates')
+          .select('*')
+          .eq('is_active', true)
+          .order('created_at', { ascending: false });
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error fetching training plan templates:', err);
+        throw err;
+      }
+    },
+    
+    // Get user's own templates
+    getOwn: async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Not authenticated');
+        
+        const { data, error } = await supabase
+          .from('training_plan_templates')
+          .select('*')
+          .eq('created_by', user.id)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false });
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error fetching own templates:', err);
+        throw err;
+      }
+    },
+    
+    // Get public templates (created by others)
+    getPublic: async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        const { data, error } = await supabase
+          .from('training_plan_templates')
+          .select('*')
+          .eq('is_public', true)
+          .eq('is_active', true)
+          .neq('created_by', user?.id || '')
+          .order('usage_count', { ascending: false });
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error fetching public templates:', err);
+        throw err;
+      }
+    },
+    
+    // Search templates
+    search: async (searchTerm) => {
+      try {
+        const { data, error } = await supabase
+          .from('training_plan_templates')
+          .select('*')
+          .or(`template_name.ilike.%${searchTerm}%,template_name_he.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false });
+        
+        if (error) throw new Error(error.message);
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error searching templates:', err);
+        throw err;
+      }
+    },
+    
+    // Create template
+    create: async (templateData) => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Not authenticated');
+        
+        const { data, error } = await supabase
+          .from('training_plan_templates')
+          .insert([{
+            ...templateData,
+            created_by: user.id
+          }])
+          .select()
+          .single();
+        
+        if (error) throw new Error(error.message);
+        return data;
+      } catch (err) {
+        console.error('❌ Error creating template:', err);
+        throw err;
+      }
+    },
+    
+    // Update template
+    update: async (id, updates) => {
+      try {
+        const { data, error } = await supabase
+          .from('training_plan_templates')
+          .update({ ...updates, updated_at: new Date().toISOString() })
+          .eq('id', id)
+          .select()
+          .single();
+        
+        if (error) throw new Error(error.message);
+        return data;
+      } catch (err) {
+        console.error('❌ Error updating template:', err);
+        throw err;
+      }
+    },
+    
+    // Delete template (soft delete - set is_active to false)
+    delete: async (id) => {
+      try {
+        const { error } = await supabase
+          .from('training_plan_templates')
+          .update({ is_active: false })
+          .eq('id', id);
+        
+        if (error) throw new Error(error.message);
+        return true;
+      } catch (err) {
+        console.error('❌ Error deleting template:', err);
+        throw err;
+      }
+    },
+    
+    // Hard delete template (permanent)
+    hardDelete: async (id) => {
+      try {
+        const { error } = await supabase
+          .from('training_plan_templates')
+          .delete()
+          .eq('id', id);
+        
+        if (error) throw new Error(error.message);
+        return true;
+      } catch (err) {
+        console.error('❌ Error hard deleting template:', err);
+        throw err;
+      }
+    },
+    
+    // Increment usage count
+    incrementUsage: async (id) => {
+      try {
+        const { data, error } = await supabase.rpc('increment_template_usage', { template_id: id });
+        
+        if (error) {
+          // Fallback if RPC doesn't exist
+          const { data: template } = await supabase
+            .from('training_plan_templates')
+            .select('usage_count')
+            .eq('id', id)
+            .single();
+          
+          const newCount = (template?.usage_count || 0) + 1;
+          await supabase
+            .from('training_plan_templates')
+            .update({ usage_count: newCount })
+            .eq('id', id);
+        }
+        
+        return true;
+      } catch (err) {
+        console.error('❌ Error incrementing template usage:', err);
+        // Don't throw - this is non-critical
+        return false;
+      }
+    },
+  },
 };
 
 // Azure OpenAI Configuration

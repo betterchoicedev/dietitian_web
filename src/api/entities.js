@@ -9,6 +9,11 @@ export const ChatConversation = entities.ChatConversation;
 export const MessageQueue = entities.MessageQueue;
 export const WeightLogs = entities.WeightLogs;
 export const FoodLogs = entities.FoodLogs;
+export const TrainingPlans = entities.TrainingPlans;
+export const TrainingLogs = entities.TrainingLogs;
+export const TrainingReminders = entities.TrainingReminders;
+export const ExerciseLibrary = entities.ExerciseLibrary;
+export const TrainingPlanTemplates = entities.TrainingPlanTemplates;
 
 // auth sdk:
 export const User = auth;

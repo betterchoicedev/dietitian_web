@@ -576,7 +576,7 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex, alternativeInd
 
 
 
-const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, translations, currentIngredient, onPortionDialog, autoFocus, forceShowAbove = false }) => {
+const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, alternativeIndex, translations, currentIngredient, onPortionDialog, autoFocus, forceShowAbove = false }) => {
 
   const [isEditing, setIsEditing] = useState(false);
 
@@ -739,31 +739,98 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
       const queryWords = query.trim().split(/\s+/).filter(word => word.length > 0);
       console.log('🔍 Query words:', queryWords);
 
-      // Build search conditions - ONLY search in product names (not ingredients)
-      let searchConditions = [];
+      // Build search conditions - run multiple queries to catch different patterns
+      let allData = [];
 
-      // For each word, create search conditions only in name fields
-      queryWords.forEach((word, index) => {
-        const wordPattern = `%${word}%`;
-        searchConditions.push(
-          `name.ilike.${wordPattern}`,
-          `english_name.ilike.${wordPattern}`
-        );
-      });
+      if (queryWords.length === 1) {
+        // Single word: prioritize items that start with it, then contain it
+        const word = queryWords[0];
+        const startsWithPattern = `${word}%`;
+        const containsPattern = `%${word}%`;
+        
+        console.log('🎯 Query 1: items that START with the word');
+        const { data: startsWithData, error: startsWithError } = await supabase
+          .from('ingridientsroee')
+          .select('id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g')
+          .or([
+            `name.ilike.${startsWithPattern}`,
+            `english_name.ilike.${startsWithPattern}`
+          ].join(','))
+          .limit(50);
 
-      // Query the ingridientsroee table - only select essential fields
-      const { data, error } = await supabase
-        .from('ingridientsroee')
-        .select('id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g')
-        .or(searchConditions.join(','))
-        .range((page - 1) * 10, page * 10 - 1);
+        if (startsWithError) {
+          console.error('❌ Supabase error (starts with):', startsWithError);
+        } else if (startsWithData) {
+          console.log(`✅ Found ${startsWithData.length} items that START with the word`);
+          allData = startsWithData;
+        }
+        
+        // Also get items that contain the word (if we need more results)
+        if (allData.length < 20) {
+          console.log('🔍 Query 2: items that CONTAIN the word');
+          const { data: containsData, error: containsError } = await supabase
+            .from('ingridientsroee')
+            .select('id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g')
+            .or([
+              `name.ilike.${containsPattern}`,
+              `english_name.ilike.${containsPattern}`
+            ].join(','))
+            .limit(50);
 
-      if (error) {
-        console.error('❌ Supabase error:', error);
-        throw new Error(`Failed to fetch suggestions: ${error.message}`);
+          if (containsError) {
+            console.error('❌ Supabase error (contains):', containsError);
+          } else if (containsData) {
+            console.log(`✅ Found ${containsData.length} items that CONTAIN the word`);
+            const existingIds = new Set(allData.map(item => item.id));
+            const newItems = containsData.filter(item => !existingIds.has(item.id));
+            allData = [...allData, ...newItems];
+          }
+        }
+      } else {
+        // Multi-word: Search for items containing ALL words (in any order, any position)
+        console.log('🔍 Searching for items containing ALL words');
+        const wordsConditions = [];
+        queryWords.forEach((word) => {
+          const containsPattern = `%${word}%`;
+          wordsConditions.push(
+            `name.ilike.${containsPattern}`,
+            `english_name.ilike.${containsPattern}`
+          );
+        });
+        
+        // Fetch items that contain at least one of the words
+        const { data: wordsData, error: wordsError } = await supabase
+          .from('ingridientsroee')
+          .select('id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g')
+          .or(wordsConditions.join(','))
+          .limit(200); // Get many results to filter properly
+
+        if (wordsError) {
+          console.error('❌ Supabase error:', wordsError);
+        } else if (wordsData) {
+          console.log(`✅ Found ${wordsData.length} items (before filtering for all words)`);
+          
+          // Filter to only include items that have ALL words (in either name or english_name, or both combined)
+          const filteredWordsData = wordsData.filter(item => {
+            const hebrewName = (item.name || '').toLowerCase();
+            const englishName = (item.english_name || '').toLowerCase();
+            const combinedText = `${hebrewName} ${englishName}`;
+            
+            // Check if all words are present in the combined text
+            const hasAllWords = queryWords.every(word => 
+              combinedText.includes(word.toLowerCase())
+            );
+            
+            return hasAllWords;
+          });
+          
+          console.log(`🔎 After filtering for ALL words: ${filteredWordsData.length} items`);
+          allData = filteredWordsData;
+        }
       }
 
-      console.log('📋 Raw ingredients data received:', data);
+      const data = allData;
+      console.log(`📋 Total raw ingredients data received: ${data.length} items`);
 
       // Apply ranking and sorting to the results
       const rankedData = data.map(ingredient => {
@@ -1130,7 +1197,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
   const confirmPendingSuggestion = () => {
     if (pendingSuggestion) {
       console.log('✅ Confirming pending suggestion:', pendingSuggestion);
-      onChange(pendingSuggestion, mealIndex, optionIndex, ingredientIndex);
+      onChange(pendingSuggestion, mealIndex, optionIndex, ingredientIndex, alternativeIndex);
       setPendingSuggestion(null);
     }
   };
@@ -1271,7 +1338,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
 
 
-    onChange(finalValues, mealIndex, optionIndex, ingredientIndex);
+    onChange(finalValues, mealIndex, optionIndex, ingredientIndex, alternativeIndex);
 
     setSuggestionSelected(true);
 
@@ -1494,7 +1561,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
       if (onPortionDialog && !finalPortionGrams && !finalHouseholdMeasure) {
 
-        onPortionDialog(updatedValues, mealIndex, optionIndex, ingredientIndex);
+        onPortionDialog(updatedValues, mealIndex, optionIndex, ingredientIndex, alternativeIndex);
 
       }
 
@@ -1811,7 +1878,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
 
 
-const EditableHouseholdMeasure = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, translations }) => {
+const EditableHouseholdMeasure = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, alternativeIndex, translations }) => {
 
   const [isEditing, setIsEditing] = useState(false);
 
@@ -1845,7 +1912,7 @@ const EditableHouseholdMeasure = ({ value, onChange, mealIndex, optionIndex, ing
 
   const handleSubmit = () => {
 
-    onChange(editValue, mealIndex, optionIndex, ingredientIndex);
+    onChange(editValue, mealIndex, optionIndex, ingredientIndex, alternativeIndex);
 
     setIsEditing(false);
 
@@ -5527,7 +5594,7 @@ const MenuCreate = () => {
 
 
 
-  const handleIngredientChange = (newValues, mealIndex, optionIndex, ingredientIndex) => {
+  const handleIngredientChange = (newValues, mealIndex, optionIndex, ingredientIndex, alternativeIndex = null) => {
 
     setMenu(prevMenu => {
 
@@ -5541,7 +5608,23 @@ const MenuCreate = () => {
 
       const meal = updatedMenu.meals[mealIndex];
 
-      const option = optionIndex === 'main' ? meal.main : meal.alternative;
+      // Get the correct option based on whether it's in the alternatives array
+
+      let option;
+
+      if (alternativeIndex !== null) {
+
+        // Editing an item in the alternatives array
+
+        option = meal.alternatives[alternativeIndex];
+
+      } else {
+
+        // Editing main or alternative
+
+        option = optionIndex === 'main' ? meal.main : meal.alternative;
+
+      }
 
 
 
@@ -5625,7 +5708,23 @@ const MenuCreate = () => {
 
       const meal = updatedOriginal.meals[mealIndex];
 
-      const option = optionIndex === 'main' ? meal.main : meal.alternative;
+      // Get the correct option based on whether it's in the alternatives array
+
+      let option;
+
+      if (alternativeIndex !== null) {
+
+        // Editing an item in the alternatives array
+
+        option = meal.alternatives[alternativeIndex];
+
+      } else {
+
+        // Editing main or alternative
+
+        option = optionIndex === 'main' ? meal.main : meal.alternative;
+
+      }
 
 
 
@@ -5687,7 +5786,7 @@ const MenuCreate = () => {
 
 
 
-  const handleHouseholdMeasureChange = (newHouseholdMeasure, mealIndex, optionIndex, ingredientIndex) => {
+  const handleHouseholdMeasureChange = (newHouseholdMeasure, mealIndex, optionIndex, ingredientIndex, alternativeIndex = null) => {
 
     setMenu(prevMenu => {
 
@@ -5701,7 +5800,19 @@ const MenuCreate = () => {
 
       const meal = updatedMenu.meals[mealIndex];
 
-      const option = optionIndex === 'main' ? meal.main : meal.alternative;
+      // Get the correct option based on whether it's in the alternatives array
+
+      let option;
+
+      if (alternativeIndex !== null) {
+
+        option = meal.alternatives[alternativeIndex];
+
+      } else {
+
+        option = optionIndex === 'main' ? meal.main : meal.alternative;
+
+      }
 
 
 
@@ -5729,7 +5840,19 @@ const MenuCreate = () => {
 
       const meal = updatedOriginal.meals[mealIndex];
 
-      const option = optionIndex === 'main' ? meal.main : meal.alternative;
+      // Get the correct option based on whether it's in the alternatives array
+
+      let option;
+
+      if (alternativeIndex !== null) {
+
+        option = meal.alternatives[alternativeIndex];
+
+      } else {
+
+        option = optionIndex === 'main' ? meal.main : meal.alternative;
+
+      }
 
 
 
@@ -5749,11 +5872,11 @@ const MenuCreate = () => {
 
   // Dialog handlers for ingredient portion
 
-  const handleOpenPortionDialog = (ingredient, mealIndex, optionIndex, ingredientIndex) => {
+  const handleOpenPortionDialog = (ingredient, mealIndex, optionIndex, ingredientIndex, alternativeIndex = null) => {
 
     setSelectedIngredientForDialog(ingredient);
 
-    setDialogIngredientContext({ mealIndex, optionIndex, ingredientIndex });
+    setDialogIngredientContext({ mealIndex, optionIndex, ingredientIndex, alternativeIndex });
 
     setShowPortionDialog(true);
 
@@ -5817,9 +5940,9 @@ const MenuCreate = () => {
 
     if (dialogIngredientContext) {
 
-      const { mealIndex, optionIndex, ingredientIndex } = dialogIngredientContext;
+      const { mealIndex, optionIndex, ingredientIndex, alternativeIndex } = dialogIngredientContext;
 
-      handleIngredientChange(updatedIngredient, mealIndex, optionIndex, ingredientIndex);
+      handleIngredientChange(updatedIngredient, mealIndex, optionIndex, ingredientIndex, alternativeIndex);
 
     }
 
@@ -10393,6 +10516,8 @@ const MenuCreate = () => {
 
                         ingredientIndex={idx}
 
+                        alternativeIndex={option.alternativeIndex}
+
                         translations={translations}
 
                         currentIngredient={ingredient}
@@ -10429,13 +10554,15 @@ const MenuCreate = () => {
 
                           ingredientIndex={idx}
 
+                          alternativeIndex={option.alternativeIndex}
+
                           translations={translations}
 
                         />
 
                         <button
 
-                          onClick={() => handleOpenPortionDialog(ingredient, option.mealIndex, isAlternative ? 'alternative' : 'main', idx)}
+                          onClick={() => handleOpenPortionDialog(ingredient, option.mealIndex, isAlternative ? 'alternative' : 'main', idx, option.alternativeIndex)}
 
                           className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-blue-500 hover:text-blue-700 hover:bg-blue-50 p-1 rounded text-xs"
 
@@ -10531,7 +10658,7 @@ const MenuCreate = () => {
 
               size="sm"
 
-              onClick={() => handleAddIngredient(option.mealIndex, isAlternative ? 'alternative' : 'main')}
+              onClick={() => handleAddIngredient(option.mealIndex, isAlternative ? 'alternative' : 'main', option.alternativeIndex)}
 
               className={`px-3 py-1.5 text-xs font-medium rounded-md shadow-sm transition-all duration-200 hover:shadow-md ${
 
@@ -11403,7 +11530,7 @@ const MenuCreate = () => {
 
 
 
-  const handleAddIngredient = (mealIndex, optionIndex) => {
+  const handleAddIngredient = (mealIndex, optionIndex, alternativeIndex = null) => {
 
     setMenu(prevMenu => {
 
@@ -11429,7 +11556,19 @@ const MenuCreate = () => {
 
       
 
-      const option = optionIndex === 'main' ? meal.main : meal.alternative;
+      // Get the correct option based on whether it's in the alternatives array
+
+      let option;
+
+      if (alternativeIndex !== null) {
+
+        option = meal.alternatives[alternativeIndex];
+
+      } else {
+
+        option = optionIndex === 'main' ? meal.main : meal.alternative;
+
+      }
 
       
 
@@ -11513,7 +11652,19 @@ const MenuCreate = () => {
 
       
 
-      const option = optionIndex === 'main' ? meal.main : meal.alternative;
+      // Get the correct option based on whether it's in the alternatives array
+
+      let option;
+
+      if (alternativeIndex !== null) {
+
+        option = meal.alternatives[alternativeIndex];
+
+      } else {
+
+        option = optionIndex === 'main' ? meal.main : meal.alternative;
+
+      }
 
       
 

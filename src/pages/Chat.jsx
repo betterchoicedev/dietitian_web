@@ -802,27 +802,8 @@ export default function Chat() {
           };
         }
         
-        // Store the message in chat_messages table ONLY for immediate display (not for scheduled messages)
-        if (!isScheduled) {
-          try {
-            const chatMessage = await ChatMessage.create({
-              role: tempMessage.role,
-              message: tempMessage.content, // Use 'message' column, not 'content'
-              content: tempMessage.content, // Also include content for compatibility
-              conversation_id: conversationId,
-              created_at: tempMessage.created_at,
-              attachments: fileAttachments
-            });
-            console.log('✅ Dietitian message stored in chat_messages:', chatMessage);
-            
-            // Update tempMessage with the actual stored message
-            tempMessage = chatMessage;
-          } catch (chatError) {
-            console.error('Error storing message in chat:', chatError);
-            // Continue anyway - message is in queue
-          }
-        }
-        
+        // Add message to queue only - don't store in chat_messages
+        // The message will be stored in chat_messages when it's processed and sent from the queue
         await addToUserMessageQueue(queueData);
         console.log(`✅ ${messageType === 'system_reminder' ? 'System reminder' : 'Dietitian'} message added to new queue`);
         
