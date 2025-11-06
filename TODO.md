@@ -128,7 +128,7 @@
   - Optimize PDF generation performance if needed
   - Fix any layout or formatting issues found
 
-### 12. WhatsApp Bot Registration Link with Pre-filled Phone Number - (CLIENTS WEBSITE)
+### 12. WhatsApp Bot Registration Link with Pre-filled Phone Number
 - **Files**: `src/App.jsx`, `src/pages/Register.jsx`
 - **Issue**: Create registration link for WhatsApp bot integration that auto-fills phone number
 - **Status**: Pending
@@ -150,49 +150,6 @@
   - Make phone number field read-only when pre-filled from URL (or clearly indicate it's from WhatsApp)
   - Add visual indicator showing "Phone number from WhatsApp" for user clarity
   - Document URL format for WhatsApp bot team to use
-
-### 13. Website Accessibility Improvements - (ALSO TO THE CLIENTS WEBSITE)
-- **Files**: All pages, components, and UI elements across the application
-- **Issue**: Improve website accessibility (a11y) to meet WCAG standards and support users with disabilities
-- **Status**: Pending
-- **Implementation**:
-  - **Keyboard Navigation**:
-    - Ensure all interactive elements are keyboard accessible (Tab, Enter, Escape)
-    - Add visible focus indicators for all focusable elements
-    - Implement proper tab order and skip-to-content links
-    - Add keyboard shortcuts for common actions
-  - **Screen Reader Support**:
-    - Add ARIA labels to all buttons, inputs, and interactive elements
-    - Add ARIA live regions for dynamic content updates
-    - Add ARIA descriptions for complex components
-    - Ensure proper heading hierarchy (h1 → h2 → h3)
-    - Add alt text to all images and icons
-  - **Visual Accessibility**:
-    - Ensure sufficient color contrast (minimum 4.5:1 for text)
-    - Don't rely on color alone to convey information
-    - Add text labels alongside color indicators
-    - Ensure text is resizable without breaking layout
-    - Add high contrast mode option
-  - **Forms & Inputs**:
-    - Add proper label associations for all form fields
-    - Add error messages with ARIA announcements
-    - Add helpful placeholder text and field descriptions
-    - Group related form fields with fieldset/legend
-  - **Navigation**:
-    - Add skip navigation links
-    - Ensure consistent navigation structure
-    - Add breadcrumbs where appropriate
-    - Add clear page titles for each route
-  - **Multimedia**:
-    - Add captions/transcripts for any video content
-    - Add text alternatives for audio content
-    - Ensure media players have keyboard controls
-  - **Testing**:
-    - Test with screen readers (NVDA, JAWS, VoiceOver)
-    - Test keyboard-only navigation
-    - Run automated accessibility audits (Lighthouse, axe)
-    - Test with browser zoom (up to 200%)
-    - Get feedback from users with disabilities
 
 
 
