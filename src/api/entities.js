@@ -14,6 +14,9 @@ export const TrainingLogs = entities.TrainingLogs;
 export const TrainingReminders = entities.TrainingReminders;
 export const ExerciseLibrary = entities.ExerciseLibrary;
 export const TrainingPlanTemplates = entities.TrainingPlanTemplates;
+export const Profiles = entities.Profiles;
+export const Companies = entities.Companies;
+export const RegistrationInvites = entities.RegistrationInvites;
 
 // auth sdk:
 export const User = auth;

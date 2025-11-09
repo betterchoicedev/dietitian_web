@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ArrowLeft, Loader, Save, Search, Filter, Utensils, Edit, CalendarRange, Download, Trash2 } from 'lucide-react';
@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { supabase, secondSupabase } from '@/lib/supabase';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useClient } from '@/contexts/ClientContext';
+import { getMyProfile } from '@/utils/auth';
 import { EventBus } from '@/utils/EventBus';
 import {
   Select,
@@ -565,10 +566,12 @@ const MenuLoad = () => {
   const [originalMenu, setOriginalMenu] = useState(null); // Store original English menu
   const [translatedMenus, setTranslatedMenus] = useState({}); // Cache translations by language
   const [removeBrandsFromPdf, setRemoveBrandsFromPdf] = useState(false);
+  const [userProfile, setUserProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(true);
   const navigate = useNavigate();
   const location = useLocation();
   const { language, translations } = useLanguage();
-  const { selectedClient } = useClient();
+  const { selectedClient, clients, isLoading: clientsLoading } = useClient();
 
   // Convert saved menu format to editable format
   const convertToEditFormat = (savedMenu) => {
@@ -1103,24 +1106,60 @@ const MenuLoad = () => {
   };
 
   // Load saved menus
-  const loadMenus = async () => {
+  const loadMenus = useCallback(async () => {
+    if (profileLoading) {
+      console.log('⏳ Profile loading, skipping menu load...');
+      return;
+    }
+
+    if (!userProfile) {
+      console.warn('⚠️ No user profile available, cannot load menus');
+      return;
+    }
+
+    if (clientsLoading) {
+      console.log('⏳ Clients still loading, delaying menu load...');
+      return;
+    }
+
     setLoadingMenus(true);
     setError(null);
     try {
       // First, check and update any expired menus
       await checkAndUpdateExpiredMenus();
       
+      const isSysAdmin = userProfile.role === 'sys_admin';
+      let accessibleUserCodes = null;
+      if (!isSysAdmin) {
+        accessibleUserCodes = Array.isArray(clients)
+          ? Array.from(new Set(clients.map((client) => client.user_code).filter(Boolean)))
+          : [];
+
+        if (!accessibleUserCodes || accessibleUserCodes.length === 0) {
+          console.log('🔒 No accessible clients for current user, skipping menu fetch.');
+          setMenus([]);
+          setUserCodes([]);
+          return;
+        }
+      }
+
       let loadedMenus = [];
       try {
-        loadedMenus = await Menu.filter({ 
-          record_type: 'meal_plan'
-        }, '-created_at');
+        const filterParams = {
+          record_type: 'meal_plan',
+          ...(accessibleUserCodes ? { user_code: accessibleUserCodes } : {})
+        };
+        loadedMenus = await Menu.filter(filterParams, '-created_at');
       } catch (fetchError) {
         console.error("Error loading menus:", fetchError);
         const allMenus = await Menu.list();
         loadedMenus = allMenus.filter(menu => 
           menu.record_type === 'meal_plan'
         );
+        if (accessibleUserCodes) {
+          const allowedSet = new Set(accessibleUserCodes);
+          loadedMenus = loadedMenus.filter(menu => allowedSet.has(menu.user_code));
+        }
       }
       
       setMenus(loadedMenus);
@@ -1133,12 +1172,39 @@ const MenuLoad = () => {
     } finally {
       setLoadingMenus(false);
     }
-  };
+  }, [clients, clientsLoading, profileLoading, userProfile]);
 
   useEffect(() => {
     loadMenus();
     // Note: Future meal plan notifications are now only sent via manual check button
     // to prevent duplicate notifications on page refresh
+  }, [loadMenus]);
+  useEffect(() => {
+    let isMounted = true;
+    const fetchUserProfile = async () => {
+      try {
+        setProfileLoading(true);
+        const profile = await getMyProfile();
+        if (isMounted) {
+          setUserProfile(profile);
+        }
+      } catch (profileError) {
+        console.error('❌ Failed to load user profile:', profileError);
+        if (isMounted) {
+          setError('Failed to load user profile. Please refresh the page.');
+        }
+      } finally {
+        if (isMounted) {
+          setProfileLoading(false);
+        }
+      }
+    };
+
+    fetchUserProfile();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Generate shopping list when editedMenu changes

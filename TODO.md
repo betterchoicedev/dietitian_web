@@ -131,7 +131,7 @@
 ### 12. WhatsApp Bot Registration Link with Pre-filled Phone Number
 - **Files**: `src/App.jsx`, `src/pages/Register.jsx`
 - **Issue**: Create registration link for WhatsApp bot integration that auto-fills phone number
-- **Status**: Pending
+- **Status**: Done
 - **Use Case**: 
   - Non-client texts the WhatsApp bot
   - Bot detects user wants to register
@@ -152,5 +152,22 @@
   - Document URL format for WhatsApp bot team to use
 
 
+### 13. Talk to Emanuel About the Website
+- **Task**: Schedule a conversation with Emanuel to walk him through the website features and recent updates
+- **Status**: Pending
+- **Notes**:
+  - Prepare a concise overview of current functionality
+  - Highlight new training management and meal plan safeguards
+  - Gather feedback or questions for follow-up
+
+
+### 14. Restrict Registration Access
+- **Task**: Limit registration so only approved individuals can sign up and access client data
+- **Status**: Pending
+- **Notes**:
+  - Add whitelist or invite-based flow for registration
+  - Validate registrations against allowed list before creating accounts
+  - Provide admin UI to manage approved registrants
+  - Ensure unauthorized users cannot view client information
 
 

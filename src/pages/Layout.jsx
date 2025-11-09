@@ -24,7 +24,8 @@ import {
   Search,
   Apple,
   LayoutDashboard,
-  Dumbbell
+  Dumbbell,
+  Shield
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -50,6 +51,7 @@ import { EventBus } from '@/utils/EventBus';
 import { Input } from '@/components/ui/input';
 import SystemMessageModal from '@/components/SystemMessageModal';
 import { useSystemMessages } from '@/hooks/useSystemMessages';
+import { getMyProfile } from '@/utils/auth';
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -72,6 +74,7 @@ export default function Layout() {
   const [clientSearchTerm, setClientSearchTerm] = useState('');
   const [isClientSelectOpen, setIsClientSelectOpen] = useState(false);
   const dataLoadedRef = useRef(false);
+  const [userProfile, setUserProfile] = useState(null);
 
   // Debug sidebar state changes
   useEffect(() => {
@@ -174,6 +177,30 @@ export default function Layout() {
     };
   
     loadUserData();
+  }, [user]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadProfile = async () => {
+      if (!user) {
+        if (isMounted) setUserProfile(null);
+        return;
+      }
+
+      try {
+        const profile = await getMyProfile();
+        if (isMounted) {
+          setUserProfile(profile);
+        }
+      } catch (err) {
+        console.error('Error loading user profile in layout:', err);
+      }
+    };
+
+    loadProfile();
+    return () => {
+      isMounted = false;
+    };
   }, [user]);
 
   const handleClientChange = (userCode) => {
@@ -450,6 +477,14 @@ export default function Layout() {
                 <span className="font-medium">{translations.users}</span>
               </Button>
             </Link>
+            {(userProfile?.role === 'sys_admin' || userProfile?.role === 'company_manager') && (
+              <Link to={createPageUrl('UserManagement')} onClick={() => setSidebarOpen(false)}>
+                <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-primary/8 hover:text-primary-darker transition-all duration-300 group">
+                  <Shield className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+                  <span className="font-medium">{translations.userManagement || 'User Management'}</span>
+                </Button>
+              </Link>
+            )}
             <Link to="/training" onClick={() => setSidebarOpen(false)}>
               <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-orange/8 hover:text-orange transition-all duration-300 group">
                 <Dumbbell className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />

@@ -4,6 +4,7 @@ import { useClient } from '@/contexts/ClientContext';
 import { entities } from '@/api/client';
 import { ExerciseLibrary, TrainingPlanTemplates } from '@/api/entities';
 import { getMyProfile, getCompanyProfileIds } from '@/utils/auth';
+import { cn } from '@/lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -1349,28 +1350,55 @@ const TrainingManagement = () => {
                   <p className="text-muted-foreground">No training plans yet. Create one to get started!</p>
                 </div>
               ) : (
-                <Table>
+                <Table dir={isRTL ? 'rtl' : 'ltr'}>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>{translations.client}</TableHead>
-                      <TableHead>{translations.planName}</TableHead>
-                      <TableHead>{translations.planGoal}</TableHead>
-                      <TableHead>{translations.difficultyLevel}</TableHead>
-                      <TableHead>{translations.durationWeeks}</TableHead>
-                      <TableHead>{translations.planStatus}</TableHead>
-                      <TableHead className="text-right">{translations.actions}</TableHead>
+                      <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                        {translations.client}
+                      </TableHead>
+                      <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                        {translations.planName}
+                      </TableHead>
+                      <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                        {translations.planGoal}
+                      </TableHead>
+                      <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                        {translations.difficultyLevel}
+                      </TableHead>
+                      <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                        {translations.durationWeeks}
+                      </TableHead>
+                      <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                        {translations.planStatus}
+                      </TableHead>
+                      <TableHead className={cn(isRTL ? 'text-left' : 'text-right')}>
+                        {translations.actions}
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {trainingPlans.map((plan) => (
                       <TableRow key={plan.id}>
-                        <TableCell className="font-medium">
-                          <div className="flex items-center gap-2">
+                        <TableCell
+                          className={cn(
+                            'font-medium',
+                            isRTL ? 'text-right' : 'text-left'
+                          )}
+                        >
+                          <div className={cn('flex items-center gap-2', isRTL && 'flex-row-reverse')}>
                             <User className="h-4 w-4 text-primary" />
-                            {getClientName(plan.user_code)}
+                            <span
+                              className="max-w-[180px] truncate leading-tight"
+                              dir="auto"
+                              title={getClientName(plan.user_code)}
+                            >
+                              {getClientName(plan.user_code)}
+                            </span>
                           </div>
                         </TableCell>
-                        <TableCell>{plan.plan_name}</TableCell>
+                        <TableCell className={cn(isRTL ? 'text-right' : 'text-left')}>
+                          {plan.plan_name}
+                        </TableCell>
                         <TableCell>
                           <Badge variant="outline">
                             {translations[plan.goal?.replace(/_/g, '')] || plan.goal}
@@ -1387,7 +1415,9 @@ const TrainingManagement = () => {
                             {translations[plan.difficulty_level] || plan.difficulty_level}
                           </Badge>
                         </TableCell>
-                        <TableCell>{plan.duration_weeks} weeks</TableCell>
+                        <TableCell className={cn(isRTL ? 'text-right' : 'text-left')}>
+                          {plan.duration_weeks} {language === 'he' ? 'שבועות' : 'weeks'}
+                        </TableCell>
                         <TableCell>
                           <Badge 
                             variant={
@@ -1400,8 +1430,8 @@ const TrainingManagement = () => {
                             {translations[plan.status + 'Plan'] || plan.status}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
+                        <TableCell className={cn(isRTL ? 'text-left' : 'text-right')}>
+                          <div className={cn('flex gap-2', isRTL ? 'justify-start flex-row-reverse' : 'justify-end')}>
                             <Button
                               variant="ghost"
                               size="sm"
@@ -1522,7 +1552,13 @@ const TrainingManagement = () => {
                           <div>
                             <CardTitle className="text-lg flex items-center gap-2">
                               <User className="h-4 w-4" />
-                              {getClientName(log.user_code)}
+                              <span
+                                className="max-w-[200px] truncate leading-tight"
+                                dir="auto"
+                                title={getClientName(log.user_code)}
+                              >
+                                {getClientName(log.user_code)}
+                              </span>
                             </CardTitle>
                             <CardDescription>
                               <div className="flex items-center gap-2 mt-1">
@@ -1624,24 +1660,36 @@ const TrainingManagement = () => {
                   <p className="text-muted-foreground">No pending reminders</p>
                 </div>
               ) : (
-                <Table>
+                <Table dir={isRTL ? 'rtl' : 'ltr'}>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>{translations.client}</TableHead>
-                      <TableHead>{translations.reminderContent}</TableHead>
-                      <TableHead>{translations.scheduledFor}</TableHead>
-                      <TableHead>{translations.status}</TableHead>
+                      <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                        {translations.client}
+                      </TableHead>
+                      <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                        {translations.reminderContent}
+                      </TableHead>
+                      <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                        {translations.scheduledFor}
+                      </TableHead>
+                      <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                        {translations.status}
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {reminders.map((reminder) => (
                       <TableRow key={reminder.id}>
-                        <TableCell>{getClientName(reminder.user_code)}</TableCell>
-                        <TableCell>{reminder.reminder_content}</TableCell>
-                        <TableCell>
+                        <TableCell className={cn(isRTL ? 'text-right' : 'text-left')}>
+                          {getClientName(reminder.user_code)}
+                        </TableCell>
+                        <TableCell className={cn(isRTL ? 'text-right' : 'text-left')}>
+                          {reminder.reminder_content}
+                        </TableCell>
+                        <TableCell className={cn(isRTL ? 'text-right' : 'text-left')}>
                           {new Date(reminder.scheduled_for).toLocaleString()}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className={cn(isRTL ? 'text-right' : 'text-left')}>
                           <Badge variant={
                             reminder.status === 'sent' ? 'secondary' :
                             reminder.status === 'pending' ? 'default' :
@@ -1721,24 +1769,38 @@ const TrainingManagement = () => {
                                 </CardTitle>
                               </CardHeader>
                               <CardContent>
-                                <Table>
+                                <Table dir={isRTL ? 'rtl' : 'ltr'}>
                                   <TableHeader>
                                     <TableRow>
-                                      <TableHead>Exercise</TableHead>
-                                      <TableHead className="text-center">Sets</TableHead>
-                                      <TableHead className="text-center">Reps</TableHead>
-                                      <TableHead className="text-center">Rest (s)</TableHead>
-                                      <TableHead>Notes</TableHead>
+                                      <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                                        {translations.exerciseName || 'Exercise'}
+                                      </TableHead>
+                                      <TableHead className="text-center">
+                                        {translations.sets || 'Sets'}
+                                      </TableHead>
+                                      <TableHead className="text-center">
+                                        {translations.reps || 'Reps'}
+                                      </TableHead>
+                                      <TableHead className="text-center">
+                                        {translations.restSeconds || 'Rest (s)'}
+                                      </TableHead>
+                                      <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                                        {translations.exerciseNotes || 'Notes'}
+                                      </TableHead>
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
                                     {day.exercises?.map((exercise, exIdx) => (
                                       <TableRow key={exIdx}>
-                                        <TableCell className="font-medium">{exercise.exercise_name || exercise.name}</TableCell>
+                                        <TableCell className={cn('font-medium', isRTL ? 'text-right' : 'text-left')}>
+                                          {exercise.exercise_name || exercise.name}
+                                        </TableCell>
                                         <TableCell className="text-center">{exercise.sets}</TableCell>
                                         <TableCell className="text-center">{exercise.reps}</TableCell>
                                         <TableCell className="text-center">{exercise.rest_seconds || exercise.rest}</TableCell>
-                                        <TableCell className="text-sm text-muted-foreground">{exercise.notes}</TableCell>
+                                        <TableCell className={cn('text-sm text-muted-foreground', isRTL ? 'text-right' : 'text-left')}>
+                                          {exercise.notes}
+                                        </TableCell>
                                       </TableRow>
                                     ))}
                                   </TableBody>
@@ -1766,24 +1828,38 @@ const TrainingManagement = () => {
                           </CardTitle>
                         </CardHeader>
                         <CardContent>
-                          <Table>
+                          <Table dir={isRTL ? 'rtl' : 'ltr'}>
                             <TableHeader>
                               <TableRow>
-                                <TableHead>Exercise</TableHead>
-                                <TableHead className="text-center">Sets</TableHead>
-                                <TableHead className="text-center">Reps</TableHead>
-                                <TableHead className="text-center">Rest (s)</TableHead>
-                                <TableHead>Notes</TableHead>
+                                <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                                  {translations.exerciseName || 'Exercise'}
+                                </TableHead>
+                                <TableHead className="text-center">
+                                  {translations.sets || 'Sets'}
+                                </TableHead>
+                                <TableHead className="text-center">
+                                  {translations.reps || 'Reps'}
+                                </TableHead>
+                                <TableHead className="text-center">
+                                  {translations.restSeconds || 'Rest (s)'}
+                                </TableHead>
+                                <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                                  {translations.exerciseNotes || 'Notes'}
+                                </TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
                               {day.exercises?.map((exercise, exIdx) => (
                                 <TableRow key={exIdx}>
-                                  <TableCell className="font-medium">{exercise.exercise_name || exercise.name}</TableCell>
+                                  <TableCell className={cn('font-medium', isRTL ? 'text-right' : 'text-left')}>
+                                    {exercise.exercise_name || exercise.name}
+                                  </TableCell>
                                   <TableCell className="text-center">{exercise.sets}</TableCell>
                                   <TableCell className="text-center">{exercise.reps}</TableCell>
                                   <TableCell className="text-center">{exercise.rest_seconds || exercise.rest}</TableCell>
-                                  <TableCell className="text-sm text-muted-foreground">{exercise.notes}</TableCell>
+                                  <TableCell className={cn('text-sm text-muted-foreground', isRTL ? 'text-right' : 'text-left')}>
+                                    {exercise.notes}
+                                  </TableCell>
                                 </TableRow>
                               ))}
                             </TableBody>

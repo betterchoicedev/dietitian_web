@@ -46,6 +46,56 @@ export const auth = {
 
 // Entity functions
 export const entities = {
+  RegistrationInvites: {
+    list: async ({ email, status } = {}) => {
+      console.log('📨 Loading registration invites', { email, status });
+      const url = new URL(`${import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net'}/api/auth/invites`);
+      if (email) url.searchParams.set('email', email);
+      if (status) url.searchParams.set('status', status);
+      const response = await fetch(url.toString(), {
+        credentials: 'include',
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = result?.error || 'Failed to load invitations';
+        console.error('❌ RegistrationInvites.list failed:', message);
+        throw new Error(message);
+      }
+      return result.invites || [];
+    },
+    create: async (payload) => {
+      console.log('✉️ Creating registration invite', payload);
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net'}/api/auth/invites`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = result?.error || 'Failed to create invitation';
+        console.error('❌ RegistrationInvites.create failed:', message);
+        throw new Error(message);
+      }
+      return result.invite;
+    },
+    revoke: async (code) => {
+      console.log('🚫 Revoking registration invite', code);
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net'}/api/auth/invites/${code}/revoke`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = result?.error || 'Failed to revoke invitation';
+        console.error('❌ RegistrationInvites.revoke failed:', message);
+        throw new Error(message);
+      }
+      return result;
+    },
+  },
   Menu: {
     create: async (data) => {
       // Normalize status to draft by default
@@ -163,13 +213,28 @@ export const entities = {
       try {
         console.log('🔍 Filtering menus with query:', query);
         
+        const hasEmptyArrayFilter = Object.values(query).some(
+          (value) => Array.isArray(value) && value.length === 0
+        );
+
+        if (hasEmptyArrayFilter) {
+          console.log('🔍 Empty array filter provided, returning no results.');
+          return [];
+        }
+
         let supabaseQuery = supabase
           .from('meal_plans_and_schemas')
           .select('*');
         
         // Apply filters
         Object.entries(query).forEach(([key, value]) => {
-          if (value !== undefined && value !== null) {
+          if (value === undefined || value === null) {
+            return;
+          }
+
+          if (Array.isArray(value)) {
+            supabaseQuery = supabaseQuery.in(key, value);
+          } else {
             supabaseQuery = supabaseQuery.eq(key, value);
           }
         });
@@ -670,6 +735,85 @@ export const entities = {
         
       } catch (err) {
         console.error('❌ Error in ChatUser.getMealPlanByUserCode:', err);
+        throw err;
+      }
+    }
+  },
+  Profiles: {
+    list: async () => {
+      try {
+        console.log('📋 Fetching profiles with company info');
+
+        const { data, error } = await supabase
+          .from('profiles')
+          .select(`
+            id,
+            role,
+            company_id,
+            name,
+            created_at,
+            company:companies(
+              id,
+              name
+            )
+          `)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('❌ Supabase profiles list error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+
+        console.log('✅ Retrieved profiles from Supabase:', data?.length || 0, 'records');
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error in Profiles.list:', err);
+        throw err;
+      }
+    },
+    update: async (id, data) => {
+      try {
+        console.log('✏️ Updating profile:', id, 'with data:', data);
+
+        const { data: result, error } = await supabase
+          .from('profiles')
+          .update(data)
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('❌ Supabase profile update error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+
+        console.log('✅ Updated profile in Supabase:', result);
+        return result;
+      } catch (err) {
+        console.error('❌ Error in Profiles.update:', err);
+        throw err;
+      }
+    }
+  },
+  Companies: {
+    list: async () => {
+      try {
+        console.log('🏢 Fetching companies list');
+
+        const { data, error } = await supabase
+          .from('companies')
+          .select('id, name')
+          .order('name', { ascending: true });
+
+        if (error) {
+          console.error('❌ Supabase companies list error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+
+        console.log('✅ Retrieved companies from Supabase:', data?.length || 0, 'records');
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error in Companies.list:', err);
         throw err;
       }
     }

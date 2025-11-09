@@ -6,6 +6,8 @@ const AuthContext = createContext({});
 
 export const useAuth = () => useContext(AuthContext);
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net';
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -52,11 +54,30 @@ export function AuthProvider({ children }) {
   }, []);
 
   const value = {
-    signUp: async (data) => {
+    signUp: async ({ email, password, name, companyId, inviteCode }) => {
       try {
-        const { data: authData, error } = await supabase.auth.signUp(data);
-        if (error) throw error;
-        return { data: authData, error: null };
+        const response = await fetch(`${BACKEND_URL}/api/auth/register`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email,
+            password,
+            name,
+            invite_code: inviteCode,
+            company_id: companyId || null,
+          }),
+        });
+
+        const result = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          const message = result?.error || 'Failed to create account';
+          throw new Error(message);
+        }
+
+        return { data: result, error: null };
       } catch (error) {
         console.error('Error signing up:', error);
         return { data: null, error };

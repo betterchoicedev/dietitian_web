@@ -20,6 +20,7 @@ import UserWeightLogs from './pages/UserWeightLogs';
 import NutritionAnalytics from './pages/NutritionAnalytics';
 import DietitianProfile from './pages/DietitianProfile';
 import TrainingManagement from './pages/TrainingManagement';
+import UserManagement from './pages/UserManagement';
 
 // Protected Route component
 function ProtectedRoute({ children }) {
@@ -101,6 +102,8 @@ function App() {
                 <Route path="training-management" element={<TrainingManagement />} />
                 <Route path="profile" element={<DietitianProfile />} />
                 <Route path="dietitian-profile" element={<DietitianProfile />} />
+                <Route path="UserManagement" element={<UserManagement />} />
+                <Route path="user-management" element={<Navigate to="/UserManagement" replace />} />
               </Route>
             </Routes>
           </ClientProvider>
