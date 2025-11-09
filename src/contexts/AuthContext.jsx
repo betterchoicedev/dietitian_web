@@ -12,6 +12,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [processingMagicLink, setProcessingMagicLink] = useState(false);
 
   useEffect(() => {
     // Check active sessions and sets the user
@@ -24,7 +25,40 @@ export function AuthProvider({ children }) {
         }
 
         setUser(session?.user ?? null);
-        
+
+        const handleHashRedirect = async () => {
+          if (processingMagicLink) return;
+          const hash = window.location.hash;
+          if (!hash) return;
+
+          const params = new URLSearchParams(hash.slice(1));
+          const accessToken = params.get('access_token');
+          const refreshToken = params.get('refresh_token');
+
+          if (accessToken && refreshToken) {
+            try {
+              setProcessingMagicLink(true);
+              const { data, error: sessionError } = await supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken,
+              });
+
+              if (sessionError) {
+                console.error('Error setting session from magic link:', sessionError);
+              } else {
+                setUser(data?.session?.user ?? null);
+              }
+            } catch (err) {
+              console.error('Failed to process magic link:', err);
+            } finally {
+              setProcessingMagicLink(false);
+              window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+            }
+          }
+        };
+
+        handleHashRedirect();
+
         // Listen for changes on auth state (sign in, sign out, etc.)
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
           setUser(session?.user ?? null);
