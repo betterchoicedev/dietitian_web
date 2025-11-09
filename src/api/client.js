@@ -816,7 +816,32 @@ export const entities = {
         console.error('❌ Error in Companies.list:', err);
         throw err;
       }
-    }
+    },
+    create: async (name) => {
+      try {
+        console.log('🏢 Creating company:', name);
+        const payload = {
+          name,
+        };
+
+        const { data, error } = await supabase
+          .from('companies')
+          .insert([payload])
+          .select('id, name')
+          .single();
+
+        if (error) {
+          console.error('❌ Supabase company create error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+
+        console.log('✅ Company created:', data);
+        return data;
+      } catch (err) {
+        console.error('❌ Error in Companies.create:', err);
+        throw err;
+      }
+    },
   },
   WeightLogs: {
     // Get all weight logs for a specific user

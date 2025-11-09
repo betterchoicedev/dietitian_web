@@ -163,7 +163,7 @@
 
 ### 14. Restrict Registration Access
 - **Task**: Limit registration so only approved individuals can sign up and access client data
-- **Status**: Pending
+- **Status**: Done
 - **Notes**:
   - Add whitelist or invite-based flow for registration
   - Validate registrations against allowed list before creating accounts

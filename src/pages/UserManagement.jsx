@@ -41,6 +41,11 @@ export default function UserManagement() {
     expiresInHours: '',
     notes: '',
   });
+  const [showInviteHistory, setShowInviteHistory] = useState(false);
+  const [clientSearchTerm, setClientSearchTerm] = useState('');
+  const [visibleClientCount, setVisibleClientCount] = useState(10);
+  const [newCompanyName, setNewCompanyName] = useState('');
+  const [creatingCompany, setCreatingCompany] = useState(false);
 
   const roleLabels = useMemo(() => ({
     sys_admin: translations?.roleLabelSysAdmin || 'System Admin',
@@ -187,6 +192,22 @@ export default function UserManagement() {
     }
   };
 
+  const isInviteActive = (invite) => {
+    if (invite.revoked_at || invite.used_at) return false;
+    if (invite.expires_at && new Date(invite.expires_at).getTime() < Date.now()) return false;
+    return true;
+  };
+
+  const activeInvitesCount = useMemo(
+    () => invites.filter(isInviteActive).length,
+    [invites],
+  );
+
+  const visibleInvites = useMemo(
+    () => (showInviteHistory ? invites : invites.filter(isInviteActive)),
+    [invites, showInviteHistory],
+  );
+
   const handleInviteFieldChange = (field, value) => {
     setInviteForm((prev) => ({
       ...prev,
@@ -277,6 +298,40 @@ export default function UserManagement() {
     }
   };
 
+  const handleCreateCompany = async (e) => {
+    e.preventDefault();
+    const trimmedName = newCompanyName.trim();
+    if (!trimmedName) {
+      toast({
+        title: translations?.error || 'Error',
+        description:
+          translations?.companyNameRequired || 'Company name is required.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setCreatingCompany(true);
+      const company = await Companies.create(trimmedName);
+      toast({
+        title: translations?.companyCreated || 'Company created',
+        description: company?.name || trimmedName,
+      });
+      setNewCompanyName('');
+      await loadData();
+    } catch (err) {
+      console.error('❌ Failed to create company:', err);
+      toast({
+        title: translations?.error || 'Error',
+        description: err.message || 'Failed to create company.',
+        variant: 'destructive',
+      });
+    } finally {
+      setCreatingCompany(false);
+    }
+  };
+
   const companyMap = useMemo(() => {
     const map = new Map();
     companies.forEach((c) => map.set(c.id, c.name));
@@ -288,6 +343,29 @@ export default function UserManagement() {
     profiles.forEach((p) => map.set(p.id, p));
     return map;
   }, [profiles]);
+
+  const filteredClients = useMemo(() => {
+    if (!clientSearchTerm.trim()) return clients;
+    const term = clientSearchTerm.trim().toLowerCase();
+    return clients.filter((client) => {
+      const nameMatch = client.full_name?.toLowerCase().includes(term);
+      const codeMatch = client.user_code?.toLowerCase().includes(term);
+      const emailMatch = client.email?.toLowerCase().includes(term);
+      const phoneMatch = client.phone_number?.toLowerCase().includes(term);
+      return nameMatch || codeMatch || emailMatch || phoneMatch;
+    });
+  }, [clients, clientSearchTerm]);
+
+  const displayedClients = useMemo(
+    () => filteredClients.slice(0, visibleClientCount),
+    [filteredClients, visibleClientCount],
+  );
+
+  const canShowMoreClients = filteredClients.length > displayedClients.length;
+
+  const resetClientPagination = () => {
+    setVisibleClientCount(10);
+  };
 
   const handleProfileUpdate = async (profileId, patch, successMessage) => {
     try {
@@ -506,9 +584,23 @@ export default function UserManagement() {
                   'Generate invite codes to control who can register for the platform.'}
               </CardDescription>
             </div>
-            <Badge variant="outline">
-              {translations?.total || 'Total'}: {invites.length}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline">
+                {showInviteHistory
+                  ? `${translations?.total || 'Total'}: ${invites.length}`
+                  : `${translations?.active || 'Active'}: ${activeInvitesCount}`}
+              </Badge>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowInviteHistory((prev) => !prev)}
+              >
+                {showInviteHistory
+                  ? translations?.hideInviteHistory || 'Hide history'
+                  : translations?.showInviteHistory || 'Show history'}
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="space-y-6">
             <form onSubmit={handleCreateInvite} className="grid gap-4 md:grid-cols-2">
@@ -647,14 +739,16 @@ export default function UserManagement() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ) : invites.length === 0 ? (
+                  ) : visibleInvites.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={8} className="py-6 text-center text-muted-foreground">
-                        {translations?.noInvitesYet || 'No invitations created yet.'}
+                        {showInviteHistory
+                          ? translations?.noInvitesYet || 'No invitations created yet.'
+                          : translations?.noActiveInvites || 'No active invitations.'}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    invites.map((invite) => {
+                    visibleInvites.map((invite) => {
                       const { label: statusLabel, variant: statusVariant } = getInviteStatus(invite);
                       const canRevoke = !invite.revoked_at && !invite.used_at;
                       return (
@@ -851,10 +945,30 @@ export default function UserManagement() {
             </CardDescription>
           </div>
           <Badge variant="outline">
-            {translations?.total || 'Total'}: {clients.length}
+            {translations?.total || 'Total'}: {filteredClients.length}
           </Badge>
         </CardHeader>
         <CardContent className="overflow-x-auto">
+          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <Input
+              value={clientSearchTerm}
+              onChange={(e) => {
+                setClientSearchTerm(e.target.value);
+                resetClientPagination();
+              }}
+              placeholder={
+                translations?.searchClients ||
+                'Search clients by name, email, code, or phone...'
+              }
+              className="md:w-80"
+            />
+            {filteredClients.length > 10 && (
+              <span className="text-sm text-muted-foreground">
+                {translations?.showing || 'Showing'} {Math.min(displayedClients.length, filteredClients.length)}{' '}
+                {translations?.of || 'of'} {filteredClients.length}
+              </span>
+            )}
+          </div>
           <Table dir={isRTL ? 'rtl' : 'ltr'}>
             <TableHeader>
               <TableRow>
@@ -870,14 +984,17 @@ export default function UserManagement() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {clients.length === 0 ? (
+              {displayedClients.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={3} className="text-center text-muted-foreground">
-                    {translations?.noClientsFound || 'No clients found.'}
+                    {clientSearchTerm.trim()
+                      ? translations?.noClientsFound || 'No clients found.'
+                      : translations?.noClientsFoundGeneral ||
+                        'No clients found. Add your first client to get started.'}
                   </TableCell>
                 </TableRow>
               ) : (
-                clients.map((client) => {
+                displayedClients.map((client) => {
                   const assignedProfile = client.provider_id
                     ? profileMap.get(client.provider_id)
                     : null;
@@ -947,6 +1064,22 @@ export default function UserManagement() {
               )}
             </TableBody>
           </Table>
+          {filteredClients.length > 0 && (
+            <div className="mt-4 flex justify-center">
+              {canShowMoreClients ? (
+                <Button
+                  variant="outline"
+                  onClick={() => setVisibleClientCount((prev) => prev + 10)}
+                >
+                  {translations?.showMore || 'Show more'}
+                </Button>
+              ) : filteredClients.length > 10 ? (
+                <Button variant="outline" onClick={() => setVisibleClientCount(10)}>
+                  {translations?.showLess || 'Show Less'}
+                </Button>
+              ) : null}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -963,6 +1096,19 @@ export default function UserManagement() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            <form onSubmit={handleCreateCompany} className="mb-4 flex flex-col gap-3 md:flex-row md:items-center">
+              <Input
+                value={newCompanyName}
+                onChange={(e) => setNewCompanyName(e.target.value)}
+                placeholder={translations?.companyNamePlaceholder || 'Enter company name'}
+                className="md:w-80"
+              />
+              <Button type="submit" disabled={creatingCompany}>
+                {creatingCompany
+                  ? translations?.creating || 'Creating'
+                  : translations?.addCompany || 'Add company'}
+              </Button>
+            </form>
             <div className="flex flex-wrap gap-2">
               {companies.length === 0 ? (
                 <Badge variant="outline">

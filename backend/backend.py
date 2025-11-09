@@ -275,6 +275,7 @@ def api_auth_register():
 
 
     auto_confirm = (os.getenv("SUPABASE_AUTO_CONFIRM") or "false").lower() in {"1", "true", "yes", "y"}
+    verification_redirect = os.getenv("SUPABASE_EMAIL_REDIRECT_URL")
 
     user_id = None
 
@@ -386,16 +387,15 @@ def api_auth_register():
 
         try:
 
+            signup_url = f"{supabase_url}/auth/v1/signup"
+            params = {"redirect_to": verification_redirect} if verification_redirect else None
+
             signup_resp = requests.post(
-
-                f"{supabase_url}/auth/v1/signup",
-
+                signup_url,
                 headers=admin_headers,
-
                 json=signup_payload,
-
+                params=params,
                 timeout=15,
-
             )
 
         except Exception as err:
