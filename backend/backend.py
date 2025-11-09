@@ -66,9 +66,24 @@ load_dotenv()
 
 app = Flask(__name__)
 
+default_allowed_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://localhost:5173",
+    "https://127.0.0.1:5173",
+    "https://www.betterchoicefood.com",
+    "https://betterchoicefood.com",
+]
+
+env_allowed_origins = os.getenv("API_ALLOWED_ORIGINS")
+if env_allowed_origins:
+    allowed_origins = [origin.strip() for origin in env_allowed_origins.split(",") if origin.strip()]
+else:
+    allowed_origins = default_allowed_origins
+
 CORS(
     app,
-    resources={r"/api/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}},
+    resources={r"/api/*": {"origins": allowed_origins}},
     supports_credentials=True,
 )
 
