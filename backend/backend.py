@@ -66,7 +66,11 @@ load_dotenv()
 
 app = Flask(__name__)
 
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+CORS(
+    app,
+    resources={r"/api/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}},
+    supports_credentials=True,
+)
 
 
 
@@ -76,9 +80,592 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 supabase_url = os.getenv("supabaseUrl")
 
-supabase_key = os.getenv("supabaseKey")
+supabase_key = (
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    or os.getenv("supabaseServiceRoleKey")
+    or os.getenv("supabaseServiceKey")
+    or os.getenv("supabaseKey")
+)
 
 supabase: Client = create_client(supabase_url, supabase_key)
+
+
+
+import uuid
+
+def _parse_iso_datetime(value):
+
+    if not value:
+
+        return None
+
+    if isinstance(value, datetime.datetime):
+
+        return value
+
+    try:
+
+        if isinstance(value, str):
+
+            cleaned = value.strip()
+
+            if not cleaned:
+
+                return None
+
+            if cleaned.endswith("Z"):
+
+                cleaned = cleaned[:-1] + "+00:00"
+
+            return datetime.datetime.fromisoformat(cleaned)
+
+    except Exception:
+
+        return None
+
+    return None
+
+
+
+def _require_service_key():
+
+    if not supabase_url or not supabase_key:
+
+        raise RuntimeError("Supabase service credentials missing; check supabaseUrl and supabaseKey env vars.")
+
+
+
+def _generate_invite_code():
+
+    return uuid.uuid4().hex[:10].upper()
+
+
+
+@app.route("/api/auth/register", methods=["POST"])
+
+def api_auth_register():
+
+    _require_service_key()
+
+    try:
+
+        payload = request.get_json(force=True)
+
+    except Exception:
+
+        return jsonify({"error": "Invalid JSON payload"}), 400
+
+
+
+    email = (payload.get("email") or "").strip().lower()
+
+    password = payload.get("password")
+
+    name = (payload.get("name") or "").strip()
+
+    invite_code = (payload.get("invite_code") or "").strip()
+
+    company_id = payload.get("company_id")
+
+    if company_id in ("", "none"):
+
+        company_id = None
+
+
+
+    if not email or not password or not name or not invite_code:
+
+        return jsonify({"error": "Missing required fields"}), 400
+
+
+
+    now_utc = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
+
+
+
+    try:
+
+        invite_response = (
+
+            supabase.table("registration_invites")
+
+            .select("*")
+
+            .eq("code", invite_code)
+
+            .limit(1)
+
+            .execute()
+
+        )
+
+    except Exception as err:
+
+        logger.error("Failed to query registration_invites: %s", err)
+
+        return jsonify({"error": "Unable to validate invitation"}), 500
+
+
+
+    invite_rows = getattr(invite_response, "data", None) or []
+
+    if not invite_rows:
+
+        return jsonify({"error": "This invitation is not valid. Please contact your administrator."}), 403
+
+
+
+    invite = invite_rows[0]
+
+    invite_email = (invite.get("email") or "").strip().lower()
+
+    if invite_email and invite_email != email:
+
+        return jsonify({"error": "This invitation is restricted to a different email address."}), 403
+
+    if invite.get("revoked_at"):
+
+        return jsonify({"error": "This invitation has been revoked. Please request a new one."}), 403
+
+    if invite.get("used_at"):
+
+        return jsonify({"error": "This invitation was already used. Please request a new one."}), 403
+
+
+
+    expires_at = _parse_iso_datetime(invite.get("expires_at"))
+
+    if expires_at and expires_at < now_utc:
+
+        return jsonify({"error": "This invitation has expired. Please request a new one."}), 403
+
+
+
+    target_company_id = company_id or invite.get("company_id")
+
+    target_role = invite.get("role") or "employee"
+
+
+
+    admin_headers = {
+
+        "apikey": supabase_key,
+
+        "Authorization": f"Bearer {supabase_key}",
+
+        "Content-Type": "application/json",
+
+    }
+
+
+
+    auto_confirm = (os.getenv("SUPABASE_AUTO_CONFIRM") or "false").lower() in {"1", "true", "yes", "y"}
+
+    user_id = None
+
+    if auto_confirm:
+
+        admin_payload = {
+
+            "email": email,
+
+            "password": password,
+
+            "email_confirm": True,
+
+            "user_metadata": {
+
+                "name": name,
+
+                "full_name": name,
+
+                "display_name": name,
+
+            },
+
+        }
+
+
+
+        try:
+
+            admin_resp = requests.post(
+
+                f"{supabase_url}/auth/v1/admin/users",
+
+                headers=admin_headers,
+
+                json=admin_payload,
+
+                timeout=15,
+
+            )
+
+        except Exception as err:
+
+            logger.error("Failed to create user via admin API: %s", err)
+
+            return jsonify({"error": "Unable to create user account"}), 500
+
+
+
+        if admin_resp.status_code >= 400:
+
+            try:
+
+                admin_error = admin_resp.json()
+
+            except Exception:
+
+                admin_error = {"error": admin_resp.text}
+
+
+
+            message = admin_error.get("message") or admin_error.get("error", "Failed to create user account")
+
+            logger.warning("Admin user creation rejected: %s", admin_error)
+
+            return jsonify({"error": message}), 400
+
+
+
+        try:
+
+            admin_data = admin_resp.json()
+
+        except Exception:
+
+            admin_data = {}
+
+
+
+        user_id = admin_data.get("id") or admin_data.get("user", {}).get("id")
+
+        if not user_id:
+
+            logger.error("Admin API response missing user id: %s", admin_data)
+
+            return jsonify({"error": "User account created but missing identifier"}), 500
+
+    else:
+
+        signup_payload = {
+
+            "email": email,
+
+            "password": password,
+
+            "data": {
+
+                "name": name,
+
+                "full_name": name,
+
+                "display_name": name,
+
+            },
+
+        }
+
+
+
+        try:
+
+            signup_resp = requests.post(
+
+                f"{supabase_url}/auth/v1/signup",
+
+                headers=admin_headers,
+
+                json=signup_payload,
+
+                timeout=15,
+
+            )
+
+        except Exception as err:
+
+            logger.error("Failed to sign up user via auth endpoint: %s", err)
+
+            return jsonify({"error": "Unable to create user account"}), 500
+
+
+
+        if signup_resp.status_code >= 400:
+
+            try:
+
+                signup_error = signup_resp.json()
+
+            except Exception:
+
+                signup_error = {"error": signup_resp.text}
+
+
+
+            message = signup_error.get("message") or signup_error.get("error", "Failed to create user account")
+
+            logger.warning("Signup request rejected: %s", signup_error)
+
+            return jsonify({"error": message}), 400
+
+
+
+        try:
+
+            signup_data = signup_resp.json()
+
+        except Exception:
+
+            signup_data = {}
+
+
+
+        user_id = signup_data.get("user", {}).get("id") or signup_data.get("id")
+
+        if not user_id:
+
+            logger.error("Signup response missing user id: %s", signup_data)
+
+            return jsonify({"error": "User account created but missing identifier"}), 500
+
+
+
+    profile_payload = {
+
+        "id": user_id,
+
+        "role": target_role,
+
+        "name": name,
+
+        "company_id": target_company_id,
+
+    }
+
+
+
+    try:
+
+        profile_resp = supabase.table("profiles").insert(profile_payload).execute()
+
+        if getattr(profile_resp, "error", None):
+
+            raise Exception(profile_resp.error)
+
+    except Exception as err:
+
+        logger.error("Failed to create profile for %s: %s", user_id, err)
+
+        return jsonify({"error": "Unable to create user profile"}), 500
+
+
+
+    try:
+
+        supabase.table("registration_invites").update(
+
+            {
+
+                "used_at": now_utc.isoformat(),
+
+                "used_by": user_id,
+
+            }
+
+        ).eq("id", invite.get("id")).execute()
+
+    except Exception as err:
+
+        logger.warning("Failed to mark invite %s as used: %s", invite.get("id"), err)
+
+
+
+    return jsonify({"success": True, "user_id": user_id, "role": target_role}), 201
+
+
+
+@app.route("/api/auth/invites", methods=["GET"])
+
+def api_list_invites():
+
+    _require_service_key()
+
+    try:
+
+        email_filter = request.args.get("email")
+
+        status_filter = request.args.get("status")
+
+        query = supabase.table("registration_invites").select("*").order("created_at", desc=True)
+
+        if email_filter:
+
+            query = query.ilike("email", f"%{email_filter}%")
+
+        if status_filter == "active":
+
+            query = query.is_("used_at", None).is_("revoked_at", None)
+
+        elif status_filter == "used":
+
+            query = query.not_.is_("used_at", None)
+
+        elif status_filter == "revoked":
+
+            query = query.not_.is_("revoked_at", None)
+
+
+
+        response = query.execute()
+
+        invites = getattr(response, "data", []) or []
+
+        return jsonify({"invites": invites})
+
+    except Exception as err:
+
+        logger.error("Failed to list invites: %s", err)
+
+        return jsonify({"error": "Unable to list invitations"}), 500
+
+
+
+@app.route("/api/auth/invites", methods=["POST"])
+
+def api_create_invite():
+
+    _require_service_key()
+
+    try:
+
+        payload = request.get_json(force=True)
+
+    except Exception:
+
+        return jsonify({"error": "Invalid JSON payload"}), 400
+
+
+
+    email = (payload.get("email") or "").strip().lower()
+
+    role = payload.get("role") or "employee"
+
+    company_id = payload.get("company_id")
+
+    expires_in_hours = payload.get("expires_in_hours")
+
+    max_uses = payload.get("max_uses") or 1
+
+    notes = payload.get("notes")
+
+
+
+    if company_id in ("", "none"):
+
+        company_id = None
+
+
+
+    if not email:
+
+        return jsonify({"error": "Email is required"}), 400
+
+    if role not in {"sys_admin", "company_manager", "employee"}:
+
+        return jsonify({"error": "Invalid role"}), 400
+
+    if max_uses < 1:
+
+        return jsonify({"error": "max_uses must be at least 1"}), 400
+
+
+
+    expires_at = None
+
+    if expires_in_hours:
+
+        expires_at_dt = datetime.datetime.utcnow() + datetime.timedelta(hours=expires_in_hours)
+
+        expires_at = expires_at_dt.replace(tzinfo=datetime.timezone.utc).isoformat()
+
+
+
+    code = payload.get("code") or _generate_invite_code()
+
+
+
+    invite_record = {
+
+        "code": code,
+
+        "email": email,
+
+        "role": role,
+
+        "company_id": company_id,
+
+        "expires_at": expires_at,
+
+        "max_uses": max_uses,
+
+        "notes": notes,
+
+    }
+
+
+
+    try:
+
+        response = supabase.table("registration_invites").insert(invite_record).execute()
+
+        if getattr(response, "error", None):
+
+            raise Exception(response.error)
+
+        invite = getattr(response, "data", [invite_record])[0]
+
+        return jsonify({"invite": invite}), 201
+
+    except Exception as err:
+
+        logger.error("Failed to create invite: %s", err)
+
+        return jsonify({"error": "Unable to create invitation"}), 500
+
+
+
+@app.route("/api/auth/invites/<code>/revoke", methods=["POST"])
+
+def api_revoke_invite(code):
+
+    _require_service_key()
+
+    try:
+
+        response = (
+
+            supabase.table("registration_invites")
+
+            .update({"revoked_at": datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc).isoformat()})
+
+            .eq("code", code)
+
+            .execute()
+
+        )
+
+        if getattr(response, "error", None):
+
+            raise Exception(response.error)
+
+        return jsonify({"success": True})
+
+    except Exception as err:
+
+        logger.error("Failed to revoke invite: %s", err)
+
+        return jsonify({"error": "Unable to revoke invitation"}), 500
 
 
 
