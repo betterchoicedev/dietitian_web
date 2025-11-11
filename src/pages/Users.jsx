@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from 'react';
 
-import { ChatUser, FoodLogs } from '@/api/entities';
+import {
+  ChatUser,
+  FoodLogs,
+  Menu,
+  Chat,
+  ChatConversation,
+  ChatMessage,
+  MessageQueue
+} from '@/api/entities';
 
 import { useLanguage } from '@/contexts/LanguageContext';
 
@@ -2387,125 +2395,287 @@ export default function Clients() {
 
 
   const handleDelete = async (client) => {
-
     const clientName = client.full_name || client.user_code || 'this client';
-
     const clientId = client.user_code || client.id;
 
-    
-
     if (!clientId) {
-
       setError('Cannot delete client without a valid identifier');
-
       return;
-
     }
-
-    
-
-    if (!window.confirm(`${translations.confirmDelete} "${clientName}"? ${translations.deleteWarning}`)) {
-
-      return;
-
-    }
-
-    
 
     setDeleteLoading(clientId);
-
     setError(null);
 
-    
+    let clientMenus = [];
+    let clientChats = [];
+    let clientConversations = [];
+    let clientFoodLogs = [];
+    let clientQueuedMessages = [];
+    let chatUserRecord = null;
+    let resourceFetchError = null;
+
+    const mealPlanSingular = translations.mealPlan || translations.menu || 'meal plan';
+    const mealPlanPlural = translations.mealPlans || translations.menus || 'meal plans';
+    const chatSingular = translations.chatConversation || translations.chat || 'chat conversation';
+    const chatPlural = translations.chatConversations || translations.chats || 'chat conversations';
+    const conversationSingular =
+      translations.chatConversation || translations.conversation || 'chat conversation';
+    const conversationPlural =
+      translations.chatConversations || translations.conversations || 'chat conversations';
+    const foodLogSingular = translations.foodLogEntry || translations.foodLog || 'food log entry';
+    const foodLogPlural = translations.foodLogEntries || translations.foodLogs || 'food log entries';
+    const queueSingular =
+      translations.queuedMessage || translations.messageQueueEntry || 'queued message';
+    const queuePlural =
+      translations.queuedMessages || translations.messageQueueEntries || 'queued messages';
 
     try {
+      const [menus, chats, conversations, queuedMessages] = await Promise.all([
+        Menu.filter({ user_code: clientId }),
+        Chat.filter({ user_code: clientId }),
+        ChatConversation.listByUserCode(clientId),
+        MessageQueue?.listByUserCode ? MessageQueue.listByUserCode(clientId) : []
+      ]);
 
-      // First, check if client has associated meal plans
+      clientMenus = menus || [];
+      clientChats = chats || [];
+      clientConversations = conversations || [];
+      clientQueuedMessages = queuedMessages || [];
 
-      const { Menu } = await import('@/api/entities');
-
-      const clientMenus = await Menu.filter({ user_code: clientId });
-
-      
-
-      if (clientMenus && clientMenus.length > 0) {
-
-        const confirmDeleteAll = window.confirm(
-
-          `This client has ${clientMenus.length} meal plan(s) associated with them. Do you want to delete the client and ALL their meal plans? This action cannot be undone.`
-
-        );
-
-        
-
-        if (!confirmDeleteAll) {
-
-          setDeleteLoading(null);
-
-          return;
-
-        }
-
-        
-
-        // Delete all meal plans first
-
-        console.log(`Deleting ${clientMenus.length} meal plans for client ${clientId}`);
-
-        for (const menu of clientMenus) {
-
-          try {
-
-            await Menu.delete(menu.id);
-
-            console.log(`✅ Deleted meal plan: ${menu.meal_plan_name || menu.id}`);
-
-          } catch (menuError) {
-
-            console.error(`❌ Failed to delete meal plan ${menu.id}:`, menuError);
-
-            // Continue with other meal plans even if one fails
-
-          }
-
-        }
-
+      try {
+        chatUserRecord = await ChatUser.get(clientId);
+      } catch (chatUserError) {
+        console.warn('Unable to load chat user record before deletion:', chatUserError);
       }
 
-      
-
-      // Now delete the client
-
-      await ChatUser.delete(clientId);
-
-      await loadClients(); // Reload the clients list
-
-      
-
-      // Show success message
-
-      const message = clientMenus && clientMenus.length > 0 
-
-        ? `${translations.clientDeleted}: ${clientName} (and ${clientMenus.length} meal plan(s))`
-
-        : `${translations.clientDeleted}: ${clientName}`;
-
-      alert(message);
-
-      
-
-    } catch (error) {
-
-      console.error('Error deleting client:', error);
-
-      setError(`${translations.failedToDeleteClient}: ${error.message}`);
-
-    } finally {
-
-      setDeleteLoading(null);
-
+      if (FoodLogs && typeof FoodLogs.getByUserCode === 'function') {
+        try {
+          clientFoodLogs = await FoodLogs.getByUserCode(clientId);
+        } catch (foodLogError) {
+          console.warn('Failed to fetch food logs for client before deletion:', foodLogError);
+        }
+      }
+    } catch (fetchError) {
+      console.error('Error loading related records before client deletion:', fetchError);
+      resourceFetchError = fetchError;
     }
 
+    const uniqueConversations = Array.from(
+      clientConversations.reduce((map, conversation) => {
+        if (conversation && conversation.id) {
+          map.set(conversation.id, conversation);
+        }
+        return map;
+      }, new Map())
+    ).map(([_, conversation]) => conversation);
+
+    const resourceSummaries = [];
+
+    if (clientMenus.length) {
+      const previewNames = clientMenus
+        .slice(0, 3)
+        .map(menu => menu.name || menu.meal_plan_name || menu.title || `#${menu.id}`)
+        .join(', ');
+      resourceSummaries.push(
+        `${clientMenus.length} ${clientMenus.length === 1 ? mealPlanSingular : mealPlanPlural}${
+          previewNames ? ` (${previewNames}${clientMenus.length > 3 ? '...' : ''})` : ''
+        }`
+      );
+    }
+
+    if (clientChats.length) {
+      resourceSummaries.push(
+        `${clientChats.length} ${clientChats.length === 1 ? chatSingular : chatPlural}`
+      );
+    }
+
+    if (uniqueConversations.length) {
+      resourceSummaries.push(
+        `${uniqueConversations.length} ${
+          uniqueConversations.length === 1 ? conversationSingular : conversationPlural
+        }`
+      );
+    }
+
+    if (clientFoodLogs.length) {
+      resourceSummaries.push(
+        `${clientFoodLogs.length} ${clientFoodLogs.length === 1 ? foodLogSingular : foodLogPlural}`
+      );
+    }
+
+    if (clientQueuedMessages.length) {
+      resourceSummaries.push(
+        `${clientQueuedMessages.length} ${
+          clientQueuedMessages.length === 1 ? queueSingular : queuePlural
+        }`
+      );
+    }
+
+    if (resourceFetchError) {
+      resourceSummaries.push(
+        translations.unableToLoadAssociations ||
+          'Some related records could not be loaded. They will still be removed if possible.'
+      );
+    }
+
+    const summaryText = resourceSummaries.length
+      ? `${translations.clientHasFollowing || 'This client currently has the following associated records:'}\n- ${resourceSummaries.join('\n- ')}`
+      : (translations.clientHasNoAssociatedRecords || 'No associated records were found for this client.');
+
+    const confirmMessage = `${translations.confirmDelete} "${clientName}"?\n\n${summaryText}\n\n${translations.deleteWarning || 'This action cannot be undone.'}`;
+
+    const confirmed = window.confirm(confirmMessage);
+
+    if (!confirmed) {
+      setDeleteLoading(null);
+      return;
+    }
+
+    try {
+      if (clientChats.length) {
+        for (const chat of clientChats) {
+          try {
+            await Chat.delete(chat.id);
+          } catch (chatError) {
+            console.error(`Failed to delete chat ${chat.id}:`, chatError);
+          }
+        }
+      }
+
+      if (uniqueConversations.length) {
+        for (const conversation of uniqueConversations) {
+          if (MessageQueue?.deleteByConversation) {
+            try {
+              await MessageQueue.deleteByConversation(conversation.id);
+            } catch (queueError) {
+              console.error(
+                `Failed to delete queued messages for conversation ${conversation.id}:`,
+                queueError
+              );
+              throw queueError;
+            }
+          }
+
+          try {
+            await ChatMessage.deleteByConversation(conversation.id);
+          } catch (messageError) {
+            console.error(
+              `Failed to delete chat messages for conversation ${conversation.id}:`,
+              messageError
+            );
+            throw messageError;
+          }
+        }
+      }
+
+      if (clientMenus.length) {
+        for (const menu of clientMenus) {
+          try {
+            await Menu.delete(menu.id);
+          } catch (menuError) {
+            console.error(`Failed to delete meal plan ${menu.id}:`, menuError);
+          }
+        }
+      }
+
+      if (clientQueuedMessages.length && MessageQueue?.deleteByUserCode) {
+        try {
+          await MessageQueue.deleteByUserCode(clientId);
+        } catch (queueDeleteError) {
+          console.error(
+            `Failed to delete remaining queued messages for user_code ${clientId}:`,
+            queueDeleteError
+          );
+        }
+      }
+
+      if (
+        clientFoodLogs.length &&
+        FoodLogs &&
+        typeof FoodLogs.deleteByUserCode === 'function'
+      ) {
+        try {
+          await FoodLogs.deleteByUserCode(clientId);
+        } catch (foodLogDeleteError) {
+          console.error(
+            `Failed to delete food logs for client ${clientId}:`,
+            foodLogDeleteError
+          );
+        }
+      }
+
+      if (ChatMessage?.deleteByUserCode) {
+        try {
+          await ChatMessage.deleteByUserCode(clientId);
+        } catch (messageCleanupError) {
+          console.error(
+            `Failed to delete remaining chat messages for user_code ${clientId}:`,
+            messageCleanupError
+          );
+          throw messageCleanupError;
+        }
+      }
+
+      if (ChatConversation?.deleteByUserCode) {
+        try {
+          await ChatConversation.deleteByUserCode(clientId);
+        } catch (conversationCleanupError) {
+          console.error(
+            `Failed to delete remaining chat conversations for user_code ${clientId}:`,
+            conversationCleanupError
+          );
+          throw conversationCleanupError;
+        }
+      }
+
+      await ChatUser.delete(clientId);
+      await loadClients();
+
+      const deletedResources = [];
+      if (clientMenus.length) {
+        deletedResources.push(
+          `${clientMenus.length} ${clientMenus.length === 1 ? mealPlanSingular : mealPlanPlural}`
+        );
+      }
+      if (clientChats.length) {
+        deletedResources.push(
+          `${clientChats.length} ${clientChats.length === 1 ? chatSingular : chatPlural}`
+        );
+      }
+      if (uniqueConversations.length) {
+        deletedResources.push(
+          `${uniqueConversations.length} ${
+            uniqueConversations.length === 1 ? conversationSingular : conversationPlural
+          }`
+        );
+      }
+      if (clientFoodLogs.length) {
+        deletedResources.push(
+          `${clientFoodLogs.length} ${
+            clientFoodLogs.length === 1 ? foodLogSingular : foodLogPlural
+          }`
+        );
+      }
+      if (clientQueuedMessages.length) {
+        deletedResources.push(
+          `${clientQueuedMessages.length} ${
+            clientQueuedMessages.length === 1 ? queueSingular : queuePlural
+          }`
+        );
+      }
+
+      const baseSuccessLabel = translations.clientDeleted || 'Client deleted';
+      const successMessage = deletedResources.length
+        ? `${baseSuccessLabel}: ${clientName} (${deletedResources.join(', ')} ${translations.removed || 'removed'})`
+        : `${baseSuccessLabel}: ${clientName}`;
+
+      alert(successMessage);
+    } catch (error) {
+      console.error('Error deleting client:', error);
+      setError(`${translations.failedToDeleteClient}: ${error.message}`);
+    } finally {
+      setDeleteLoading(null);
+    }
   };
 
 

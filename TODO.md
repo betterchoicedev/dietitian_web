@@ -154,7 +154,7 @@
 
 ### 13. Talk to Emanuel About the Website
 - **Task**: Schedule a conversation with Emanuel to walk him through the website features and recent updates
-- **Status**: Pending
+- **Status**: Done
 - **Notes**:
   - Prepare a concise overview of current functionality
   - Highlight new training management and meal plan safeguards
@@ -170,4 +170,26 @@
   - Provide admin UI to manage approved registrants
   - Ensure unauthorized users cannot view client information
 
+
+### 15. Move Chat Photo Uploads to Google Cloud Storage
+- **Task**: Update chat message photo uploads to use Google Cloud Storage instead of the current path
+- **Status**: Pending
+- **Added**: 2025-11-10
+- **Notes**:
+  - Configure GCS bucket and credentials
+  - Update upload code to write to GCS
+  - Adjust download/display URLs to point to GCS
+  - Ensure access rules and security policies match requirements
+
+### 16. Localize Meal Plan Templates in Hebrew
+- **Files**: `src/pages/MenuCreate.jsx`, `src/pages/MenuTemplates.jsx`, `src/contexts/LanguageContext.jsx`
+- **Task**: Display meal plan template names and ingredient lists in Hebrew alongside existing language
+- **Status**: Done
+- **Added**: 2025-11-10
+- **Notes**:
+  - Add Hebrew translations for all template names
+  - Translate template ingredient titles and descriptions
+  - Ensure UI properly handles RTL presentation where applicable
+  - Validate that template selection dialogs show both languages
+  - Update export/PDF flows to include Hebrew content
 

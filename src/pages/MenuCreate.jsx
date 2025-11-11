@@ -3412,6 +3412,16 @@ const MenuCreate = () => {
     return '📋';
   };
 
+  const getTemplateDisplayName = (template) => {
+    if (language === 'he') {
+      const hebrewName = template?.hebrew_name?.trim();
+      if (hebrewName) {
+        return hebrewName;
+      }
+    }
+    return template?.name || '';
+  };
+
   const [mealPlanStructure, setMealPlanStructure] = useState(() => {
 
     // Initialize with numberOfMeals if available
@@ -7255,13 +7265,14 @@ const MenuCreate = () => {
       }
       
       // Fetch all meal templates with their variants
+      const orderColumn = language === 'he' ? 'hebrew_name' : 'name';
       const { data: templates, error: templatesError } = await supabase
         .from('meal_templates')
         .select(`
           *,
           variants:meal_template_variants(meals_per_day)
         `)
-        .order('name');
+        .order(orderColumn, { ascending: true, nullsFirst: false });
       
       if (templatesError) throw templatesError;
       
@@ -7327,13 +7338,14 @@ const MenuCreate = () => {
       
       const mealsPerDay = numberOfMeals || selectedClient?.number_of_meals || 4;
       
-      console.log(`📋 Applying template "${template.name}" with ${mealsPerDay} meals per day`);
+      const templateDisplayName = getTemplateDisplayName(template);
+      console.log(`📋 Applying template "${templateDisplayName}" with ${mealsPerDay} meals per day`);
       
       // Fetch the template variant and its meals
       const meals = await fetchTemplateVariant(template.id, mealsPerDay);
       
       if (!meals || meals.length === 0) {
-        alert(`No meals found for template "${template.name}" with ${mealsPerDay} meals per day.\nPlease select a different template or adjust the number of meals.`);
+        alert(`No meals found for template "${templateDisplayName}" with ${mealsPerDay} meals per day.\nPlease select a different template or adjust the number of meals.`);
         return;
       }
       
@@ -7342,14 +7354,17 @@ const MenuCreate = () => {
       const caloriesPerMeal = totalCalories > 0 ? Math.round(totalCalories / meals.length) : 0;
       const percentagePerMeal = meals.length > 0 ? Math.round((100 / meals.length) * 10) / 10 : 0;
       
-      const newMealPlanStructure = meals.map((meal, index) => ({
-        key: `meal_${index + 1}`,
-        meal: meal.name,
-        description: meal.example || '',
-        calories: caloriesPerMeal,
-        calories_pct: percentagePerMeal,
-        locked: false
-      }));
+      const newMealPlanStructure = meals.map((meal, index) => {
+        const mealDescription = language === 'he' && meal.hebrew_example ? meal.hebrew_example : (meal.example || '');
+        return {
+          key: `meal_${index + 1}`,
+          meal: meal.name,
+          description: mealDescription,
+          calories: caloriesPerMeal,
+          calories_pct: percentagePerMeal,
+          locked: false
+        };
+      });
       
       setMealPlanStructure(newMealPlanStructure);
       setSelectedTemplate(template);
@@ -7507,6 +7522,8 @@ const MenuCreate = () => {
 
   // Render a template card (helper function for template manager)
   const renderTemplateCard = (template) => {
+    const displayName = getTemplateDisplayName(template);
+    const templateEmoji = getTemplateEmoji(template.name);
     return (
       <div key={template.id} className={`border rounded-lg p-4 hover:shadow-md transition-shadow ${
         template.isOwnedByCurrentUser 
@@ -7516,8 +7533,8 @@ const MenuCreate = () => {
         <div className="flex items-start justify-between">
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-2xl">{getTemplateEmoji(template.name)}</span>
-              <h4 className="font-semibold text-gray-900 text-lg">{template.name}</h4>
+              <span className="text-2xl">{templateEmoji}</span>
+              <h4 className="font-semibold text-gray-900 text-lg">{displayName}</h4>
               {template.isOwnedByCurrentUser && (
                 <Badge variant="outline" className="bg-purple-100 border-purple-400 text-purple-800 text-xs font-semibold">
                   👤 {translations.yourTemplate || 'Your Template'}
@@ -7675,7 +7692,7 @@ const MenuCreate = () => {
                   variant="outline"
                   size="sm"
                   onClick={async () => {
-                    if (window.confirm(translations.confirmDeleteTemplate || `Are you sure you want to delete the template "${template.name}"? This action cannot be undone.`)) {
+                    if (window.confirm(translations.confirmDeleteTemplate || `Are you sure you want to delete the template "${displayName}"? This action cannot be undone.`)) {
                       try {
                         await deleteTemplate(template.id);
                         alert(translations.templateDeleted || 'Template deleted successfully!');
@@ -13043,6 +13060,8 @@ const MenuCreate = () => {
                             const currentMealCount = numberOfMeals || 4;
                             const hasMatchingVariant = template.availableMealCounts?.includes(currentMealCount);
                             const isDisabled = !hasMatchingVariant;
+                            const displayName = getTemplateDisplayName(template);
+                            const templateEmoji = getTemplateEmoji(template.name);
                             
                             return (
                               <SelectItem 
@@ -13053,8 +13072,8 @@ const MenuCreate = () => {
                               >
                                 <div className="flex items-center justify-between gap-3 py-1 w-full">
                                   <div className="flex items-center gap-2">
-                                    <span className="text-lg">{getTemplateEmoji(template.name)}</span>
-                                    <span className="font-medium">{template.name}</span>
+                                    <span className="text-lg">{templateEmoji}</span>
+                                    <span className="font-medium">{displayName}</span>
                                   </div>
                                   <div className="flex items-center gap-2">
                                     {template.tags && template.tags.length > 0 && (
@@ -13113,7 +13132,7 @@ const MenuCreate = () => {
                     <div className="mt-2 flex items-start gap-2 bg-blue-100/50 border border-blue-200 rounded-md p-2">
                       <span className="text-blue-600">ℹ️</span>
                       <p className="text-xs text-blue-800">
-                        <span className="font-medium">{translations.templateApplied || 'Template applied'}:</span> <span className="text-base">{getTemplateEmoji(selectedTemplate.name)}</span> {selectedTemplate.name}
+                        <span className="font-medium">{translations.templateApplied || 'Template applied'}:</span> <span className="text-base">{getTemplateEmoji(selectedTemplate.name)}</span> {getTemplateDisplayName(selectedTemplate)}
                         <span className="ml-2 text-blue-600">({numberOfMeals} meals)</span>
                       </p>
                     </div>

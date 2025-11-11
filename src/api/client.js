@@ -398,6 +398,48 @@ export const entities = {
         console.error('❌ Error in Menu.delete:', err);
         throw err;
       }
+    },
+    
+    deleteByUserCode: async (user_code) => {
+      try {
+        console.log('🗑️ Deleting food logs for user_code:', user_code);
+
+        const { data: user, error: userError } = await supabase
+          .from('chat_users')
+          .select('id')
+          .eq('user_code', user_code)
+          .single();
+
+        if (userError) {
+          if (userError.code === 'PGRST116') {
+            console.log('⚠️ No chat user found when deleting food logs:', user_code);
+            return 0;
+          }
+          console.error('❌ Error getting user by user_code before deleting food logs:', userError);
+          throw new Error(`Supabase error: ${userError.message}`);
+        }
+
+        if (!user) {
+          console.log('⚠️ No chat user found when deleting food logs:', user_code);
+          return 0;
+        }
+
+        const { error } = await supabase
+          .from('food_logs')
+          .delete()
+          .eq('user_id', user.id);
+
+        if (error) {
+          console.error('❌ Supabase food logs delete error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+
+        console.log('✅ Deleted food logs for user_code:', user_code);
+        return true;
+      } catch (err) {
+        console.error('❌ Error in FoodLogs.deleteByUserCode:', err);
+        throw err;
+      }
     }
   },
   Chat: {
@@ -1311,6 +1353,97 @@ export const entities = {
       if (error) throw new Error(error.message);
       return data || [];
     },
+
+    deleteByConversation: async (conversation_id) => {
+      try {
+        console.log('🗑️ Deleting chat messages for conversation:', conversation_id);
+
+        const { error } = await supabase
+          .from('chat_messages')
+          .delete()
+          .eq('conversation_id', conversation_id);
+
+        if (error) {
+          console.error('❌ Supabase chat message delete error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+
+        console.log('✅ Deleted chat messages for conversation:', conversation_id);
+        return true;
+      } catch (err) {
+        console.error('❌ Error in ChatMessage.deleteByConversation:', err);
+        throw err;
+      }
+    },
+
+    deleteByUserCode: async (user_code) => {
+      try {
+        console.log('🗑️ Deleting chat messages for user_code:', user_code);
+
+        const { data: user, error: userError } = await supabase
+          .from('chat_users')
+          .select('id')
+          .eq('user_code', user_code)
+          .single();
+
+        if (userError) {
+          if (userError.code === 'PGRST116') {
+            console.log('⚠️ No chat user found when deleting chat messages:', user_code);
+            return 0;
+          }
+          console.error('❌ Error fetching chat user before deleting chat messages:', userError);
+          throw new Error(`Supabase error: ${userError.message}`);
+        }
+
+        if (!user) {
+          console.log('⚠️ No chat user found when deleting chat messages:', user_code);
+          return 0;
+        }
+
+        const { data: conversations, error: conversationsError } = await supabase
+          .from('chat_conversations')
+          .select('id')
+          .eq('user_id', user.id);
+
+        if (conversationsError) {
+          console.error('❌ Error fetching conversations before deleting chat messages:', conversationsError);
+          throw new Error(`Supabase error: ${conversationsError.message}`);
+        }
+
+        if (!conversations || conversations.length === 0) {
+          console.log('⚠️ No conversations found when deleting chat messages:', user_code);
+          return 0;
+        }
+
+        const conversationIds = conversations.map(convo => convo.id).filter(Boolean);
+
+        if (conversationIds.length === 0) {
+          console.log('⚠️ No valid conversation IDs found when deleting chat messages:', user_code);
+          return 0;
+        }
+
+        const { error } = await supabase
+          .from('chat_messages')
+          .delete()
+          .in('conversation_id', conversationIds);
+
+        if (error) {
+          console.error('❌ Supabase chat messages deleteByUserCode error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+
+        console.log(
+          '✅ Deleted chat messages for user_code:',
+          user_code,
+          'conversationCount:',
+          conversationIds.length
+        );
+        return true;
+      } catch (err) {
+        console.error('❌ Error in ChatMessage.deleteByUserCode:', err);
+        throw err;
+      }
+    },
   },
   
   MessageQueue: {
@@ -1501,6 +1634,78 @@ export const entities = {
         throw err;
       }
     },
+
+    listByUserCode: async (user_code) => {
+      try {
+        console.log('📬 Listing queued messages for user_code:', user_code);
+
+        const { data, error } = await supabase
+          .from('message_queue')
+          .select('*')
+          .eq('user_code', user_code)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('❌ Supabase message queue listByUserCode error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+
+        console.log(
+          '✅ Retrieved queued messages for user_code:',
+          user_code,
+          'count:',
+          data?.length || 0
+        );
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error in MessageQueue.listByUserCode:', err);
+        throw err;
+      }
+    },
+
+    deleteByConversation: async (conversation_id) => {
+      try {
+        console.log('🗑️ Deleting queued messages for conversation:', conversation_id);
+
+        const { error } = await supabase
+          .from('message_queue')
+          .delete()
+          .eq('conversation_id', conversation_id);
+
+        if (error) {
+          console.error('❌ Supabase message queue deleteByConversation error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+
+        console.log('✅ Deleted queued messages for conversation:', conversation_id);
+        return true;
+      } catch (err) {
+        console.error('❌ Error in MessageQueue.deleteByConversation:', err);
+        throw err;
+      }
+    },
+
+    deleteByUserCode: async (user_code) => {
+      try {
+        console.log('🗑️ Deleting queued messages for user_code:', user_code);
+
+        const { error } = await supabase
+          .from('message_queue')
+          .delete()
+          .eq('user_code', user_code);
+
+        if (error) {
+          console.error('❌ Supabase message queue deleteByUserCode error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+
+        console.log('✅ Deleted queued messages for user_code:', user_code);
+        return true;
+      } catch (err) {
+        console.error('❌ Error in MessageQueue.deleteByUserCode:', err);
+        throw err;
+      }
+    },
   },
   ChatConversation: {
     // Get conversation by user_id
@@ -1535,6 +1740,118 @@ export const entities = {
       if (error) throw new Error(error.message);
       return data;
     },
+
+    listByUserCode: async (user_code) => {
+      try {
+        console.log('📃 Listing chat conversations for user_code:', user_code);
+
+        const { data: user, error: userError } = await supabase
+          .from('chat_users')
+          .select('id')
+          .eq('user_code', user_code)
+          .single();
+
+        if (userError) {
+          if (userError.code === 'PGRST116') {
+            console.log('⚠️ No chat user found when listing conversations:', user_code);
+            return [];
+          }
+          console.error('❌ Error fetching chat user for conversations:', userError);
+          throw new Error(`Supabase error: ${userError.message}`);
+        }
+
+        if (!user) {
+          console.log('⚠️ No chat user found when listing conversations:', user_code);
+          return [];
+        }
+
+        const { data, error } = await supabase
+          .from('chat_conversations')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('started_at', { ascending: false });
+
+        if (error) {
+          console.error('❌ Supabase chat conversation list error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+
+        console.log(
+          '✅ Retrieved chat conversations for user_code:',
+          user_code,
+          'count:',
+          data?.length || 0
+        );
+        return data || [];
+      } catch (err) {
+        console.error('❌ Error in ChatConversation.listByUserCode:', err);
+        throw err;
+      }
+    },
+
+    delete: async (id) => {
+      try {
+        console.log('🗑️ Deleting chat conversation with id:', id);
+
+        const { error } = await supabase
+          .from('chat_conversations')
+          .delete()
+          .eq('id', id);
+
+        if (error) {
+          console.error('❌ Supabase chat conversation delete error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+
+        console.log('✅ Deleted chat conversation with id:', id);
+        return true;
+      } catch (err) {
+        console.error('❌ Error in ChatConversation.delete:', err);
+        throw err;
+      }
+    },
+
+    deleteByUserCode: async (user_code) => {
+      try {
+        console.log('🗑️ Deleting chat conversations for user_code:', user_code);
+
+        const { data: user, error: userError } = await supabase
+          .from('chat_users')
+          .select('id')
+          .eq('user_code', user_code)
+          .single();
+
+        if (userError) {
+          if (userError.code === 'PGRST116') {
+            console.log('⚠️ No chat user found when deleting conversations:', user_code);
+            return 0;
+          }
+          console.error('❌ Error fetching chat user before deleting conversations:', userError);
+          throw new Error(`Supabase error: ${userError.message}`);
+        }
+
+        if (!user) {
+          console.log('⚠️ No chat user found when deleting conversations:', user_code);
+          return 0;
+        }
+
+        const { error } = await supabase
+          .from('chat_conversations')
+          .delete()
+          .eq('user_id', user.id);
+
+        if (error) {
+          console.error('❌ Supabase chat conversation deleteByUserCode error:', error);
+          throw new Error(`Supabase error: ${error.message}`);
+        }
+
+        console.log('✅ Deleted chat conversations for user_code:', user_code);
+        return true;
+      } catch (err) {
+        console.error('❌ Error in ChatConversation.deleteByUserCode:', err);
+        throw err;
+      }
+    }
   },
   
   // Training Management APIs
