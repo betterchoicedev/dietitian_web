@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 
 from flask_cors import CORS
 
@@ -2469,7 +2469,9 @@ HARD RULES
 
 • If snacks are requested, prefer fruit, veg, nuts, yogurt, cottage cheese, hummus, whole-grain crackers.
 
-• Respect ALL dietary restrictions and allergies.
+• **CRITICAL: STRICTLY AVOID ALL FOODS IN ALLERGIES LIST** - This is life-threatening: {allergies_list}
+
+• **CRITICAL: STRICTLY FOLLOW ALL DIETARY LIMITATIONS** - Never include these foods/ingredients: {limitations_list}
 
 • If kosher: never mix meat + dairy; avoid non-kosher meats (pork, shellfish); use kosher-suitable brands.
 
@@ -2667,7 +2669,13 @@ def _build_option_with_retries(
 
     validation_feedback = ""  # Current validation feedback
 
-
+    # Extract allergies and limitations from preferences
+    allergies = preferences.get("allergies", []) or []
+    limitations = preferences.get("limitations", []) or []
+    
+    # Format for prompt
+    allergies_list = ", ".join(allergies) if allergies else "None"
+    limitations_list = ", ".join(limitations) if limitations else "None"
 
     for i in range(max_attempts):
 
@@ -2698,7 +2706,11 @@ def _build_option_with_retries(
 
                 previous_issues_section=previous_issues_section,
 
-                validation_feedback_section=validation_feedback_section
+                validation_feedback_section=validation_feedback_section,
+                
+                allergies_list=allergies_list,
+                
+                limitations_list=limitations_list
 
             )
 
@@ -2738,6 +2750,8 @@ Your previous meal attempt failed validation. Review the failed meal and issues 
 * Avoid these proteins: {avoid_proteins} *
 * Avoid these ingredients: {avoid_ingredients} *
 * Regional brands: {region_instruction} *
+* **CRITICAL: STRICTLY AVOID ALL FOODS IN ALLERGIES LIST** - This is life-threatening: {allergies_list} *
+* **CRITICAL: STRICTLY FOLLOW ALL DIETARY LIMITATIONS** - Never include these foods/ingredients: {limitations_list} *
 
 
 **EXPECTED OUTPUT FORMAT:**
@@ -3512,6 +3526,74 @@ def api_validate_menu():
 
             return kosher_issues
 
+        
+
+        def _validate_dietary_restrictions(ingredients, limitations_list, allergies_list):
+
+            """Validate general dietary limitations and allergies (not just kosher)"""
+
+            issues = []
+
+            
+
+            # Normalize lists to lowercase for comparison
+
+            limitations_normalized = [str(lim).lower().strip() for lim in limitations_list if lim]
+
+            allergies_normalized = [str(allergy).lower().strip() for allergy in allergies_list if allergy]
+
+            
+
+            # Skip kosher as it's handled separately
+
+            limitations_normalized = [lim for lim in limitations_normalized if lim != "kosher"]
+
+            
+
+            for ing in ingredients or []:
+
+                item_name = str(ing.get("item", "")).lower()
+
+                
+
+                # Check allergies (exact or substring match)
+
+                for allergy in allergies_normalized:
+
+                    if allergy in item_name or item_name in allergy:
+
+                        issues.append(f"ALLERGY VIOLATION: Contains '{ing.get('item', '')}' which matches allergy '{allergy}'")
+
+                
+
+                # Check limitations (exact or substring match)
+
+                for limitation in limitations_normalized:
+
+                    # Handle common patterns like "no chicken", "no beef", etc.
+
+                    if limitation.startswith("no ") or limitation.startswith("avoid "):
+
+                        # Extract the food item from "no chicken" -> "chicken"
+
+                        food_item = limitation.replace("no ", "").replace("avoid ", "").strip()
+
+                        if food_item in item_name or item_name in food_item:
+
+                            issues.append(f"DIETARY LIMITATION VIOLATION: Contains '{ing.get('item', '')}' which violates limitation '{limitation}'")
+
+                    else:
+
+                        # Direct match (e.g., "chicken", "beef")
+
+                        if limitation in item_name or item_name in limitation:
+
+                            issues.append(f"DIETARY LIMITATION VIOLATION: Contains '{ing.get('item', '')}' which violates limitation '{limitation}'")
+
+            
+
+            return issues
+
 
 
         # -------- schema checks ----------
@@ -3651,6 +3733,18 @@ def api_validate_menu():
         for ki in kosher_issues:
 
             issues.append(f"{option.capitalize()} option: {ki}")
+
+
+
+        # -------- general dietary restrictions and allergies checks ----------
+
+        allergies = preferences.get("allergies", []) or []
+
+        dietary_restriction_issues = _validate_dietary_restrictions(ingredients, limitations, allergies)
+
+        for dri in dietary_restriction_issues:
+
+            issues.append(f"{option.capitalize()} option: {dri}")
 
 
 
@@ -7676,6 +7770,496 @@ def extract_measurement_from_text(text, to_type):
         return None
 
 
+
+@app.route("/api/generate-pdf", methods=["POST"])
+
+def generate_pdf():
+
+    """
+
+    Generate PDF from menu JSON - returns error to trigger browser print fallback.
+
+    The frontend will handle PDF generation using browser print dialog.
+
+    """
+
+    try:
+
+        data = request.json or {}
+
+        menu = data.get("menu")
+
+        if not menu:
+
+            return jsonify({"error": "Missing menu data"}), 400
+
+        # Return error to trigger frontend browser print fallback
+
+        # This is the old working system - browser print handles Hebrew well
+
+        return jsonify({"error": "Server-side PDF generation temporarily disabled. Using browser print."}), 500
+
+    except Exception as e:
+
+        logger.error(f"❌ Error in PDF endpoint: {traceback.format_exc()}")
+
+        return jsonify({"error": f"Failed to generate PDF: {str(e)}"}), 500
+
+
+
+def _generate_pdf_html(menu, version="portrait", remove_brands=False):
+
+    """Generate HTML content for PDF with proper Hebrew/RTL support
+
+    Returns: (html_content, html_dir)
+
+    """
+
+    
+
+    today = datetime.datetime.now()
+
+    hebrew_date = today.strftime("%d %B %Y")
+
+    english_date = today.strftime("%B %d, %Y")
+
+    
+
+    totals = menu.get("totals", {})
+
+    user_name = menu.get("user_name", "Client")
+
+    
+
+    # Detect Hebrew content
+
+    def contains_hebrew(text):
+
+        if not text:
+
+            return False
+
+        return bool(re.search(r'[\u0590-\u05FF]', str(text)))
+
+    
+
+    has_hebrew = any(
+
+        contains_hebrew(meal.get("meal")) or
+
+        contains_hebrew(meal.get("main", {}).get("meal_title")) or
+
+        contains_hebrew(meal.get("alternative", {}).get("meal_title")) or
+
+        any(contains_hebrew(ing.get("item")) for ing in meal.get("main", {}).get("ingredients", [])) or
+
+        any(contains_hebrew(ing.get("item")) for ing in meal.get("alternative", {}).get("ingredients", []))
+
+        for meal in menu.get("meals", [])
+
+    )
+
+    
+
+    html_dir = "rtl" if has_hebrew else "ltr"
+
+    html_lang = "he" if has_hebrew else "en"
+
+    
+
+    # Build meals HTML
+
+    meals_html = ""
+
+    for meal in menu.get("meals", []):
+
+        meal_name = meal.get("meal", "")
+
+        main = meal.get("main", {})
+
+        alternative = meal.get("alternative", {})
+
+        
+
+        # Main option
+
+        main_title = main.get("meal_title", "")
+
+        main_ingredients = "".join([
+
+            f'<li>{ing.get("item", "")} - {ing.get("household_measure", "")}</li>'
+
+            for ing in main.get("ingredients", [])
+
+        ])
+
+        main_nutrition = main.get("nutrition", {})
+
+        
+
+        # Alternative option
+
+        alt_title = alternative.get("meal_title", "")
+
+        alt_ingredients = "".join([
+
+            f'<li>{ing.get("item", "")} - {ing.get("household_measure", "")}</li>'
+
+            for ing in alternative.get("ingredients", [])
+
+        ])
+
+        alt_nutrition = alternative.get("nutrition", {})
+
+        
+
+        meals_html += f"""
+
+        <div class="meal-section">
+
+            <h2 class="meal-title">{meal_name}</h2>
+
+            
+
+            <div class="meal-option main-option">
+
+                <h3 class="meal-subtitle">{main_title}</h3>
+
+                <div class="nutrition-info">
+
+                    <span>{main_nutrition.get("calories", 0)} kcal</span>
+
+                    <span>P: {main_nutrition.get("protein", 0)}g</span>
+
+                    <span>F: {main_nutrition.get("fat", 0)}g</span>
+
+                    <span>C: {main_nutrition.get("carbs", 0)}g</span>
+
+                </div>
+
+                <ul class="ingredients-list">{main_ingredients}</ul>
+
+            </div>
+
+            
+
+            <div class="meal-option alt-option">
+
+                <h3 class="meal-subtitle">{alt_title}</h3>
+
+                <div class="nutrition-info">
+
+                    <span>{alt_nutrition.get("calories", 0)} kcal</span>
+
+                    <span>P: {alt_nutrition.get("protein", 0)}g</span>
+
+                    <span>F: {alt_nutrition.get("fat", 0)}g</span>
+
+                    <span>C: {alt_nutrition.get("carbs", 0)}g</span>
+
+                </div>
+
+                <ul class="ingredients-list">{alt_ingredients}</ul>
+
+            </div>
+
+        </div>
+
+        """
+
+    
+
+    # Return just the body content (CSS will be added separately)
+
+    html_body = f"""
+
+        <div class="header">
+
+            <h1>BetterChoice - {("תפריט אישי" if has_hebrew else "Personal Meal Plan")}</h1>
+
+            <p class="user-name">{user_name}</p>
+
+            <p class="date">{hebrew_date if has_hebrew else english_date}</p>
+
+        </div>
+
+        
+
+        <div class="totals-section">
+
+            <h2>{("סה\"כ יומי" if has_hebrew else "Daily Totals")}</h2>
+
+            <div class="totals-box">
+
+                <span>{totals.get("calories", 0)} kcal</span>
+
+                <span>P: {totals.get("protein", 0)}g</span>
+
+                <span>F: {totals.get("fat", 0)}g</span>
+
+                <span>C: {totals.get("carbs", 0)}g</span>
+
+            </div>
+
+        </div>
+
+        
+
+        <div class="meals-container">
+
+            {meals_html}
+
+        </div>
+
+    """
+    
+    return html_body, html_dir
+
+
+
+def _get_pdf_css(version="portrait", html_dir="ltr"):
+
+    """Get CSS styles for PDF with Hebrew/RTL support"""
+
+    
+
+    page_size = "A4 landscape" if version == "landscape" else "A4"
+
+    
+
+    return f"""
+
+    @page {{
+
+        size: {page_size};
+
+        margin: 15mm;
+
+    }}
+
+    
+
+    * {{
+
+        margin: 0;
+
+        padding: 0;
+
+        box-sizing: border-box;
+
+    }}
+
+    
+
+    body {{
+
+        font-family: Arial, 'DejaVu Sans', sans-serif;
+
+        line-height: 1.6;
+
+        color: #333;
+
+        direction: {html_dir};
+
+    }}
+
+    
+
+    .header {{
+
+        background: #e8f5e8;
+
+        padding: 15px;
+
+        text-align: center;
+
+        margin-bottom: 20px;
+
+    }}
+
+    
+
+    .header h1 {{
+
+        font-size: 24px;
+
+        color: #2d5016;
+
+        margin-bottom: 10px;
+
+    }}
+
+    
+
+    .user-name {{
+
+        font-size: 16px;
+
+        color: #4CAF50;
+
+        font-weight: 600;
+
+    }}
+
+    
+
+    .date {{
+
+        font-size: 12px;
+
+        color: #666;
+
+    }}
+
+    
+
+    .totals-section {{
+
+        margin-bottom: 30px;
+
+        text-align: center;
+
+    }}
+
+    
+
+    .totals-box {{
+
+        background: #f0f8f0;
+
+        padding: 15px;
+
+        border-radius: 8px;
+
+        display: inline-block;
+
+    }}
+
+    
+
+    .totals-box span {{
+
+        margin: 0 10px;
+
+        font-weight: 600;
+
+        font-size: 14px;
+
+    }}
+
+    
+
+    .meal-section {{
+
+        margin-bottom: 25px;
+
+        page-break-inside: avoid;
+
+    }}
+
+    
+
+    .meal-title {{
+
+        font-size: 20px;
+
+        font-weight: 700;
+
+        color: #2d5016;
+
+        background: #f0f8f0;
+
+        padding: 10px;
+
+        border-bottom: 2px solid #4CAF50;
+
+        margin-bottom: 15px;
+
+    }}
+
+    
+
+    .meal-option {{
+
+        margin-bottom: 15px;
+
+        padding: 12px;
+
+        border-radius: 6px;
+
+    }}
+
+    
+
+    .main-option {{
+
+        background: #e6f9f0;
+
+    }}
+
+    
+
+    .alt-option {{
+
+        background: #e0f2fe;
+
+    }}
+
+    
+
+    .meal-subtitle {{
+
+        font-size: 16px;
+
+        font-weight: 600;
+
+        color: #4CAF50;
+
+        margin-bottom: 8px;
+
+    }}
+
+    
+
+    .nutrition-info {{
+
+        margin-bottom: 10px;
+
+        font-size: 12px;
+
+    }}
+
+    
+
+    .nutrition-info span {{
+
+        margin-right: 15px;
+
+        font-weight: 500;
+
+    }}
+
+    
+
+    .ingredients-list {{
+
+        list-style: none;
+
+        padding-left: 0;
+
+    }}
+
+    
+
+    .ingredients-list li {{
+
+        padding: 4px 0;
+
+        font-size: 13px;
+
+    }}
+
+    """
 
 
 

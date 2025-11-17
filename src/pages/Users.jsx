@@ -14,6 +14,8 @@ import { useLanguage } from '@/contexts/LanguageContext';
 
 import { getMyProfile, getCompanyProfileIds } from '@/utils/auth';
 
+import { secondSupabase } from '@/lib/supabase';
+
 import { 
 
   Search, 
@@ -2628,6 +2630,139 @@ export default function Clients() {
         }
       }
 
+      // Delete from secondary Supabase clients table and auth.users
+      try {
+        // First, fetch the client record to get user_id or email for auth deletion
+        const { data: clientRecord, error: fetchError } = await secondSupabase
+          .from('clients')
+          .select('user_id, email')
+          .eq('user_code', clientId)
+          .single();
+
+        if (fetchError && fetchError.code !== 'PGRST116') {
+          // PGRST116 means no rows found, which is fine
+          console.warn(
+            `Failed to fetch client record from secondary Supabase for user_code ${clientId}:`,
+            fetchError
+          );
+        }
+
+        // Delete from clients table
+        const { error: clientsDeleteError } = await secondSupabase
+          .from('clients')
+          .delete()
+          .eq('user_code', clientId);
+
+        if (clientsDeleteError) {
+          console.warn(
+            `Failed to delete client from secondary Supabase clients table for user_code ${clientId}:`,
+            clientsDeleteError
+          );
+          // Don't throw - continue with deletion even if secondary table deletion fails
+        } else {
+          console.log(`Successfully deleted client from secondary Supabase clients table for user_code ${clientId}`);
+        }
+
+        // Delete from auth.users if we have the user_id or email
+        if (clientRecord && (clientRecord.user_id || clientRecord.email)) {
+          try {
+            const secondSupabaseUrl = import.meta.env.VITE_SECOND_SUPABASE_URL;
+            const secondSupabaseServiceRoleKey = import.meta.env.VITE_SECOND_SUPABASE_SERVICE_ROLE_KEY;
+
+            if (!secondSupabaseServiceRoleKey) {
+              console.warn(
+                'VITE_SECOND_SUPABASE_SERVICE_ROLE_KEY not configured. Cannot delete auth user. Please add the service role key to environment variables.'
+              );
+            } else {
+              // Use admin API to delete auth user
+              let authUserId = clientRecord.user_id;
+              const authUserEmail = clientRecord.email;
+
+              const adminHeaders = {
+                apikey: secondSupabaseServiceRoleKey,
+                Authorization: `Bearer ${secondSupabaseServiceRoleKey}`,
+                'Content-Type': 'application/json'
+              };
+
+              // If we don't have user_id, look it up by email first
+              if (!authUserId && authUserEmail) {
+                try {
+                  const lookupResponse = await fetch(
+                    `${secondSupabaseUrl}/auth/v1/admin/users?email=${encodeURIComponent(authUserEmail)}`,
+                    {
+                      method: 'GET',
+                      headers: adminHeaders
+                    }
+                  );
+
+                  if (lookupResponse.ok) {
+                    const lookupData = await lookupResponse.json();
+                    if (lookupData.users && lookupData.users.length > 0) {
+                      authUserId = lookupData.users[0].id;
+                      console.log(`Found auth user_id ${authUserId} for email ${authUserEmail}`);
+                    }
+                  }
+                } catch (lookupError) {
+                  console.warn(
+                    `Failed to lookup auth user by email ${authUserEmail}:`,
+                    lookupError
+                  );
+                }
+              }
+
+              // Delete by user_id (UUID) - this is the only supported method
+              if (authUserId) {
+                const deleteEndpoint = `${secondSupabaseUrl}/auth/v1/admin/users/${authUserId}`;
+
+                const deleteResponse = await fetch(deleteEndpoint, {
+                  method: 'DELETE',
+                  headers: adminHeaders
+                });
+
+                if (!deleteResponse.ok) {
+                  const errorText = await deleteResponse.text();
+                  let errorData;
+                  try {
+                    errorData = JSON.parse(errorText);
+                  } catch {
+                    errorData = { error: errorText };
+                  }
+
+                  console.warn(
+                    `Failed to delete auth user from secondary Supabase for user_id ${authUserId}:`,
+                    errorData
+                  );
+                } else {
+                  console.log(
+                    `Successfully deleted auth user from secondary Supabase for user_id ${authUserId}`
+                  );
+                }
+              } else {
+                console.warn(
+                  `Cannot delete auth user: no user_id found and could not lookup by email ${authUserEmail}`
+                );
+              }
+            }
+          } catch (authDeleteError) {
+            console.warn(
+              `Error deleting auth user from secondary Supabase for user_code ${clientId}:`,
+              authDeleteError
+            );
+            // Don't throw - continue with deletion even if auth deletion fails
+          }
+        } else {
+          console.log(
+            `No user_id or email found in client record for user_code ${clientId}. Skipping auth user deletion.`
+          );
+        }
+      } catch (secondaryDeleteError) {
+        console.warn(
+          `Error deleting client from secondary Supabase for user_code ${clientId}:`,
+          secondaryDeleteError
+        );
+        // Don't throw - continue with deletion even if secondary table deletion fails
+      }
+
       await ChatUser.delete(clientId);
       await loadClients();
 
@@ -4042,9 +4177,8 @@ export default function Clients() {
 
         </div>
 
-        {/* Only sys_admin and company_manager can add new clients */}
-
-        {userRole && userRole !== 'employee' && (
+        {/* Only sys_admin can add new clients */}
+        {userRole === 'sys_admin' && (
 
           <Button 
 

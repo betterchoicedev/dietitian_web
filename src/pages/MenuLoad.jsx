@@ -1268,7 +1268,7 @@ const MenuLoad = () => {
     }
   };
 
-  const handleMenuSelect = (menu) => {
+  const handleMenuSelect = async (menu) => {
     console.log('Selected menu:', menu);
     setSelectedMenu(menu);
     
@@ -1279,8 +1279,37 @@ const MenuLoad = () => {
       // Clear previous translations cache
       setTranslatedMenus({});
       
-      setEditedMenu(convertedMenu);
       setIsEditing(true);
+      
+      // If current language is Hebrew, automatically translate the menu
+      if (language === 'he') {
+        setLoading(true);
+        setError(null);
+        
+        try {
+          console.log('🌐 Auto-translating menu to Hebrew...');
+          const translated = await translateMenu(convertedMenu, 'he');
+          
+          // Cache the translation
+          setTranslatedMenus(prev => ({
+            ...prev,
+            'he': translated
+          }));
+          
+          setEditedMenu(translated);
+          console.log('✅ Menu auto-translated to Hebrew');
+        } catch (err) {
+          console.error('Auto-translation failed:', err);
+          // Fall back to original English menu if translation fails
+          setEditedMenu(convertedMenu);
+          setError('Failed to translate menu. Showing English version.');
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        // If not Hebrew, just set the English menu
+        setEditedMenu(convertedMenu);
+      }
       
       // Fetch user targets for the selected menu's user
       if (menu.user_code) {
@@ -2411,6 +2440,31 @@ const MenuLoad = () => {
       }
     };
   }, [editedMenu, loading]);
+
+  // Auto-translate menu when language changes to Hebrew and menu is already loaded
+  useEffect(() => {
+    // Only auto-translate if menu is loaded and we're not already loading/translating
+    if (!editedMenu || !originalMenu || loading) return;
+    
+    // Check if current menu is already in the correct language by comparing with cached translation
+    const isCurrentlyHebrew = translatedMenus['he'] && editedMenu === translatedMenus['he'];
+    const isCurrentlyEnglish = editedMenu === originalMenu;
+    
+    if (language === 'he' && !isCurrentlyHebrew) {
+      // Check if we already have a Hebrew translation cached
+      if (translatedMenus['he']) {
+        console.log('🌐 Language is Hebrew, using cached translation');
+        setEditedMenu(translatedMenus['he']);
+      } else {
+        console.log('🌐 Language is Hebrew, auto-translating loaded menu...');
+        handleLanguageChange('he');
+      }
+    } else if (language === 'en' && !isCurrentlyEnglish) {
+      // Restore English menu when language changes to English
+      console.log('🌐 Language is English, restoring original menu');
+      setEditedMenu(originalMenu);
+    }
+  }, [language, editedMenu, originalMenu, loading, translatedMenus]);
 
   // Manual check for future meal plan notifications
   const manualCheckFutureMealPlans = async () => {

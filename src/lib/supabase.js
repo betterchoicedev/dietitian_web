@@ -21,4 +21,16 @@ export const secondSupabase = createClient(secondSupabaseUrl, secondSupabaseKey,
     persistSession: true,
     detectSessionInUrl: true
   }
-}) 
+})
+
+// Second Supabase admin client for auth operations (if service role key is available)
+const secondSupabaseServiceRoleKey = import.meta.env.VITE_SECOND_SUPABASE_SERVICE_ROLE_KEY
+
+export const secondSupabaseAdmin = secondSupabaseServiceRoleKey
+  ? createClient(secondSupabaseUrl, secondSupabaseServiceRoleKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    })
+  : null 
