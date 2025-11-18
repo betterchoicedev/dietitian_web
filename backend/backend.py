@@ -76,6 +76,7 @@ default_allowed_origins = [
     "https://127.0.0.1:5173",
     "https://www.betterchoicefood.com",
     "https://betterchoicefood.com",
+    "https://betterchoice.one",
 ]
 
 env_allowed_origins = os.getenv("API_ALLOWED_ORIGINS")
