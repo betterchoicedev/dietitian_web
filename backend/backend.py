@@ -4852,7 +4852,9 @@ HARD RULES
 
  Prioritize whole foods; avoid ultra-processed snacks unless explicitly liked in preferences.
 
- Respect ALL dietary restrictions and allergies.
+ **CRITICAL: STRICTLY AVOID ALL FOODS IN ALLERGIES LIST** - This is life-threatening: {allergies_list}
+
+ **CRITICAL: STRICTLY FOLLOW ALL DIETARY LIMITATIONS** - Never include these foods/ingredients: {limitations_list}
 
  If kosher: never mix meat + dairy; avoid pork/shellfish; prefer kosher-suitable brands.
 
@@ -5108,7 +5110,13 @@ def generate_alternative_meal():
 
     region_instruction = _region_instruction_from_prefs(preferences)
 
-
+    # Extract allergies and limitations from preferences
+    allergies = preferences.get("allergies", []) or []
+    limitations = preferences.get("limitations", []) or []
+    
+    # Format for prompt
+    allergies_list = ", ".join(allergies) if allergies else "None"
+    limitations_list = ", ".join(limitations) if limitations else "None"
 
     # Macro targets: mirror the MAIN meal's totals (strict)
 
@@ -5150,7 +5158,11 @@ def generate_alternative_meal():
 
                     avoid_proteins=avoid_proteins,
 
-                    avoid_ingredients=avoid_ingredients
+                    avoid_ingredients=avoid_ingredients,
+
+                    allergies_list=allergies_list,
+
+                    limitations_list=limitations_list
 
                 )
 
@@ -5173,6 +5185,12 @@ Here is the meal you generated:
 These are the validation issues that need to be fixed:
 
 {validation_feedback}
+
+
+
+**CRITICAL: STRICTLY AVOID ALL FOODS IN ALLERGIES LIST** - This is life-threatening: {allergies_list}
+
+**CRITICAL: STRICTLY FOLLOW ALL DIETARY LIMITATIONS** - Never include these foods/ingredients: {limitations_list}
 
 
 
