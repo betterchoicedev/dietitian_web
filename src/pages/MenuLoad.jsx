@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ArrowLeft, Loader, Save, Search, Filter, Utensils, Edit, CalendarRange, Download, Trash2 } from 'lucide-react';
+import { ArrowLeft, Loader, Save, Search, Filter, Utensils, Edit, CalendarRange, Download, Trash2, Plus } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Menu } from '@/api/entities';
@@ -310,7 +310,16 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
   );
 };
 
-const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, translations }) => {
+const EditableIngredient = ({
+  value,
+  onChange,
+  mealIndex,
+  optionIndex,
+  ingredientIndex,
+  alternativeIndex,
+  translations,
+  autoFocus = false,
+}) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
   const [originalValue, setOriginalValue] = useState(value);
@@ -341,18 +350,130 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
     setIsLoading(true);
     try {
-      // Use only the external API endpoint
-      const response = await fetch(`https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/suggestions?query=${encodeURIComponent(query)}`);
-      
-      if (response.ok) {
-        const data = await response.json();
-        setSuggestions(data.suggestions || data || []);
+      const queryWords = query.trim().split(/\s+/).filter(Boolean);
+      let allData = [];
+
+      if (queryWords.length === 1) {
+        const word = queryWords[0];
+        const startsWithPattern = `${word}%`;
+        const containsPattern = `%${word}%`;
+
+        const { data: startsWithData, error: startsWithError } = await supabase
+          .from('ingridientsroee')
+          .select('id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g')
+          .or([
+            `name.ilike.${startsWithPattern}`,
+            `english_name.ilike.${startsWithPattern}`
+          ].join(','))
+          .limit(50);
+
+        if (!startsWithError && startsWithData) {
+          allData = startsWithData;
+        }
+
+        if (allData.length < 20) {
+          const { data: containsData, error: containsError } = await supabase
+            .from('ingridientsroee')
+            .select('id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g')
+            .or([
+              `name.ilike.${containsPattern}`,
+              `english_name.ilike.${containsPattern}`
+            ].join(','))
+            .limit(50);
+
+          if (!containsError && containsData) {
+            const existingIds = new Set(allData.map(item => item.id));
+            const newItems = containsData.filter(item => !existingIds.has(item.id));
+            allData = [...allData, ...newItems];
+          }
+        }
       } else {
-        console.error('Failed to fetch suggestions from external API:', response.status);
-        setSuggestions([]);
+        const wordsConditions = [];
+        queryWords.forEach(word => {
+          const pattern = `%${word}%`;
+          wordsConditions.push(
+            `name.ilike.${pattern}`,
+            `english_name.ilike.${pattern}`
+          );
+        });
+
+        const { data: wordsData, error: wordsError } = await supabase
+          .from('ingridientsroee')
+          .select('id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g')
+          .or(wordsConditions.join(','))
+          .limit(200);
+
+        if (!wordsError && wordsData) {
+          const filteredWordsData = wordsData.filter(item => {
+            const combinedText = `${(item.name || '').toLowerCase()} ${(item.english_name || '').toLowerCase()}`;
+            return queryWords.every(word => combinedText.includes(word.toLowerCase()));
+          });
+          allData = filteredWordsData;
+        }
       }
+
+      const rankedData = allData.map(ingredient => {
+        const hebrewName = (ingredient.name || '').toLowerCase();
+        const englishName = (ingredient.english_name || '').toLowerCase();
+        const queryLower = query.toLowerCase();
+        const queryWordsLower = queryWords.map(w => w.toLowerCase());
+        const isHebrewQuery = /[\u0590-\u05FF]/.test(query);
+
+        const scoreName = (fullName) => {
+          if (!fullName) return 0;
+          if (fullName === queryLower) return 10000;
+          if (fullName.startsWith(queryLower)) return 9000;
+          if (queryWordsLower.length > 1) {
+            const phrase = queryWordsLower.join(' ');
+            if (fullName.startsWith(phrase)) return 8800;
+            if (fullName.includes(phrase)) return 5000;
+          }
+          if (fullName.includes(queryLower)) return 3000;
+          return queryWordsLower.every(word => fullName.includes(word)) ? 2000 : 0;
+        };
+
+        const englishScore = scoreName(englishName);
+        const hebrewScore = scoreName(hebrewName);
+        const score = Math.max(englishScore, hebrewScore);
+        const preferEnglish = isHebrewQuery ? englishScore > hebrewScore : englishScore >= hebrewScore;
+
+        return {
+          ...ingredient,
+          _searchScore: score,
+          _preferEnglish: preferEnglish && (ingredient.english_name || ingredient.name)
+        };
+      });
+
+      rankedData.sort((a, b) => {
+        if (b._searchScore !== a._searchScore) {
+          return b._searchScore - a._searchScore;
+        }
+        const aName = a._preferEnglish ? (a.english_name || a.name || '') : (a.name || a.english_name || '');
+        const bName = b._preferEnglish ? (b.english_name || b.name || '') : (b.name || b.english_name || '');
+        return aName.localeCompare(bName);
+      });
+
+      const suggestions = rankedData.slice(0, 50).map(ingredient => {
+        const displayName = ingredient._preferEnglish
+          ? (ingredient.english_name || ingredient.name || '')
+          : (ingredient.name || ingredient.english_name || '');
+
+        return {
+          english: ingredient.english_name || ingredient.name || '',
+          hebrew: displayName,
+          household_measure: '',
+          calories: ingredient.calories_energy || 0,
+          protein: ingredient.protein_g || 0,
+          fat: ingredient.fat_g || 0,
+          carbs: ingredient.carbohydrates_g || 0,
+          'portionSI(gram)': 100,
+          'brand of pruduct': ''
+        };
+      });
+
+      setSuggestions(suggestions);
     } catch (error) {
-      console.error('Error fetching suggestions:', error);
+      console.error('Error fetching suggestions from Supabase:', error);
       setSuggestions([]);
     } finally {
       setIsLoading(false);
@@ -440,7 +561,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
         setEditValue(suggestion.name);
       }
 
-      onChange(updatedValues, mealIndex, optionIndex, ingredientIndex);
+      onChange(updatedValues, mealIndex, optionIndex, ingredientIndex, alternativeIndex);
       setShowSuggestions(false);
       setIsEditing(false);
       setSuggestions([]);
@@ -456,6 +577,12 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
     setSuggestions([]);
     setShowSuggestions(false);
   };
+
+  useEffect(() => {
+    if (autoFocus && !isEditing && value === '') {
+      startEditing();
+    }
+  }, [autoFocus, isEditing, value]);
 
   if (!isEditing) {
     return (
@@ -481,7 +608,7 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
         onFocus={() => setShowSuggestions(true)}
         className="bg-white border border-gray-300 rounded px-2 py-1 text-sm min-w-[120px]"
         placeholder="Search ingredient..."
-        autoFocus
+        autoFocus={autoFocus}
       />
 
       {isLoading && (
@@ -519,6 +646,322 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
   );
 };
 
+const EditableHouseholdMeasure = ({ value, onChange, mealIndex, optionIndex, ingredientIndex, alternativeIndex, translations }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(value);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    setEditValue(value);
+  }, [value]);
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const handleSubmit = () => {
+    onChange(editValue, mealIndex, optionIndex, ingredientIndex, alternativeIndex);
+    setIsEditing(false);
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleSubmit();
+    } else if (e.key === 'Escape') {
+      setEditValue(value);
+      setIsEditing(false);
+    }
+  };
+
+  if (!isEditing) {
+    return (
+      <span
+        onClick={() => setIsEditing(true)}
+        className="text-gray-600 cursor-pointer hover:bg-gray-100 px-1 rounded"
+        title={translations?.clickToEditHouseholdMeasure || 'Click to edit household measure'}
+      >
+        {value || translations?.noMeasure || 'No measure'}
+      </span>
+    );
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      type="text"
+      value={editValue}
+      onChange={(e) => setEditValue(e.target.value)}
+      onKeyDown={handleKeyPress}
+      onBlur={handleSubmit}
+      className="text-gray-600 bg-white border border-gray-300 rounded px-1 py-0.5 text-sm min-w-[80px] focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      placeholder={translations?.householdMeasurePlaceholder || 'e.g., 1 cup, 2 tbsp'}
+    />
+  );
+};
+
+const IngredientPortionDialog = ({ isOpen, onClose, onConfirm, ingredient, translations }) => {
+  const [gramAmount, setGramAmount] = useState('');
+  const [householdMeasure, setHouseholdMeasure] = useState('');
+  const [adjustedNutrition, setAdjustedNutrition] = useState(null);
+  const [isAIConverting, setIsAIConverting] = useState(false);
+  const [aiConversionMessage, setAiConversionMessage] = useState('');
+
+  useEffect(() => {
+    if (isOpen && ingredient) {
+      setGramAmount(ingredient['portionSI(gram)'] || '');
+      setHouseholdMeasure(ingredient.household_measure || '');
+
+      const currentPortion = parseFloat(ingredient['portionSI(gram)'] || 0);
+      if (currentPortion > 0) {
+        const nutritionPer100g = {
+          calories: Math.round((ingredient.calories || 0) * 100 / currentPortion),
+          protein: Math.round((ingredient.protein || 0) * 100 / currentPortion),
+          fat: Math.round((ingredient.fat || 0) * 100 / currentPortion),
+          carbs: Math.round((ingredient.carbs || 0) * 100 / currentPortion),
+        };
+
+        const ratio = currentPortion / 100;
+        setAdjustedNutrition({
+          calories: Math.round(nutritionPer100g.calories * ratio),
+          protein: Math.round(nutritionPer100g.protein * ratio),
+          fat: Math.round(nutritionPer100g.fat * ratio),
+          carbs: Math.round(nutritionPer100g.carbs * ratio),
+        });
+      } else {
+        setAdjustedNutrition(null);
+      }
+    }
+  }, [isOpen, ingredient]);
+
+  const recalcNutrition = (newAmount) => {
+    if (!ingredient) return;
+    const currentPortion = parseFloat(ingredient['portionSI(gram)'] || 0);
+    const newAmountNum = parseFloat(newAmount);
+    if (!newAmountNum) {
+      setAdjustedNutrition(null);
+      return;
+    }
+
+    if (currentPortion > 0) {
+      const nutritionPer100g = {
+        calories: Math.round((ingredient.calories || 0) * 100 / currentPortion),
+        protein: Math.round((ingredient.protein || 0) * 100 / currentPortion),
+        fat: Math.round((ingredient.fat || 0) * 100 / currentPortion),
+        carbs: Math.round((ingredient.carbs || 0) * 100 / currentPortion),
+      };
+      const ratio = newAmountNum / 100;
+      setAdjustedNutrition({
+        calories: Math.round(nutritionPer100g.calories * ratio),
+        protein: Math.round(nutritionPer100g.protein * ratio),
+        fat: Math.round(nutritionPer100g.fat * ratio),
+        carbs: Math.round(nutritionPer100g.carbs * ratio),
+      });
+    } else {
+      const ratio = newAmountNum / 100;
+      setAdjustedNutrition({
+        calories: Math.round((ingredient.calories || 0) * ratio),
+        protein: Math.round((ingredient.protein || 0) * ratio),
+        fat: Math.round((ingredient.fat || 0) * ratio),
+        carbs: Math.round((ingredient.carbs || 0) * ratio),
+      });
+    }
+  };
+
+  const handleGramAmountChange = (e) => {
+    const newAmount = e.target.value;
+    setGramAmount(newAmount);
+    if (newAmount) {
+      recalcNutrition(newAmount);
+    } else {
+      setAdjustedNutrition(null);
+    }
+  };
+
+  const convertGramsToHousehold = async () => {
+    if (!gramAmount || !ingredient) return;
+    try {
+      setIsAIConverting(true);
+      setAiConversionMessage('🤖 Converting to household measure...');
+      const conversionResult = await convertMeasurementWithAI(ingredient, `${gramAmount}g`, 'household');
+      if (conversionResult?.converted_measurement) {
+        setHouseholdMeasure(conversionResult.converted_measurement);
+        setAiConversionMessage(`✅ Converted to "${conversionResult.converted_measurement}"`);
+      } else {
+        setAiConversionMessage('⚠️ Could not determine household measure');
+      }
+    } catch (error) {
+      console.error('Error converting grams to household', error);
+      setAiConversionMessage('❌ Conversion failed');
+    } finally {
+      setTimeout(() => {
+        setAiConversionMessage('');
+        setIsAIConverting(false);
+      }, 3000);
+    }
+  };
+
+  const convertHouseholdToGrams = async () => {
+    if (!householdMeasure.trim() || !ingredient) return;
+    try {
+      setIsAIConverting(true);
+      setAiConversionMessage('🤖 Converting to grams...');
+      const conversionResult = await convertMeasurementWithAI(ingredient, householdMeasure.trim(), 'grams');
+      if (conversionResult?.converted_measurement) {
+        setGramAmount(conversionResult.converted_measurement.toString());
+        setAiConversionMessage(`✅ Converted to ${conversionResult.converted_measurement}g`);
+        recalcNutrition(conversionResult.converted_measurement);
+      } else {
+        setAiConversionMessage('⚠️ Could not determine gram amount');
+      }
+    } catch (error) {
+      console.error('Error converting household to grams', error);
+      setAiConversionMessage('❌ Conversion failed');
+    } finally {
+      setTimeout(() => {
+        setAiConversionMessage('');
+        setIsAIConverting(false);
+      }, 3000);
+    }
+  };
+
+  const handleConfirm = () => {
+    if (!gramAmount || !householdMeasure.trim()) {
+      alert(translations?.pleaseFillAllFields || 'Please fill in all fields');
+      return;
+    }
+
+    const gramAmountNum = parseFloat(gramAmount);
+    if (isNaN(gramAmountNum) || gramAmountNum <= 0) {
+      alert(translations?.pleaseEnterValidAmount || 'Please enter a valid amount greater than 0');
+      return;
+    }
+
+    const updatedIngredient = {
+      ...ingredient,
+      'portionSI(gram)': gramAmountNum,
+      household_measure: householdMeasure.trim(),
+      calories: adjustedNutrition?.calories ?? ingredient.calories,
+      protein: adjustedNutrition?.protein ?? ingredient.protein,
+      fat: adjustedNutrition?.fat ?? ingredient.fat,
+      carbs: adjustedNutrition?.carbs ?? ingredient.carbs,
+    };
+
+    onConfirm(updatedIngredient);
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4" dir="rtl">
+        <h3 className="text-lg font-semibold mb-4 text-gray-900">
+          {translations?.setPortion || 'Set Portion Size'}
+        </h3>
+        <p className="text-sm text-gray-600 mb-4">
+          {translations?.portionDialogDescription || 'Enter the amount in grams and a household measurement. The nutrition values will be adjusted automatically.'}
+        </p>
+
+        <div className="space-y-4">
+          {aiConversionMessage && (
+            <div className="bg-purple-50 border border-purple-200 rounded-md p-3 flex items-center gap-2">
+              <div className="animate-pulse">🤖</div>
+              <span className="text-sm text-purple-700 font-medium">{aiConversionMessage}</span>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              {translations?.ingredient || 'Ingredient'}:
+            </label>
+            <div className="text-sm text-gray-900 bg-gray-50 p-2 rounded border">
+              {ingredient?.item}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              {translations?.amountInGrams || 'Amount (grams)'}:
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                value={gramAmount}
+                onChange={handleGramAmountChange}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="100"
+                min="0"
+                step="0.1"
+              />
+              <Button
+                type="button"
+                onClick={convertGramsToHousehold}
+                disabled={isAIConverting || !gramAmount}
+                variant="outline"
+                size="sm"
+                className="px-3 py-2 text-purple-600 border-purple-300 hover:bg-purple-50 whitespace-nowrap"
+                title="Use AI to convert grams to household measure"
+              >
+                {isAIConverting ? '🤖' : '🏠'}
+              </Button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              {translations?.householdMeasure || 'Household Measure'}:
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={householdMeasure}
+                onChange={(e) => setHouseholdMeasure(e.target.value)}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder={translations?.householdMeasurePlaceholder || 'e.g., 1 cup, 2 tbsp'}
+              />
+              <Button
+                type="button"
+                onClick={convertHouseholdToGrams}
+                disabled={isAIConverting || !householdMeasure.trim()}
+                variant="outline"
+                size="sm"
+                className="px-3 py-2 text-purple-600 border-purple-300 hover:bg-purple-50 whitespace-nowrap"
+                title="Use AI to convert household measure to grams"
+              >
+                {isAIConverting ? '🤖' : '⚖️'}
+              </Button>
+            </div>
+          </div>
+
+          {adjustedNutrition && (
+            <div className="bg-blue-50 p-3 rounded-md">
+              <p className="text-sm font-medium text-blue-800 mb-2">{translations?.adjustedNutrition || 'Adjusted Nutrition'}:</p>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <span className="text-blue-700">{translations?.calories || 'Calories'}: {adjustedNutrition.calories}</span>
+                <span className="text-green-700">{translations?.protein || 'Protein'}: {adjustedNutrition.protein}g</span>
+                <span className="text-amber-700">{translations?.fat || 'Fat'}: {adjustedNutrition.fat}g</span>
+                <span className="text-orange-700">{translations?.carbs || 'Carbs'}: {adjustedNutrition.carbs}g</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6 flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>
+            {translations?.cancel || 'Cancel'}
+          </Button>
+          <Button onClick={handleConfirm}>
+            {translations?.save || 'Save'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Function to filter out generic brand names
 const shouldShowBrand = (brand) => {
   if (!brand || typeof brand !== 'string') return false;
@@ -527,6 +970,34 @@ const shouldShowBrand = (brand) => {
   const genericBrands = ['fresh', 'none', 'generic', 'store brand', 'private label', 'no brand', 'unbranded'];
   
   return !genericBrands.includes(normalizedBrand) && normalizedBrand.length > 0;
+};
+
+const convertMeasurementWithAI = async (ingredient, fromMeasurement, toType, targetLang = 'en', region = 'israel') => {
+  if (!ingredient || !fromMeasurement || !toType) return null;
+  try {
+    const response = await fetch('https://dietitian-be.azurewebsites.net/api/convert-measurement', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ingredient: ingredient.item,
+        brand: ingredient['brand of pruduct'] || '',
+        fromMeasurement,
+        toType,
+        targetLang,
+        region
+      })
+    });
+
+    if (!response.ok) {
+      console.error('Measurement conversion API error', await response.text());
+      return null;
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Measurement conversion failed', error);
+    return null;
+  }
 };
 
 const MenuLoad = () => {
@@ -568,6 +1039,9 @@ const MenuLoad = () => {
   const [removeBrandsFromPdf, setRemoveBrandsFromPdf] = useState(false);
   const [userProfile, setUserProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [showPortionDialog, setShowPortionDialog] = useState(false);
+  const [selectedIngredientForDialog, setSelectedIngredientForDialog] = useState(null);
+  const [dialogIngredientContext, setDialogIngredientContext] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
   const { language, translations } = useLanguage();
@@ -685,8 +1159,10 @@ const MenuLoad = () => {
 
     return {
       meals: convertedMeals,
-      totals: totals,
-      note: savedMenu.meal_plan?.note || savedMenu.note || ''
+      totals,
+      note: savedMenu.meal_plan?.note || savedMenu.note || '',
+      user_code: savedMenu.user_code || savedMenu.meal_plan?.user_code || null,
+      meal_plan_name: savedMenu.meal_plan_name || savedMenu.meal_plan?.name || ''
     };
   };
 
@@ -1289,14 +1765,20 @@ const MenuLoad = () => {
         try {
           console.log('🌐 Auto-translating menu to Hebrew...');
           const translated = await translateMenu(convertedMenu, 'he');
+          const mergedTranslated = {
+            ...convertedMenu,
+            ...translated,
+            user_code: convertedMenu.user_code,
+            meal_plan_name: convertedMenu.meal_plan_name
+          };
           
           // Cache the translation
           setTranslatedMenus(prev => ({
             ...prev,
-            'he': translated
+            he: mergedTranslated
           }));
           
-          setEditedMenu(translated);
+          setEditedMenu(mergedTranslated);
           console.log('✅ Menu auto-translated to Hebrew');
         } catch (err) {
           console.error('Auto-translation failed:', err);
@@ -1338,29 +1820,123 @@ const MenuLoad = () => {
     });
   };
 
-  const handleIngredientChange = (newValues, mealIndex, optionIndex, ingredientIndex) => {
-    setEditedMenu(prev => {
-      const updated = JSON.parse(JSON.stringify(prev));
-      const option = optionIndex === 'main' ? updated.meals[mealIndex].main : updated.meals[mealIndex].alternative;
-      
-      if (option.ingredients && option.ingredients[ingredientIndex]) {
+  const handleIngredientChange = (newValues, mealIndex, optionIndex, ingredientIndex, alternativeIndex = null) => {
+    const updateMenu = (menuData) => {
+      if (!menuData) return menuData;
+      const updated = JSON.parse(JSON.stringify(menuData));
+      const meal = updated.meals?.[mealIndex];
+      if (!meal) return menuData;
+
+      const option =
+        alternativeIndex !== null
+          ? meal.alternatives?.[alternativeIndex]
+          : optionIndex === 'main'
+            ? meal.main
+            : meal.alternative;
+
+      if (option?.ingredients && option.ingredients[ingredientIndex]) {
         Object.assign(option.ingredients[ingredientIndex], newValues);
-        
-        if (optionIndex === 'main') {
-          const totalNutrition = option.ingredients.reduce((acc, ing) => ({
-            calories: acc.calories + (ing.calories || 0),
-            protein: acc.protein + (ing.protein || 0),
-            fat: acc.fat + (ing.fat || 0),
-            carbs: acc.carbs + (ing.carbs || 0)
-          }), { calories: 0, protein: 0, fat: 0, carbs: 0 });
-          
+
+        if (optionIndex === 'main' && alternativeIndex === null) {
+          const totalNutrition = option.ingredients.reduce(
+            (acc, ing) => ({
+              calories: acc.calories + (ing.calories || 0),
+              protein: acc.protein + (ing.protein || 0),
+              fat: acc.fat + (ing.fat || 0),
+              carbs: acc.carbs + (ing.carbs || 0)
+            }),
+            { calories: 0, protein: 0, fat: 0, carbs: 0 }
+          );
           option.nutrition = totalNutrition;
           updated.totals = calculateMainTotals(updated);
         }
       }
-      
+
       return updated;
-    });
+    };
+
+    setEditedMenu(prev => updateMenu(prev) || prev);
+    setOriginalMenu(prev => updateMenu(prev) || prev);
+  };
+
+  const handleAddIngredient = (mealIndex, optionIndex, alternativeIndex = null) => {
+    const addIngredient = (menuData) => {
+      if (!menuData) return menuData;
+      const updated = JSON.parse(JSON.stringify(menuData));
+      const meal = updated.meals?.[mealIndex];
+      if (!meal) return menuData;
+
+      const option =
+        alternativeIndex !== null
+          ? meal.alternatives?.[alternativeIndex]
+          : optionIndex === 'main'
+            ? meal.main
+            : meal.alternative;
+
+      if (!option) return menuData;
+      option.ingredients = option.ingredients || [];
+      option.ingredients.push({
+        item: '',
+        household_measure: '',
+        calories: 0,
+        protein: 0,
+        fat: 0,
+        carbs: 0,
+        'brand of pruduct': '',
+        UPC: null,
+        'portionSI(gram)': 0
+      });
+
+      return updated;
+    };
+
+    setEditedMenu(prev => addIngredient(prev) || prev);
+    setOriginalMenu(prev => addIngredient(prev) || prev);
+  };
+
+  const handleHouseholdMeasureChange = (newMeasure, mealIndex, optionIndex, ingredientIndex, alternativeIndex = null) => {
+    const updateMenu = (menuData) => {
+      if (!menuData) return menuData;
+      const updated = JSON.parse(JSON.stringify(menuData));
+      const meal = updated.meals?.[mealIndex];
+      if (!meal) return menuData;
+
+      const option =
+        alternativeIndex !== null
+          ? meal.alternatives?.[alternativeIndex]
+          : optionIndex === 'main'
+            ? meal.main
+            : meal.alternative;
+
+      if (option?.ingredients && option.ingredients[ingredientIndex]) {
+        option.ingredients[ingredientIndex].household_measure = newMeasure;
+      }
+
+      return updated;
+    };
+
+    setEditedMenu(prev => updateMenu(prev) || prev);
+    setOriginalMenu(prev => updateMenu(prev) || prev);
+  };
+
+  const handleOpenPortionDialog = (ingredient, mealIndex, optionIndex, ingredientIndex, alternativeIndex = null) => {
+    setSelectedIngredientForDialog(ingredient);
+    setDialogIngredientContext({ mealIndex, optionIndex, ingredientIndex, alternativeIndex });
+    setShowPortionDialog(true);
+  };
+
+  const handleClosePortionDialog = () => {
+    setShowPortionDialog(false);
+    setSelectedIngredientForDialog(null);
+    setDialogIngredientContext(null);
+  };
+
+  const handleConfirmPortionDialog = (updatedIngredient) => {
+    if (dialogIngredientContext) {
+      const { mealIndex, optionIndex, ingredientIndex, alternativeIndex } = dialogIngredientContext;
+      handleIngredientChange(updatedIngredient, mealIndex, optionIndex, ingredientIndex, alternativeIndex);
+    }
+    handleClosePortionDialog();
   };
 
   const handleMakeAlternativeMain = (mealIndex, alternativeIndex = null) => {
@@ -1394,23 +1970,23 @@ const MenuLoad = () => {
   };
 
   const handleDeleteIngredient = (mealIndex, optionIndex, ingredientIndex, alternativeIndex = null) => {
-    setEditedMenu(prev => {
-      const updated = JSON.parse(JSON.stringify(prev));
-      const meal = updated.meals[mealIndex];
-      
-      let option;
-      if (alternativeIndex !== null) {
-        // Handle additional alternatives array
-        option = meal.alternatives[alternativeIndex];
-      } else {
-        // Handle main and alternative sections
-        option = optionIndex === 'main' ? meal.main : meal.alternative;
-      }
+    const updateMenu = (menuData) => {
+      if (!menuData) return menuData;
+      const updated = JSON.parse(JSON.stringify(menuData));
+      const meal = updated.meals?.[mealIndex];
+      if (!meal) return menuData;
 
-      // Remove the ingredient
+      const option =
+        alternativeIndex !== null
+          ? meal.alternatives?.[alternativeIndex]
+          : optionIndex === 'main'
+            ? meal.main
+            : meal.alternative;
+
+      if (!option?.ingredients) return menuData;
+
       option.ingredients.splice(ingredientIndex, 1);
 
-      // Recalculate nutrition totals from remaining ingredients
       const newNutrition = option.ingredients.reduce(
         (acc, ing) => {
           acc.calories += Number(ing.calories) || 0;
@@ -1422,7 +1998,6 @@ const MenuLoad = () => {
         { calories: 0, protein: 0, fat: 0, carbs: 0 }
       );
 
-      // Update option nutrition
       option.nutrition = {
         calories: Math.round(newNutrition.calories),
         protein: Math.round(newNutrition.protein),
@@ -1430,15 +2005,17 @@ const MenuLoad = () => {
         carbs: Math.round(newNutrition.carbs),
       };
 
-      // Recalculate daily totals
       updated.totals = calculateMainTotals(updated);
-
       return updated;
-    });
+    };
+
+    setEditedMenu(prev => updateMenu(prev) || prev);
+    setOriginalMenu(prev => updateMenu(prev) || prev);
   };
 
   async function generateAlternativeMeal(main, alternative) {
-    const response = await fetch('https://dietitian-be.azurewebsites.net/api/generate-alternative-meal', {
+    const response = await fetch('http://127.0.0.1:8000/api/generate-alternative-meal', {
+    // const response = await fetch('https://dietitian-be.azurewebsites.net/api/generate-alternative-meal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2414,14 +2991,20 @@ const MenuLoad = () => {
     try {
       console.log('🔄 Translating menu to:', lang);
       const translated = await translateMenu(originalMenu, lang);
+      const mergedTranslation = {
+        ...originalMenu,
+        ...translated,
+        user_code: originalMenu.user_code,
+        meal_plan_name: originalMenu.meal_plan_name
+      };
       
       // Cache the translation
       setTranslatedMenus(prev => ({
         ...prev,
-        [lang]: translated
+        [lang]: mergedTranslation
       }));
       
-      setEditedMenu(translated);
+      setEditedMenu(mergedTranslation);
       console.log('✅ Translation completed and cached for:', lang);
     } catch (err) {
       console.error('Translation failed:', err);
@@ -2694,9 +3277,9 @@ const MenuLoad = () => {
           </div>
         </div>
 
-        {option.ingredients && option.ingredients.length > 0 && (
-          <div>
-            <h5 className="text-sm font-medium text-gray-700 mb-2">{translations.ingredients || 'Ingredients'}:</h5>
+        <div>
+          <h5 className="text-sm font-medium text-gray-700 mb-2">{translations.ingredients || 'Ingredients'}:</h5>
+          {option.ingredients && option.ingredients.length > 0 ? (
             <ul className="space-y-1">
               {option.ingredients.map((ingredient, idx) => (
                 <li key={idx} className="flex items-start gap-2 text-sm group">
@@ -2709,11 +3292,41 @@ const MenuLoad = () => {
                         mealIndex={option.mealIndex}
                         optionIndex={isAlternative ? 'alternative' : 'main'}
                         ingredientIndex={idx}
+                        alternativeIndex={option.alternativeIndex}
                         translations={translations}
+                        autoFocus={ingredient.item === ''}
                       />
-                      <span className="text-gray-600">
-                        {ingredient.household_measure}
-                      </span>
+                      <div className="flex items-center gap-1">
+                        {ingredient['portionSI(gram)'] && (
+                          <span className="text-gray-600 text-xs">
+                            ({ingredient['portionSI(gram)']}g)
+                          </span>
+                        )}
+                        <EditableHouseholdMeasure
+                          value={ingredient.household_measure}
+                          onChange={handleHouseholdMeasureChange}
+                          mealIndex={option.mealIndex}
+                          optionIndex={isAlternative ? 'alternative' : 'main'}
+                          ingredientIndex={idx}
+                          alternativeIndex={option.alternativeIndex}
+                          translations={translations}
+                        />
+                        <button
+                          onClick={() =>
+                            handleOpenPortionDialog(
+                              ingredient,
+                              option.mealIndex,
+                              isAlternative ? 'alternative' : 'main',
+                              idx,
+                              option.alternativeIndex
+                            )
+                          }
+                          className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-blue-500 hover:text-blue-700 hover:bg-blue-50 p-1 rounded text-xs"
+                          title={translations?.editPortion || 'Edit portion size'}
+                        >
+                          ✏️
+                        </button>
+                      </div>
                       {(ingredient.calories || ingredient.protein || ingredient.fat || ingredient.carbs) && (
                         <>
                           <span className="text-orange-600 font-medium">
@@ -2744,8 +3357,28 @@ const MenuLoad = () => {
                 </li>
               ))}
             </ul>
+          ) : (
+            <div className="text-gray-500 text-sm italic mb-2">
+              {translations.noIngredients || 'No ingredients added yet'}
+            </div>
+          )}
+
+          <div className="flex justify-end mt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleAddIngredient(option.mealIndex, isAlternative ? 'alternative' : 'main', option.alternativeIndex)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md shadow-sm transition-all duration-200 hover:shadow-md ${
+                isAlternative
+                  ? 'bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 hover:from-blue-100 hover:to-blue-200 hover:border-blue-400 text-blue-700 hover:text-blue-800'
+                  : 'bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-300 hover:from-green-100 hover:to-green-200 hover:border-green-400 text-green-700 hover:text-green-800'
+              }`}
+            >
+              <Plus className="w-3 h-3 mr-1.5" />
+              {translations.addIngredient || 'Add Ingredient'}
+            </Button>
           </div>
-        )}
+        </div>
       </div>
     );
   };
@@ -3672,6 +4305,13 @@ const MenuLoad = () => {
             )}
           </div>
         )}
+        <IngredientPortionDialog
+          isOpen={showPortionDialog}
+          ingredient={selectedIngredientForDialog}
+          translations={translations}
+          onClose={handleClosePortionDialog}
+          onConfirm={handleConfirmPortionDialog}
+        />
       </div>
     );
   }

@@ -1,59 +1,61 @@
-import { supabase } from '@/lib/supabase';
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'dietitian-be.azurewebsites.net';
 
 /**
- * Upload a file to Supabase Storage
+ * Upload a file via backend to Google Cloud Storage
  * @param {File} file - The file to upload
  * @param {string} folder - The folder path within the bucket (e.g., 'images', 'videos', 'user_123')
- * @param {string} bucket - The storage bucket name (default: 'chat-attachments')
+ * @param {string} bucket - The storage bucket name (default: 'users-chat-uploads')
+ * @param {Object} extraFields - Additional form fields (e.g., user_code, priority)
  * @returns {Promise<{url: string, path: string, error: null} | {url: null, path: null, error: string}>}
  */
-export async function uploadFile(file, folder = 'chat', bucket = 'chat-attachments') {
+export async function uploadFile(file, folder = 'chat', bucket = 'users-chat-uploads', extraFields = {}) {
   try {
     if (!file || !(file instanceof File)) {
       throw new Error('Invalid file provided');
     }
 
-    // Generate unique filename with timestamp to avoid collisions
-    const timestamp = Date.now();
-    const randomString = Math.random().toString(36).substring(2, 15);
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${timestamp}-${randomString}.${fileExt}`;
-    const filePath = `${folder}/${fileName}`;
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('folder', folder);
+    if (bucket) {
+      formData.append('bucket', bucket);
+    }
+    Object.entries(extraFields || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        formData.append(key, value);
+      }
+    });
 
-    console.log('📤 Uploading file:', {
+    console.log('📤 Uploading file to backend endpoint:', {
       originalName: file.name,
       size: file.size,
       type: file.type,
-      path: filePath
+      folder
     });
 
-    // Upload file to Supabase Storage
-    const { data, error } = await supabase.storage
-      .from(bucket)
-      .upload(filePath, file, {
-        cacheControl: '3600',
-        upsert: false,
-        contentType: file.type
-      });
+    const response = await fetch(`${BACKEND_URL}/api/chat/uploads`, {
+      method: 'POST',
+      body: formData,
+      credentials: 'include'
+    });
 
-    if (error) {
-      console.error('❌ Upload error:', error);
-      throw error;
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      const message = errorBody?.error || 'Failed to upload file';
+      console.error('❌ Upload error:', message, errorBody);
+      throw new Error(message);
     }
 
-    // Get public URL
-    const { data: { publicUrl } } = supabase.storage
-      .from(bucket)
-      .getPublicUrl(filePath);
+    const payload = await response.json();
 
     console.log('✅ File uploaded successfully:', {
-      path: data.path,
-      url: publicUrl
+      path: payload.path,
+      url: payload.url
     });
 
     return {
-      url: publicUrl,
-      path: data.path,
+      url: payload.url,
+      path: payload.path,
       error: null
     };
   } catch (error) {
@@ -67,12 +69,12 @@ export async function uploadFile(file, folder = 'chat', bucket = 'chat-attachmen
 }
 
 /**
- * Delete a file from Supabase Storage
+ * Delete a file from Google Cloud Storage via backend
  * @param {string} filePath - The path of the file to delete
- * @param {string} bucket - The storage bucket name (default: 'chat-attachments')
+ * @param {string} bucket - The storage bucket name (default: 'users-chat-uploads')
  * @returns {Promise<{success: boolean, error: null | string}>}
  */
-export async function deleteFile(filePath, bucket = 'chat-attachments') {
+export async function deleteFile(filePath, bucket = 'users-chat-uploads') {
   try {
     if (!filePath) {
       throw new Error('File path is required');
@@ -80,13 +82,23 @@ export async function deleteFile(filePath, bucket = 'chat-attachments') {
 
     console.log('🗑️ Deleting file:', filePath);
 
-    const { error } = await supabase.storage
-      .from(bucket)
-      .remove([filePath]);
+    const response = await fetch(`${BACKEND_URL}/api/chat/uploads`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        path: filePath,
+        bucket
+      })
+    });
 
-    if (error) {
-      console.error('❌ Delete error:', error);
-      throw error;
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      const message = errorBody?.error || 'Failed to delete file';
+      console.error('❌ Delete error:', message, errorBody);
+      throw new Error(message);
     }
 
     console.log('✅ File deleted successfully');
@@ -105,13 +117,13 @@ export async function deleteFile(filePath, bucket = 'chat-attachments') {
 }
 
 /**
- * Upload multiple files to Supabase Storage
+ * Upload multiple files through the backend endpoint
  * @param {File[]} files - Array of files to upload
  * @param {string} folder - The folder path within the bucket
- * @param {string} bucket - The storage bucket name (default: 'chat-attachments')
+ * @param {string} bucket - The storage bucket name (default: 'users-chat-uploads')
  * @returns {Promise<Array<{url: string, path: string, error: null}>>}
  */
-export async function uploadMultipleFiles(files, folder = 'chat', bucket = 'chat-attachments') {
+export async function uploadMultipleFiles(files, folder = 'chat', bucket = 'users-chat-uploads', extraFields = {}) {
   try {
     if (!Array.isArray(files) || files.length === 0) {
       throw new Error('Invalid files array provided');
@@ -119,7 +131,7 @@ export async function uploadMultipleFiles(files, folder = 'chat', bucket = 'chat
 
     console.log(`📤 Uploading ${files.length} files...`);
 
-    const uploadPromises = files.map(file => uploadFile(file, folder, bucket));
+    const uploadPromises = files.map(file => uploadFile(file, folder, bucket, extraFields));
     const results = await Promise.all(uploadPromises);
 
     const successCount = results.filter(r => r.error === null).length;

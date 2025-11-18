@@ -676,7 +676,12 @@ export default function Chat() {
         if (imageFile instanceof File) {
           try {
             console.log('📤 Uploading file to Supabase Storage...');
-            const uploadResult = await uploadFile(imageFile, `chat/${selectedClient.user_code}`);
+            const uploadResult = await uploadFile(
+              imageFile,
+              'chat',
+              'users-chat-uploads',
+              { user_code: selectedClient.user_code }
+            );
             
             if (uploadResult.error) {
               throw new Error(uploadResult.error);
@@ -856,7 +861,12 @@ export default function Chat() {
       if (imageFile instanceof File) {
         try {
           console.log('📤 Uploading file to Supabase Storage...');
-          const uploadResult = await uploadFile(imageFile, `chat/${selectedClient.user_code}`);
+          const uploadResult = await uploadFile(
+            imageFile,
+            'chat',
+            'users-chat-uploads',
+            { user_code: selectedClient.user_code }
+          );
           
           if (uploadResult.error) {
             throw new Error(uploadResult.error);

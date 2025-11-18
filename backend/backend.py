@@ -47,6 +47,9 @@ from copy import deepcopy
 import re
 
 from supabase import create_client, Client
+from google.cloud import storage
+from google.oauth2 import service_account
+from werkzeug.utils import secure_filename
 
 
 
@@ -104,9 +107,75 @@ supabase_key = (
 
 supabase: Client = create_client(supabase_url, supabase_key)
 
+GCS_BUCKET_NAME = os.getenv("GCS_CHAT_BUCKET", "users-chat-uploads")
+GCS_SERVICE_ACCOUNT_FILE = os.getenv("GCS_SERVICE_ACCOUNT_FILE")
+GCS_SERVICE_ACCOUNT_JSON = os.getenv("GCS_SERVICE_ACCOUNT_JSON")
+_gcs_client = None
+
 
 
 import uuid
+
+
+def _get_gcs_client():
+
+    global _gcs_client
+
+    if _gcs_client:
+
+        return _gcs_client
+
+    credentials = None
+
+    json_env = (GCS_SERVICE_ACCOUNT_JSON or "").strip()
+
+    if json_env:
+
+        try:
+
+            info = json.loads(json_env)
+
+            credentials = service_account.Credentials.from_service_account_info(info)
+
+        except Exception:
+
+            logger.exception("Failed to load GCS credentials from GCS_SERVICE_ACCOUNT_JSON; falling back to file/env")
+
+            credentials = None
+
+    if credentials is None and GCS_SERVICE_ACCOUNT_FILE and os.path.exists(GCS_SERVICE_ACCOUNT_FILE):
+
+        try:
+
+            credentials = service_account.Credentials.from_service_account_file(GCS_SERVICE_ACCOUNT_FILE)
+
+        except Exception:
+
+            logger.exception("Failed to load GCS credentials from file")
+
+            raise
+
+    if credentials is None and os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+
+        _gcs_client = storage.Client()
+
+        return _gcs_client
+
+    if credentials is None:
+
+        raise RuntimeError(
+
+            "Google Cloud Storage credentials are not configured. "
+
+            "Set GCS_SERVICE_ACCOUNT_JSON, GCS_SERVICE_ACCOUNT_FILE, or GOOGLE_APPLICATION_CREDENTIALS."
+
+        )
+
+    project_id = getattr(credentials, "project_id", None)
+
+    _gcs_client = storage.Client(credentials=credentials, project=project_id)
+
+    return _gcs_client
 
 def _parse_iso_datetime(value):
 
@@ -153,6 +222,170 @@ def _require_service_key():
 def _generate_invite_code():
 
     return uuid.uuid4().hex[:10].upper()
+
+
+
+@app.route("/api/chat/uploads", methods=["POST"])
+
+def api_chat_upload_media():
+
+    """
+
+    Accepts multipart/form-data uploads and stores the file in Google Cloud Storage.
+
+    Returns JSON containing the public URL and object path.
+
+    """
+
+    bucket_override = (request.form.get("bucket") or "").strip()
+
+    bucket_name = bucket_override or GCS_BUCKET_NAME
+
+    if not bucket_name:
+
+        return jsonify({"error": "GCS bucket is not configured"}), 500
+
+    if "file" not in request.files:
+
+        return jsonify({"error": "Missing file field"}), 400
+
+    file_obj = request.files["file"]
+
+    if not file_obj or not file_obj.filename:
+
+        return jsonify({"error": "Uploaded file is empty"}), 400
+
+    folder = (request.form.get("folder") or "chat").strip().strip("/")
+
+    user_code = (request.form.get("user_code") or "").strip().strip("/")
+
+    priority = request.form.get("priority")
+
+    try:
+
+        client = _get_gcs_client()
+
+        bucket = client.bucket(bucket_name)
+
+        if not bucket.exists(client=client):
+
+            return jsonify({"error": f"GCS bucket '{bucket_name}' does not exist"}), 400
+
+        safe_name = secure_filename(file_obj.filename) or "upload"
+
+        _, ext = os.path.splitext(safe_name)
+
+        timestamp = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S")
+
+        unique_id = uuid.uuid4().hex
+
+        folder_parts = [part for part in folder.split("/") if part]
+
+        path_parts = ["web"]
+
+        if user_code:
+
+            path_parts.append(user_code)
+
+        elif folder_parts:
+
+            path_parts.extend(folder_parts)
+
+        object_name = "/".join(path_parts + [f"{timestamp}-{unique_id}{ext}"])
+
+        blob = bucket.blob(object_name)
+
+        blob.cache_control = "public, max-age=3600"
+
+        file_obj.stream.seek(0)
+
+        blob.upload_from_file(
+
+            file_obj.stream,
+
+            content_type=file_obj.mimetype or "application/octet-stream",
+
+            rewind=True,
+
+        )
+
+        # Attempt to make the object public for direct access.
+
+        try:
+
+            blob.make_public()
+
+            public_url = blob.public_url
+
+        except Exception:
+
+            logger.warning("Failed to set public ACL for %s; using media link", object_name)
+
+            public_url = blob.media_link or f"https://storage.googleapis.com/{bucket_name}/{object_name}"
+
+        response_payload = {
+
+            "url": public_url,
+
+            "path": object_name,
+
+            "bucket": bucket_name,
+
+            "content_type": file_obj.mimetype or "application/octet-stream",
+
+            "size": getattr(file_obj, "content_length", None),
+
+            "priority": priority,
+
+        }
+
+        return jsonify(response_payload), 201
+
+    except Exception as exc:
+
+        logger.exception("Failed to upload chat media to GCS")
+
+        return jsonify({"error": "Failed to upload file", "details": str(exc)}), 500
+
+
+
+@app.route("/api/chat/uploads", methods=["DELETE"])
+
+def api_chat_delete_media():
+
+    payload = request.get_json(silent=True) or {}
+
+    object_path = (payload.get("path") or "").strip()
+
+    bucket_override = (payload.get("bucket") or "").strip()
+
+    bucket_name = bucket_override or GCS_BUCKET_NAME
+
+    if not bucket_name:
+
+        return jsonify({"error": "GCS bucket is not configured"}), 500
+
+    if not object_path:
+
+        return jsonify({"error": "File path is required"}), 400
+
+    try:
+
+        client = _get_gcs_client()
+
+        bucket = client.bucket(bucket_name)
+
+        blob = bucket.blob(object_path)
+
+        blob.delete()
+
+        return jsonify({"success": True}), 200
+
+    except Exception as exc:
+
+        logger.exception("Failed to delete chat media from GCS")
+
+        return jsonify({"error": "Failed to delete file", "details": str(exc)}), 500
 
 
 
@@ -1868,19 +2101,12 @@ deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "obi2")
 
 
 def require_api_key(f):
-
     @wraps(f)
-
     def decorated_function(*args, **kwargs):
-
         if not os.getenv("AZURE_OPENAI_API_KEY"):
-
             logger.error("API key not configured")
-
             return jsonify({"error": "Service not configured properly"}), 503
-
         return f(*args, **kwargs)
-
     return decorated_function
 
 
@@ -2212,13 +2438,8 @@ Generate meal options that are practical, delicious, and respect all dietary res
 
 
             response = client.chat.completions.create(
-
                 model=deployment,
-
-                messages=[{"role": "system", "content": system_prompt}, user_prompt],
-
-                temperature=0.1
-
+                messages=[{"role": "system", "content": system_prompt}, user_prompt]
             )
 
 
@@ -2810,9 +3031,7 @@ Your previous meal attempt failed validation. Review the failed meal and issues 
 
                 {"role": "user", "content": user_message_content}
 
-            ],
-
-            temperature=0.1
+            ]
 
         )
 
@@ -2865,6 +3084,12 @@ Your previous meal attempt failed validation. Review the failed meal and issues 
             # Automatically calculate and add nutrition totals from ingredients
 
             candidate = _calculate_nutrition_from_ingredients(candidate)
+
+            # Persist the protein source so downstream consumers (UI, alt generators) have it
+            if required_protein_source:
+                candidate["main_protein_source"] = required_protein_source
+            else:
+                candidate.setdefault("main_protein_source", "Unknown")
 
             return candidate
 
@@ -4622,17 +4847,17 @@ OUTPUT SCHEMA (object)
 
 HARD RULES
 
-• **ENGLISH ONLY** for all names/measures/brands.
+ **ENGLISH ONLY** for all names/measures/brands.
 
-• Prioritize whole foods; avoid ultra-processed snacks unless explicitly liked in preferences.
+ Prioritize whole foods; avoid ultra-processed snacks unless explicitly liked in preferences.
 
-• Respect ALL dietary restrictions and allergies.
+ Respect ALL dietary restrictions and allergies.
 
-• If kosher: never mix meat + dairy; avoid pork/shellfish; prefer kosher-suitable brands.
+ If kosher: never mix meat + dairy; avoid pork/shellfish; prefer kosher-suitable brands.
 
-• ≤ 7 ingredients; simple methods (grill, bake, steam, sauté).
+ ≤ 7 ingredients; simple methods (grill, bake, steam, sauté).
 
-• Use realistic regional pack sizes & brands:
+ Use realistic regional pack sizes & brands:
 
   {region_instruction}
 
@@ -4640,35 +4865,35 @@ HARD RULES
 
 MACRO TARGETS
 
-• The sum of all ingredients must match these targets within margin: {macro_targets}.
+The sum of all ingredients must match these targets within margin: {macro_targets}.
 
-• CRITICAL: Cross-check every ingredient's macro values against reliable nutrition databases to ensure accuracy.
+CRITICAL: Cross-check every ingredient's macro values against reliable nutrition databases to ensure accuracy.
 
 
 
 DIFFERENTIATION (from both the given MAIN and CURRENT ALTERNATIVE)
 
-• **Different main protein source** (avoid: {avoid_proteins}).
+ **Different main protein source** (avoid: {avoid_proteins}).
 
-• **Different carb base** and **different cooking method**.
+ **Different carb base** and **different cooking method**.
 
-• **Different flavour profile** (e.g., if Mediterranean, switch to Asian/Mexican/Italian).
+ **Different flavour profile** (e.g., if Mediterranean, switch to Asian/Mexican/Italian).
 
-• Avoid these core ingredients (substring match): {avoid_ingredients}.
+ Avoid these core ingredients (substring match): {avoid_ingredients}.
 
 
 
 VALIDATION
 
-• Return only the JSON object in the schema above.
+ Return only the JSON object in the schema above.
 
-• Do not add keys not listed in the schema.
+ Do not add keys not listed in the schema.
 
-• The validator will sum all ingredient macros and check against targets with appropriate margins.
+ The validator will sum all ingredient macros and check against targets with appropriate margins.
 
-• If you see a previous meal attempt above, analyze what went wrong and fix those specific issues.
+ If you see a previous meal attempt above, analyze what went wrong and fix those specific issues.
 
-• Pay special attention to macro calculations, ingredient accuracy, and dietary restrictions.
+ Pay special attention to macro calculations, ingredient accuracy, and dietary restrictions.
 
 """
 
@@ -4982,9 +5207,7 @@ Return ONLY valid JSON, no markdown fences or explanations."""
 
                     {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)}
 
-                ],
-
-                temperature=0
+                ]
 
             )
 
@@ -5690,9 +5913,7 @@ def generate_alternative_meal_by_id():
 
                 user_prompt
 
-            ],
-
-            temperature=0
+            ]
 
         )
 
@@ -6021,22 +6242,13 @@ Guidelines
             
 
             response = client.chat.completions.create(
-
-    model=deployment,
-
-    messages=[
-
-        {"role": "system", "content": system_prompt},
-
-        {"role": "user", "content": "Summarize the habits and suggest improvements."}
-
-    ],
-
-    temperature=0.6,   # a bit lower for crisper language
-
-    max_tokens=250      # plenty for ~4 sentences
-
-)
+                model=deployment,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "Summarize the habits and suggest improvements."}
+                ],
+                max_tokens=250
+            )
 
 
 
@@ -6454,8 +6666,6 @@ Return ALL meals from the input - do not omit any."""
                     {"role": "user", "content": user_prompt}
 
                 ],
-
-                temperature=0.7,
 
                 max_tokens=800
 
@@ -7576,8 +7786,6 @@ Please provide the most accurate conversion based on nutritional and culinary st
                 {"role": "user", "content": user_prompt}
 
             ],
-
-            temperature=0.1,  # Low temperature for consistent results
 
             max_tokens=200
 
