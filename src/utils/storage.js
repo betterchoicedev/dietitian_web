@@ -1,4 +1,4 @@
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'dietitian-be.azurewebsites.net';
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net/';
 
 /**
  * Upload a file via backend to Google Cloud Storage
