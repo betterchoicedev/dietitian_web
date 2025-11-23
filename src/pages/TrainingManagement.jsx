@@ -149,6 +149,8 @@ const TrainingManagement = () => {
   
   // Plan Builder State
   const [isPlanBuilderOpen, setIsPlanBuilderOpen] = useState(false);
+  const [isEditingPlan, setIsEditingPlan] = useState(false);
+  const [editingPlanId, setEditingPlanId] = useState(null);
   const [builderWeeks, setBuilderWeeks] = useState([]);
   const [currentWeek, setCurrentWeek] = useState(0);
   const [currentDay, setCurrentDay] = useState(0);
@@ -173,6 +175,12 @@ const TrainingManagement = () => {
     tags: [],
     notes: ''
   });
+  
+  // Track last edited field for translation
+  const lastEditedTemplateNameField = useRef(null);
+  const lastEditedTemplateDescField = useRef(null);
+  const lastEditedExerciseNameField = useRef(null);
+  const lastEditedExerciseDescField = useRef(null);
   
   // Exercise Management State
   const [isAddExerciseDialogOpen, setIsAddExerciseDialogOpen] = useState(false);
@@ -604,32 +612,49 @@ const TrainingManagement = () => {
     if (isHeb) {
       // Hebrew input - only update Hebrew field
       setTemplateFormData(prev => ({ ...prev, template_name_he: value }));
+      lastEditedTemplateNameField.current = 'he';
     } else {
       // English input - only update English field
       setTemplateFormData(prev => ({ ...prev, template_name: value }));
+      lastEditedTemplateNameField.current = 'en';
     }
   };
   
   // Handle template name blur (translate when user leaves the field)
   const handleTemplateNameBlur = async () => {
-    const value = language === 'he' ? templateFormData.template_name_he : templateFormData.template_name;
-    if (!value || value.trim() === '') return;
+    const lastEdited = lastEditedTemplateNameField.current;
+    if (!lastEdited) return;
     
-    const isHeb = isHebrew(value);
+    const currentEn = templateFormData.template_name;
+    const currentHe = templateFormData.template_name_he;
     
-    try {
-      if (isHeb) {
-        // Hebrew input, always translate to English
-        const translated = await translateText(value, 'en');
-        setTemplateFormData(prev => ({ ...prev, template_name: translated }));
-      } else {
-        // English input, always translate to Hebrew
-        const translated = await translateText(value, 'he');
-        setTemplateFormData(prev => ({ ...prev, template_name_he: translated }));
-      }
-    } catch (err) {
-      console.error('Translation error:', err);
+    let valueToTranslate = null;
+    let targetLang = null;
+    let targetField = null;
+    
+    if (lastEdited === 'en' && currentEn && !isHebrew(currentEn)) {
+      // English was edited, translate to Hebrew
+      valueToTranslate = currentEn;
+      targetLang = 'he';
+      targetField = 'template_name_he';
+    } else if (lastEdited === 'he' && currentHe && isHebrew(currentHe)) {
+      // Hebrew was edited, translate to English
+      valueToTranslate = currentHe;
+      targetLang = 'en';
+      targetField = 'template_name';
     }
+    
+    if (valueToTranslate && targetLang && targetField) {
+      try {
+        const translated = await translateText(valueToTranslate, targetLang);
+        setTemplateFormData(prev => ({ ...prev, [targetField]: translated }));
+      } catch (err) {
+        console.error('Translation error:', err);
+      }
+    }
+    
+    // Reset tracking
+    lastEditedTemplateNameField.current = null;
   };
   
   // Handle template description change (no translation on every keystroke)
@@ -639,32 +664,49 @@ const TrainingManagement = () => {
     if (isHeb) {
       // Hebrew input - only update Hebrew field
       setTemplateFormData(prev => ({ ...prev, description_he: value }));
+      lastEditedTemplateDescField.current = 'he';
     } else {
       // English input - only update English field
       setTemplateFormData(prev => ({ ...prev, description: value }));
+      lastEditedTemplateDescField.current = 'en';
     }
   };
   
   // Handle template description blur (translate when user leaves the field)
   const handleTemplateDescriptionBlur = async () => {
-    const value = language === 'he' ? templateFormData.description_he : templateFormData.description;
-    if (!value || value.trim() === '') return;
+    const lastEdited = lastEditedTemplateDescField.current;
+    if (!lastEdited) return;
     
-    const isHeb = isHebrew(value);
+    const currentEn = templateFormData.description;
+    const currentHe = templateFormData.description_he;
     
-    try {
-      if (isHeb) {
-        // Hebrew input, always translate to English
-        const translated = await translateText(value, 'en');
-        setTemplateFormData(prev => ({ ...prev, description: translated }));
-      } else {
-        // English input, always translate to Hebrew
-        const translated = await translateText(value, 'he');
-        setTemplateFormData(prev => ({ ...prev, description_he: translated }));
-      }
-    } catch (err) {
-      console.error('Translation error:', err);
+    let valueToTranslate = null;
+    let targetLang = null;
+    let targetField = null;
+    
+    if (lastEdited === 'en' && currentEn && !isHebrew(currentEn)) {
+      // English was edited, translate to Hebrew
+      valueToTranslate = currentEn;
+      targetLang = 'he';
+      targetField = 'description_he';
+    } else if (lastEdited === 'he' && currentHe && isHebrew(currentHe)) {
+      // Hebrew was edited, translate to English
+      valueToTranslate = currentHe;
+      targetLang = 'en';
+      targetField = 'description';
     }
+    
+    if (valueToTranslate && targetLang && targetField) {
+      try {
+        const translated = await translateText(valueToTranslate, targetLang);
+        setTemplateFormData(prev => ({ ...prev, [targetField]: translated }));
+      } catch (err) {
+        console.error('Translation error:', err);
+      }
+    }
+    
+    // Reset tracking
+    lastEditedTemplateDescField.current = null;
   };
   
   // ============ EXERCISE MANAGEMENT FUNCTIONS ============
@@ -675,29 +717,48 @@ const TrainingManagement = () => {
     
     if (isHeb) {
       setExerciseFormData(prev => ({ ...prev, exercise_name_he: value }));
+      lastEditedExerciseNameField.current = 'he';
     } else {
       setExerciseFormData(prev => ({ ...prev, exercise_name: value }));
+      lastEditedExerciseNameField.current = 'en';
     }
   };
   
   // Handle exercise name blur (translate)
   const handleExerciseNameBlur = async () => {
-    const value = language === 'he' ? exerciseFormData.exercise_name_he : exerciseFormData.exercise_name;
-    if (!value || value.trim() === '') return;
+    const lastEdited = lastEditedExerciseNameField.current;
+    if (!lastEdited) return;
     
-    const isHeb = isHebrew(value);
+    const currentEn = exerciseFormData.exercise_name;
+    const currentHe = exerciseFormData.exercise_name_he;
     
-    try {
-      if (isHeb) {
-        const translated = await translateText(value, 'en');
-        setExerciseFormData(prev => ({ ...prev, exercise_name: translated }));
-      } else {
-        const translated = await translateText(value, 'he');
-        setExerciseFormData(prev => ({ ...prev, exercise_name_he: translated }));
-      }
-    } catch (err) {
-      console.error('Translation error:', err);
+    let valueToTranslate = null;
+    let targetLang = null;
+    let targetField = null;
+    
+    if (lastEdited === 'en' && currentEn && !isHebrew(currentEn)) {
+      // English was edited, translate to Hebrew
+      valueToTranslate = currentEn;
+      targetLang = 'he';
+      targetField = 'exercise_name_he';
+    } else if (lastEdited === 'he' && currentHe && isHebrew(currentHe)) {
+      // Hebrew was edited, translate to English
+      valueToTranslate = currentHe;
+      targetLang = 'en';
+      targetField = 'exercise_name';
     }
+    
+    if (valueToTranslate && targetLang && targetField) {
+      try {
+        const translated = await translateText(valueToTranslate, targetLang);
+        setExerciseFormData(prev => ({ ...prev, [targetField]: translated }));
+      } catch (err) {
+        console.error('Translation error:', err);
+      }
+    }
+    
+    // Reset tracking
+    lastEditedExerciseNameField.current = null;
   };
   
   // Handle exercise description change
@@ -706,29 +767,48 @@ const TrainingManagement = () => {
     
     if (isHeb) {
       setExerciseFormData(prev => ({ ...prev, description_he: value }));
+      lastEditedExerciseDescField.current = 'he';
     } else {
       setExerciseFormData(prev => ({ ...prev, description: value }));
+      lastEditedExerciseDescField.current = 'en';
     }
   };
   
   // Handle exercise description blur (translate)
   const handleExerciseDescriptionBlur = async () => {
-    const value = language === 'he' ? exerciseFormData.description_he : exerciseFormData.description;
-    if (!value || value.trim() === '') return;
+    const lastEdited = lastEditedExerciseDescField.current;
+    if (!lastEdited) return;
     
-    const isHeb = isHebrew(value);
+    const currentEn = exerciseFormData.description;
+    const currentHe = exerciseFormData.description_he;
     
-    try {
-      if (isHeb) {
-        const translated = await translateText(value, 'en');
-        setExerciseFormData(prev => ({ ...prev, description: translated }));
-      } else {
-        const translated = await translateText(value, 'he');
-        setExerciseFormData(prev => ({ ...prev, description_he: translated }));
-      }
-    } catch (err) {
-      console.error('Translation error:', err);
+    let valueToTranslate = null;
+    let targetLang = null;
+    let targetField = null;
+    
+    if (lastEdited === 'en' && currentEn && !isHebrew(currentEn)) {
+      // English was edited, translate to Hebrew
+      valueToTranslate = currentEn;
+      targetLang = 'he';
+      targetField = 'description_he';
+    } else if (lastEdited === 'he' && currentHe && isHebrew(currentHe)) {
+      // Hebrew was edited, translate to English
+      valueToTranslate = currentHe;
+      targetLang = 'en';
+      targetField = 'description';
     }
+    
+    if (valueToTranslate && targetLang && targetField) {
+      try {
+        const translated = await translateText(valueToTranslate, targetLang);
+        setExerciseFormData(prev => ({ ...prev, [targetField]: translated }));
+      } catch (err) {
+        console.error('Translation error:', err);
+      }
+    }
+    
+    // Reset tracking
+    lastEditedExerciseDescField.current = null;
   };
   
   // Save new exercise
@@ -902,14 +982,49 @@ const TrainingManagement = () => {
   // ============ END TEMPLATE FUNCTIONS ============
 
   // Open plan builder
-  const openPlanBuilder = (useTemplate = null) => {
-    // Check if we already have weeks loaded from template selection
-    if (builderWeeks.length > 0) {
-      // Already have template structure loaded, just open the builder
-      console.log('✅ Opening builder with existing template structure');
+  const openPlanBuilder = (useTemplate = null, planToEdit = null) => {
+    if (planToEdit) {
+      // Editing mode - load existing plan
+      setIsEditingPlan(true);
+      setEditingPlanId(planToEdit.id);
+      
+      // Load plan data into form
+      setPlanFormData({
+        user_code: planToEdit.user_code,
+        plan_name: planToEdit.plan_name || '',
+        description: planToEdit.description || '',
+        goal: planToEdit.goal || 'strength_training',
+        difficulty_level: planToEdit.difficulty_level || 'beginner',
+        duration_weeks: planToEdit.duration_weeks || 4,
+        weekly_frequency: planToEdit.weekly_frequency || 3,
+        status: planToEdit.status || 'active',
+        plan_structure: planToEdit.plan_structure || {},
+        notes: planToEdit.notes || '',
+        active_from: planToEdit.active_from ? planToEdit.active_from.split('T')[0] : new Date().toISOString().split('T')[0],
+        active_until: planToEdit.active_until ? planToEdit.active_until.split('T')[0] : ''
+      });
+      
+      // Load plan structure
+      const planWeeks = planToEdit.plan_structure?.weeks || [];
+      if (planWeeks.length > 0) {
+        setBuilderWeeks(JSON.parse(JSON.stringify(planWeeks)));
+        isLoadingTemplate.current = true; // Prevent auto-adjust on load
+      } else {
+        initializePlanBuilder();
+      }
     } else {
-      // No template loaded, initialize empty structure
-      initializePlanBuilder();
+      // Creating new plan
+      setIsEditingPlan(false);
+      setEditingPlanId(null);
+      
+      // Check if we already have weeks loaded from template selection
+      if (builderWeeks.length > 0) {
+        // Already have template structure loaded, just open the builder
+        console.log('✅ Opening builder with existing template structure');
+      } else {
+        // No template loaded, initialize empty structure
+        initializePlanBuilder();
+      }
     }
     
     setIsCreatePlanDialogOpen(false);
@@ -937,12 +1052,22 @@ const TrainingManagement = () => {
         user_id: client?.id || null
       };
 
-      const newPlan = await entities.TrainingPlans.create(planData);
+      if (isEditingPlan && editingPlanId) {
+        // Update existing plan
+        const updatedPlan = await entities.TrainingPlans.update(editingPlanId, planData);
+        setTrainingPlans(trainingPlans.map(p => p.id === editingPlanId ? updatedPlan : p));
+        setSuccess(translations.planUpdated || 'Training plan updated successfully!');
+      } else {
+        // Create new plan
+        const newPlan = await entities.TrainingPlans.create(planData);
+        setTrainingPlans([newPlan, ...trainingPlans]);
+        setSuccess(translations.success || 'Training plan created successfully!');
+      }
       
-      setTrainingPlans([newPlan, ...trainingPlans]);
-      setSuccess(translations.success || 'Training plan created successfully!');
       setIsPlanBuilderOpen(false);
       setBuilderWeeks([]);
+      setIsEditingPlan(false);
+      setEditingPlanId(null);
       
       // Reset form
       setPlanFormData({
@@ -962,8 +1087,8 @@ const TrainingManagement = () => {
 
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
-      console.error('Error creating training plan:', err);
-      setError(err.message || 'Failed to create training plan');
+      console.error('Error saving training plan:', err);
+      setError(err.message || 'Failed to save training plan');
     } finally {
       setLoading(false);
     }
@@ -1439,6 +1564,14 @@ const TrainingManagement = () => {
                               title={translations.viewTrainingPlan}
                             >
                               <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openPlanBuilder(null, plan)}
+                              title={translations.editTrainingPlan || 'Edit Plan'}
+                            >
+                              <Edit className="h-4 w-4" />
                             </Button>
                             {plan.status === 'active' ? (
                               <Button
@@ -1931,7 +2064,7 @@ const TrainingManagement = () => {
           <DialogHeader className="p-6 pb-4 border-b">
             <DialogTitle className="text-2xl flex items-center gap-2">
               <Layers className="h-6 w-6 text-blue-600" />
-              {translations.trainingPlanBuilder || 'Training Plan Builder'}: {planFormData.plan_name}
+              {isEditingPlan ? (translations.editTrainingPlan || 'Edit Training Plan') : (translations.trainingPlanBuilder || 'Training Plan Builder')}: {planFormData.plan_name}
             </DialogTitle>
             <DialogDescription>
               {getClientName(planFormData.user_code)} • {planFormData.duration_weeks} {language === 'he' ? 'שבועות' : 'weeks'} • {planFormData.weekly_frequency}x {language === 'he' ? 'בשבוע' : 'per week'}
@@ -2277,7 +2410,7 @@ const TrainingManagement = () => {
                     disabled={loading || builderWeeks.every(w => w.days.every(d => d.exercises.length === 0))}
                     className="bg-green-600 hover:bg-green-700"
                   >
-                    {loading ? translations.saving : translations.savePlan}
+                    {loading ? translations.saving : (isEditingPlan ? (translations.updatePlan || 'Update Plan') : translations.savePlan)}
                   </Button>
                 </div>
               </div>
