@@ -193,3 +193,18 @@
   - Validate that template selection dialogs show both languages
   - Update export/PDF flows to include Hebrew content
 
+### 17. Fix Translation of Exercise Descriptions When Building and Editing Exercises
+- **Files**: `src/pages/TrainingManagement.jsx`, `src/contexts/LanguageContext.jsx`
+- **Issue**: Exercise descriptions are not properly translated when building/creating or editing exercises in the training management system
+- **Status**: Pending
+- **Added**: 2025-11-10
+- **Implementation**:
+  - Investigate exercise description translation logic in TrainingManagement.jsx
+  - Add Hebrew translations for exercise description fields in LanguageContext.jsx
+  - Ensure exercise descriptions display in the correct language based on user preference
+  - Update exercise creation/editing forms to support bilingual descriptions
+  - Fix translation when editing existing exercises in training management
+  - Test exercise description translation in both English and Hebrew for both create and edit flows
+  - Ensure RTL support for Hebrew exercise descriptions
+  - Verify translations work in exercise library and training plan views
+

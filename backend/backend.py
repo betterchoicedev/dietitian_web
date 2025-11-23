@@ -117,6 +117,8 @@ _gcs_client = None
 
 import uuid
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 
 def _get_gcs_client():
 
@@ -2083,7 +2085,7 @@ def load_user_preferences(user_code=None):
 
 
 
-# Azure OpenAI config
+# Azure OpenAI config (Main AI for meal generation)
 
 client = AzureOpenAI(
 
@@ -2098,6 +2100,186 @@ client = AzureOpenAI(
 
 
 deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "obi2")
+
+# Anthropic Claude config (Correction AI for nutrition validation)
+from anthropic import AnthropicFoundry
+
+anthropic_endpoint = os.getenv("ANTHROPIC_ENDPOINT")
+anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+anthropic_deployment = os.getenv("ANTHROPIC_DEPLOYMENT", "claude-haiku-4-5")
+anthropic_version = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
+
+logger.info(f"🔍 Anthropic config check: endpoint={anthropic_endpoint}, deployment={anthropic_deployment}, key={'SET' if anthropic_api_key else 'NOT SET'}")
+
+if anthropic_endpoint and anthropic_api_key:
+    # Anthropic is configured for correction
+    anthropic_client = AnthropicFoundry(
+        api_key=anthropic_api_key,
+        base_url=anthropic_endpoint
+    )
+    logger.info(f"✅ Using Anthropic Claude ({anthropic_deployment}) for nutrition correction")
+else:
+    anthropic_client = None
+    logger.info("⚠️ Anthropic credentials not set, correction will be skipped")
+
+
+
+# Nutrition Correction Prompt (Simplified to avoid content policy issues)
+
+NUTRITION_CORRECTION_PROMPT = """
+You are a Nutrition-Correction AI. Your mission is to check and fix meal data so it is realistic, accurate, and aligned with the stated macro targets.
+
+────────────────────────────────────────────────────────
+INPUT
+{
+  "meal":   { /* ingredient list */ },
+  "targets":{ "calories": X, "protein": Y, "fat": Z, "carbs": W }
+}
+────────────────────────────────────────────────────────
+
+1. **VALIDATE NUTRITION VALUES**
+   * Use authoritative sources (USDA, CIQUAL, etc.).
+   * Correct clearly wrong values (e.g., “avocado 60 g protein”).
+   * Nutrients must scale with portion size.
+   * If brand is unknown, assume generic averages.
+
+2. **FIX PORTION SIZES & HOUSEHOLD MEASURES**
+   * `portionSI` (grams) must match `household_measure`.
+   * Adjust both if they conflict, using standard measures (e.g., 1 Tbsp oil ≈ 14–15 g).
+
+3. **HIT THE TARGET TOTALS**
+   * Adjust quantities so meal totals are within ±3 % of each target.
+   * If needed, scale ingredients proportionally.
+   * Keep item names unless a minor change is required for realism (e.g., “fried” → “cooked”).
+
+4. **MAINTAIN JSON STRUCTURE**
+   * Preserve field names, order, and nesting.
+   * Do **not** add comments, explanations, or extra fields.
+
+5. **SAFETY & REALISM RULES**
+   * Zero macros only when realistic.
+   * Bounds by weight: Protein ≤ 40 %, Fat ≤ 100 %, Carbs ≤ 100 %.
+   * Calories must obey: kcal ≈ P×4 + C×4 + F×9 (±5 %).
+   * No food should exceed known biological limits (e.g., no veggie ≥ chicken in protein).
+
+6. **INGREDIENT & BRAND LIMITS**
+   * **Max 7 ingredients**—merge or drop the smallest if over.
+   * Replace placeholder brands (“Generic”, "", etc.) with real ones (e.g., Tnuva, Osem).
+   * For fresh produce, use brand “Fresh” or a local-market equivalent.
+
+────────────────────────────────────────────────────────
+OUTPUT
+Return **ONLY** the corrected JSON for `"meal"`—no markdown, no comments, no extra text.
+
+"""
+
+
+
+def _correct_meal_nutrition(meal_data: dict, macro_targets: dict, max_attempts: int = 1):
+    """
+    Use Anthropic Claude to fix unrealistic nutrition values and ensure meal matches macro targets.
+    Returns (corrected_meal_data, success_flag) tuple.
+    """
+    # Skip if Anthropic is not configured
+    if not anthropic_client:
+        logger.info("ℹ️ Anthropic not configured, skipping correction")
+        return (meal_data, False)
+    
+    try:
+        # Prepare the payload (remove any calculated totals from meal_data to avoid confusion)
+        clean_meal_data = {k: v for k, v in meal_data.items() if k != "totals"}
+        
+        payload = {
+            "meal": clean_meal_data,
+            "targets": macro_targets
+        }
+        
+        logger.info(f"📊 Current meal totals: {meal_data.get('totals', 'not calculated')}")
+        logger.info(f"🎯 Target macros: {macro_targets}")
+        
+        for attempt in range(1, max_attempts + 1):
+            try:
+                logger.info(f"🔧 Correcting nutrition values with Claude (attempt {attempt}/{max_attempts})...")
+                logger.info(f"🔧 Sending to Claude - Meal: {meal_data.get('meal_title', 'N/A')}, Targets: {macro_targets}")
+                
+                # Build the full content to send
+                full_content = f"{NUTRITION_CORRECTION_PROMPT}\n\nInput:\n{json.dumps(payload, ensure_ascii=False)}"
+                
+                # Call Anthropic Claude
+                message = anthropic_client.messages.create(
+                    model=anthropic_deployment,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": full_content
+                        }
+                    ],
+                    max_tokens=2048,
+                    temperature=0.3
+                )
+                
+                # Extract text from response
+                raw_text = ""
+                for content_block in message.content:
+                    if hasattr(content_block, 'text'):
+                        raw_text += content_block.text
+                
+                logger.info(f"🔍 Claude raw response: {raw_text[:8000]}...")  # Log first 500 chars
+                
+                if not raw_text:
+                    logger.warning(f"❌ Empty response from Claude (attempt {attempt})")
+                    if attempt < max_attempts:
+                        continue
+                    logger.info(f"ℹ️ Correction failed, using original meal from first AI")
+                    return (meal_data, False)
+                
+                # Strip markdown fences and parse JSON
+                raw = _strip_markdown_fences(raw_text)
+                logger.info(f"🔍 After stripping markdown: {raw[:8000]}...")
+                
+                try:
+                    corrected_meal = json.loads(raw)
+                except Exception as e:
+                    logger.warning(f"❌ JSON parse error in correction (attempt {attempt}): {e}")
+                    if attempt < max_attempts:
+                        continue
+                    logger.info(f"ℹ️ Correction failed, using original meal from first AI")
+                    return (meal_data, False)
+                
+                # Check if response has "meal" wrapper (Claude sometimes adds this)
+                if isinstance(corrected_meal, dict) and "meal" in corrected_meal and "ingredients" not in corrected_meal:
+                    logger.info("🔧 Unwrapping 'meal' object from Claude response")
+                    corrected_meal = corrected_meal["meal"]
+                
+                # Validate the corrected meal has required fields
+                if not isinstance(corrected_meal, dict) or "ingredients" not in corrected_meal:
+                    logger.warning(f"❌ Invalid corrected meal structure (attempt {attempt})")
+                    logger.warning(f"Keys found: {corrected_meal.keys() if isinstance(corrected_meal, dict) else 'not a dict'}")
+                    if attempt < max_attempts:
+                        continue
+                    logger.info(f"ℹ️ Correction failed, using original meal from first AI")
+                    return (meal_data, False)
+                
+                logger.info(f"✅ Nutrition correction with Claude successful!")
+                return (corrected_meal, True)
+                
+            except Exception as e:
+                logger.error(f"❌ Exception during Claude correction (attempt {attempt}): {e}")
+                if attempt < max_attempts:
+                    continue
+                # If all attempts fail, return original meal as fallback
+                logger.info(f"ℹ️ Correction failed, using original meal from first AI")
+                return (meal_data, False)
+        
+        # If all attempts fail, return original meal as fallback
+        logger.info(f"ℹ️ Correction failed, using original meal from first AI")
+        return (meal_data, False)
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to correct meal nutrition with Claude: {e}")
+        # Return original meal as fallback
+        logger.info(f"ℹ️ Correction failed, using original meal from first AI")
+        return (meal_data, False)
 
 
 
@@ -2687,9 +2869,15 @@ HARD RULES
 
 • **ENGLISH ONLY** for all names/measures/brands (keep meal_name as given).
 
-• Prioritize whole foods; avoid ultra-processed snacks unless explicitly liked in preferences.
+• **HEALTHY FOOD PRIORITY**: You are a HEALTHY dietitian - prioritize whole, nutritious foods.
+
+• **NEVER USE** these unhealthy items: margarine, processed cheese spreads, artificial sweeteners, ultra-processed snacks.
+
+• **ALWAYS PREFER** healthy alternatives: butter or olive oil (not margarine), real cheese (not processed), whole grains, fresh produce, natural yogurt.
 
 • If snacks are requested, prefer fruit, veg, nuts, yogurt, cottage cheese, hummus, whole-grain crackers.
+
+• Only include unhealthy processed items if client explicitly requests them in preferences.
 
 • **CRITICAL: STRICTLY AVOID ALL FOODS IN ALLERGIES LIST** - This is life-threatening: {allergies_list}
 
@@ -2764,6 +2952,14 @@ def _strip_markdown_fences(s: str) -> str:
     if s.startswith("```"):
 
         s = s.split("```", 1)[-1]
+        
+        # Remove language tag (e.g., "json", "python") if present on first line
+        first_newline = s.find('\n')
+        if first_newline > 0 and first_newline < 20:  # Language tag is usually short
+            first_line = s[:first_newline].strip()
+            # Check if first line is just a language identifier (no special chars)
+            if first_line and first_line.isalpha():
+                s = s[first_newline+1:]
 
         if "```" in s:
 
@@ -2882,6 +3078,75 @@ def _build_option_with_retries(
     max_attempts: int = 6
 
 ):
+    """
+    Build a meal option using DSPy pipeline (multi-stage with specialized predictors).
+    Falls back to legacy prompt-based approach if DSPy is unavailable.
+    """
+    
+    # Try DSPy approach first
+    USE_DSPY = os.getenv("USE_DSPY", "true").lower() == "true"
+    
+    if USE_DSPY:
+        try:
+            from meal_builder_dspy import build_meal_with_dspy
+            
+            logger.info(f"🚀 Using DSPy pipeline for {option_type} '{meal_name}'")
+            
+            # Prepare preferences with avoid lists
+            enhanced_prefs = dict(preferences)
+            enhanced_prefs["avoid_proteins"] = avoid_proteins or []
+            enhanced_prefs["avoid_ingredients"] = avoid_ingredients or []
+            
+            # Call DSPy pipeline
+            result = build_meal_with_dspy(
+                meal_type=meal_name,
+                macro_targets=macro_targets,
+                required_protein_source=required_protein_source,
+                preferences=enhanced_prefs,
+                max_retries=max_attempts,
+                option_type=option_type
+            )
+            
+            if result:
+                # Validate the DSPy result
+                tpl_key = "main" if option_type.upper() == "MAIN" else "alternative"
+                wrapped_template = [{tpl_key: macro_targets}]
+                wrapped_menu = [{tpl_key: result}]
+                
+                val_res = app.test_client().post(
+                    "/api/validate-menu",
+                    json={"template": wrapped_template, "menu": wrapped_menu, "user_code": user_code}
+                )
+                val = val_res.get_json() or {}
+                
+                if val.get("is_valid"):
+                    logger.info(f"✅ DSPy result passed validation for '{meal_name}'")
+                    
+                    # Add nutrition totals and protein source
+                    result = _calculate_nutrition_from_ingredients(result)
+                    if required_protein_source:
+                        result["main_protein_source"] = required_protein_source
+                    else:
+                        result.setdefault("main_protein_source", "Unknown")
+                    
+                    return result
+                else:
+                    issues = val.get("issues", [])
+                    failed_meal = val.get("meal_data", {})
+                    logger.warning(f"⚠️ DSPy result failed validation for '{meal_name}', falling back to legacy approach")
+                    logger.warning(f"   Validation issues: {issues}")
+                    if failed_meal:
+                        logger.warning(f"   Failed meal data: {json.dumps(failed_meal, ensure_ascii=False, indent=2)[:500]}...")
+            else:
+                logger.warning(f"⚠️ DSPy pipeline returned None, falling back to legacy approach")
+        
+        except ImportError as e:
+            logger.warning(f"⚠️ DSPy not available ({e}), falling back to legacy approach")
+        except Exception as e:
+            logger.error(f"❌ DSPy pipeline error: {e}, falling back to legacy approach")
+    
+    # Legacy prompt-based approach (fallback)
+    logger.info(f"🔄 Using legacy prompt-based approach for {option_type} '{meal_name}'")
 
     avoid_proteins = avoid_proteins or []
 
@@ -3022,19 +3287,56 @@ Your previous meal attempt failed validation. Review the failed meal and issues 
         else:
             user_message_content = user_payload  # Already a formatted string
 
-        response = client.chat.completions.create(
-
-            model=deployment,
-
-            messages=[
-
-                {"role": "system", "content": prompt},
-
-                {"role": "user", "content": user_message_content}
-
-            ]
-
-        )
+        # Use OBI2 for first attempt, Claude for validation corrections
+        if i == 0:
+            # First attempt: Use OBI2 (Azure OpenAI)
+            response = client.chat.completions.create(
+                model=deployment,
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": user_message_content}
+                ]
+            )
+        else:
+            # Retry attempts: Use Claude for validation corrections
+            if not anthropic_client:
+                logger.warning("⚠️ Anthropic not configured, falling back to OBI2 for corrections")
+                response = client.chat.completions.create(
+                    model=deployment,
+                    messages=[
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": user_message_content}
+                    ]
+                )
+            else:
+                logger.info(f"🔧 Using Claude for validation correction (attempt {i+1})")
+                # Combine prompt and user message for Claude
+                full_content = f"{prompt}\n\n{user_message_content}"
+                
+                message = anthropic_client.messages.create(
+                    model=anthropic_deployment,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": full_content
+                        }
+                    ],
+                    max_tokens=2048,
+                    temperature=0.3
+                )
+                
+                # Extract text from Claude response
+                raw_text = ""
+                for content_block in message.content:
+                    if hasattr(content_block, 'text'):
+                        raw_text += content_block.text
+                
+                # Create a mock response object to maintain compatibility with existing code
+                class MockResponse:
+                    def __init__(self, content):
+                        self.choices = [type('obj', (object,), {'message': type('obj', (object,), {'content': content})()})]
+                
+                response = MockResponse(raw_text)
 
         raw = _strip_markdown_fences(response.choices[0].message.content)
 
@@ -3053,6 +3355,13 @@ Your previous meal attempt failed validation. Review the failed meal and issues 
             previous_issues.append(error_msg)
 
             continue
+
+        # Apply nutrition correction IMMEDIATELY after generation, BEFORE validation
+        candidate, correction_success = _correct_meal_nutrition(candidate, macro_targets)
+        
+        if correction_success:
+            logger.info(f"✅ Nutrition values corrected by correction AI")
+        # If correction failed or was skipped, candidate already contains original meal
 
 
 
@@ -3131,6 +3440,76 @@ Your previous meal attempt failed validation. Review the failed meal and issues 
     return None
 
 
+
+def _build_single_meal_option(
+    template_meal: dict,
+    option_type: str,
+    preferences: dict,
+    user_code: str,
+    region_instruction: str,
+    avoid_proteins=None,
+    avoid_ingredients=None
+):
+    """
+    Build a single meal option (MAIN or ALTERNATIVE) and return the result.
+    Returns (meal_name, option_type, result) tuple.
+    """
+    meal_name = template_meal.get("meal")
+    
+    try:
+        if option_type == "MAIN":
+            macros = template_meal.get("main", {})
+        else:
+            macros = template_meal.get("alternative", {})
+        
+        required_protein = macros.get("main_protein_source")
+        
+        # Extract macro targets from template
+        calories = macros.get("calories")
+        protein = macros.get("protein")
+        fat = macros.get("fat")
+        
+        # Calculate carbs if not provided
+        carbs = macros.get("carbs")
+        if carbs is None and calories is not None and protein is not None and fat is not None:
+            carbs = (calories - (protein * 4) - (fat * 9)) / 4
+            carbs = round(carbs)
+        
+        targets = {
+            "calories": calories,
+            "protein": protein,
+            "fat": fat,
+            "carbs": carbs,
+        }
+        
+        # Validate targets
+        if any(v is None for k, v in targets.items()):
+            logger.error(f"❌ Template missing macro targets for {option_type} '{meal_name}'")
+            return (meal_name, option_type, None, f"Missing macro targets: {targets}")
+        
+        # Build the option (without correction, that happens inside _build_option_with_retries now)
+        result = _build_option_with_retries(
+            option_type=option_type,
+            meal_name=meal_name,
+            macro_targets=targets,
+            required_protein_source=required_protein,
+            preferences=preferences,
+            user_code=user_code,
+            region_instruction=region_instruction,
+            avoid_proteins=avoid_proteins,
+            avoid_ingredients=avoid_ingredients
+        )
+        
+        if result:
+            logger.info(f"✅ Successfully built {option_type} for '{meal_name}'")
+            return (meal_name, option_type, result, None)
+        else:
+            logger.error(f"❌ Failed to build {option_type} for '{meal_name}'")
+            return (meal_name, option_type, None, f"Failed to build {option_type}")
+            
+    except Exception as e:
+        logger.error(f"❌ Exception building {option_type} for '{meal_name}': {e}")
+        return (meal_name, option_type, None, str(e))
 
 
 
@@ -3262,216 +3641,80 @@ def api_build_menu():
 
 
 
-            logger.info("🔹 Building menu meal by meal, option by option...")
+            logger.info("🔹 Building menu in PARALLEL - ALL meal options at once...")
 
+            # Build ALL meal options (MAIN + ALTERNATIVE for each meal) in parallel
+            # If we have 5 meals, we run 10 threads simultaneously (5 MAIN + 5 ALT)
+            total_options = len(template) * 2  # MAIN + ALTERNATIVE for each meal
+            logger.info(f"🚀 Building {total_options} meal options in parallel ({len(template)} meals × 2 options)...")
+
+            # Submit all tasks at once
+            all_results = {}
+            with ThreadPoolExecutor(max_workers=total_options) as executor:
+                all_futures = {}
+
+                # Submit all MAIN and ALTERNATIVE tasks simultaneously
+                for template_meal in template:
+                    meal_name = template_meal.get("meal")
+                    
+                    # Submit MAIN task
+                    main_future = executor.submit(
+                        _build_single_meal_option,
+                        template_meal,
+                        "MAIN",
+                        preferences,
+                        user_code,
+                        region_instruction
+                    )
+                    all_futures[main_future] = (meal_name, "MAIN")
+                    
+                    # Submit ALTERNATIVE task (running in parallel with MAIN)
+                    # Note: Since they run in parallel, ALTERNATIVE won't have MAIN's ingredients to avoid
+                    # The AI will differentiate based on the prompt instructions
+                    alt_future = executor.submit(
+                        _build_single_meal_option,
+                        template_meal,
+                        "ALTERNATIVE",
+                        preferences,
+                        user_code,
+                        region_instruction,
+                        None,  # avoid_proteins - will be handled by prompt
+                        None   # avoid_ingredients - will be handled by prompt
+                    )
+                    all_futures[alt_future] = (meal_name, "ALTERNATIVE")
+                
+                # Collect all results as they complete
+                for future in as_completed(all_futures):
+                    meal_name_returned, option_type_returned, result, error = future.result()
+                    expected_meal, expected_option = all_futures[future]
+                    
+                    if error or not result:
+                        logger.error(f"❌ Failed to build {expected_option} for '{expected_meal}': {error}")
+                        return jsonify({
+                            "error": f"Failed to build {expected_option.lower()} option for '{expected_meal}'",
+                            "meal_name": expected_meal,
+                            "option_type": expected_option,
+                            "details": error,
+                            "failure_type": f"{expected_option.lower()}_option_build_failed"
+                        }), 400
+                    
+                    # Store result with key (meal_name, option_type)
+                    if meal_name_returned not in all_results:
+                        all_results[meal_name_returned] = {}
+                    all_results[meal_name_returned][option_type_returned] = result
+
+                    logger.info(f"✅ Completed {option_type_returned} for '{meal_name_returned}'")
+
+            logger.info(f"✅ Successfully built all {total_options} meal options in parallel!")
+
+            # Assemble the full menu in the correct order
             full_menu = []
-
-
-
             for template_meal in template:
-
                 meal_name = template_meal.get("meal")
-
-
-
-                # ---- MAIN ----
-
-                main_macros = template_meal.get("main", {})
-
-                main_required_protein = main_macros.get("main_protein_source")
-
-
-
-                # Extract macro targets from template
-                calories = main_macros.get("calories")
-                protein = main_macros.get("protein")
-                fat = main_macros.get("fat")
-                
-                # Calculate carbs if not provided in template
-                # Formula: Carbs = (Calories - (Protein × 4) - (Fat × 9)) ÷ 4
-                carbs = main_macros.get("carbs")
-                if carbs is None and calories is not None and protein is not None and fat is not None:
-                    carbs = (calories - (protein * 4) - (fat * 9)) / 4
-                    carbs = round(carbs)  # Round to nearest whole number
-                
-                main_targets = {
-
-                    "calories": calories,
-
-                    "protein":  protein,
-
-                    "fat":      fat,
-
-                    "carbs":    carbs,
-
-                }
-
-
-
-                # Basic guardrails
-
-                if any(v is None for k, v in main_targets.items()):
-
-                    return jsonify({
-
-                        "error": f"Template missing macro targets for MAIN '{meal_name}'",
-
-                        "targets": main_targets
-
-                    }), 400
-
-
-
-                main_built = _build_option_with_retries(
-
-                    option_type="MAIN",
-
-                    meal_name=meal_name,
-
-                    macro_targets=main_targets,
-
-                    required_protein_source=main_required_protein,
-
-                    preferences=preferences,
-
-                    user_code=user_code,
-
-                    region_instruction=region_instruction
-
-                )
-
-
-
-                if not main_built:
-
-                    logger.error(f"❌ Could not build valid MAIN for '{meal_name}'.")
-
-                    return jsonify({
-
-                        "error": f"Failed to build main option for '{meal_name}'",
-
-                        "meal_name": meal_name,
-
-                        "target_macros": main_targets,
-
-                        "failure_type": "main_option_build_failed"
-
-                    }), 400
-
-
-
-                # ---- ALTERNATIVE ----
-
-                alt_macros = template_meal.get("alternative", {})
-
-                alt_required_protein = alt_macros.get("main_protein_source")
-
-
-
-                # Extract macro targets from template
-                alt_calories = alt_macros.get("calories")
-                alt_protein = alt_macros.get("protein")
-                alt_fat = alt_macros.get("fat")
-                
-                # Calculate carbs if not provided in template
-                # Formula: Carbs = (Calories - (Protein × 4) - (Fat × 9)) ÷ 4
-                alt_carbs = alt_macros.get("carbs")
-                if alt_carbs is None and alt_calories is not None and alt_protein is not None and alt_fat is not None:
-                    alt_carbs = (alt_calories - (alt_protein * 4) - (alt_fat * 9)) / 4
-                    alt_carbs = round(alt_carbs)  # Round to nearest whole number
-                
-                alt_targets = {
-
-                    "calories": alt_calories,
-
-                    "protein":  alt_protein,
-
-                    "fat":      alt_fat,
-
-                    "carbs":    alt_carbs,
-
-                }
-
-
-
-                if any(v is None for k, v in alt_targets.items()):
-
-                    return jsonify({
-
-                        "error": f"Template missing macro targets for ALTERNATIVE '{meal_name}'",
-
-                        "targets": alt_targets
-
-                    }), 400
-
-
-
-                # Avoid repeating main's protein/ingredients
-
-                avoid_proteins = [p for p in [main_required_protein] if p]
-
-                avoid_ingredients = []
-
-                for ing in main_built.get("ingredients", []):
-
-                    name = (ing.get("item") or "").strip()
-
-                    if name:
-
-                        avoid_ingredients.append(name)
-
-
-
-                alt_built = _build_option_with_retries(
-
-                    option_type="ALTERNATIVE",
-
-                    meal_name=meal_name,
-
-                    macro_targets=alt_targets,
-
-                    required_protein_source=alt_required_protein,
-
-                    preferences=preferences,
-
-                    user_code=user_code,
-
-                    region_instruction=region_instruction,
-
-                    avoid_proteins=avoid_proteins,
-
-                    avoid_ingredients=avoid_ingredients
-
-                )
-
-
-
-                if not alt_built:
-
-                    logger.error(f"❌ Could not build valid ALTERNATIVE for '{meal_name}'.")
-
-                    return jsonify({
-
-                        "error": f"Failed to build alternative option for '{meal_name}'",
-
-                        "meal_name": meal_name,
-
-                        "target_macros": alt_targets,
-
-                        "failure_type": "alternative_option_build_failed"
-
-                    }), 400
-
-
-
                 full_menu.append({
-
                     "meal": meal_name,
-
-                    "main": main_built,
-
-                    "alternative": alt_built
-
+                    "main": all_results[meal_name]["MAIN"],
+                    "alternative": all_results[meal_name]["ALTERNATIVE"]
                 })
 
 
@@ -3628,16 +3871,30 @@ def api_validate_menu():
 
                 return False
 
-            # Allow ASCII printable + basic punctuation; flag Hebrew/Arabic/other letters
+            # Allow ASCII + common English Unicode punctuation (en-dash, em-dash, smart quotes, degree, etc.)
+            # Flag Hebrew (U+0590-U+05FF), Arabic (U+0600-U+06FF), and other non-Latin scripts
 
             try:
-
+                # First try pure ASCII (fastest path)
                 s.encode("ascii")
-
                 return True
-
+            except UnicodeEncodeError:
+                # If not ASCII, check if it contains Hebrew, Arabic, or other non-Latin scripts
+                # Allow common English Unicode: en-dash (–), em-dash (—), smart quotes, degree, fractions, etc.
+                for char in s:
+                    code_point = ord(char)
+                    # Reject Hebrew, Arabic, Cyrillic, Chinese, Japanese, Korean, etc.
+                    if (0x0590 <= code_point <= 0x05FF or  # Hebrew
+                        0x0600 <= code_point <= 0x06FF or  # Arabic
+                        0x0400 <= code_point <= 0x04FF or  # Cyrillic
+                        0x4E00 <= code_point <= 0x9FFF or  # CJK Unified Ideographs
+                        0x3040 <= code_point <= 0x309F or  # Hiragana
+                        0x30A0 <= code_point <= 0x30FF or  # Katakana
+                        0xAC00 <= code_point <= 0xD7AF):   # Hangul
+                        return False
+                # If no non-Latin scripts found, it's acceptable English with Unicode punctuation
+                return True
             except Exception:
-
                 return False
 
 
@@ -4850,7 +5107,13 @@ HARD RULES
 
  **ENGLISH ONLY** for all names/measures/brands.
 
- Prioritize whole foods; avoid ultra-processed snacks unless explicitly liked in preferences.
+ **HEALTHY FOOD PRIORITY**: You are a HEALTHY dietitian - use whole, nutritious foods only.
+
+ **NEVER USE**: margarine, processed cheese spreads, artificial sweeteners, ultra-processed snacks.
+
+ **ALWAYS PREFER**: butter or olive oil (not margarine), real cheese (not processed), whole grains, fresh produce.
+
+ Only include unhealthy items if client explicitly requests them in preferences.
 
  **CRITICAL: STRICTLY AVOID ALL FOODS IN ALLERGIES LIST** - This is life-threatening: {allergies_list}
 
@@ -5113,7 +5376,7 @@ def generate_alternative_meal():
     # Extract allergies and limitations from preferences
     allergies = preferences.get("allergies", []) or []
     limitations = preferences.get("limitations", []) or []
-    
+
     # Format for prompt
     allergies_list = ", ".join(allergies) if allergies else "None"
     limitations_list = ", ".join(limitations) if limitations else "None"
