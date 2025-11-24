@@ -7,7 +7,8 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: {
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: true
+    detectSessionInUrl: true,
+    storageKey: 'betterchoice-primary-auth'
   }
 })
 
@@ -19,7 +20,8 @@ export const secondSupabase = createClient(secondSupabaseUrl, secondSupabaseKey,
   auth: {
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: true
+    detectSessionInUrl: true,
+    storageKey: 'betterchoice-secondary-auth'
   }
 })
 
