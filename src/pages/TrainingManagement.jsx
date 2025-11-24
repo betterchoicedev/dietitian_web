@@ -489,6 +489,12 @@ const TrainingManagement = () => {
     setExpandedWeeks(newExpanded);
   };
   
+  // Helper: select a day to edit
+  const selectBuilderDay = (weekIdx, dayIdx) => {
+    setCurrentWeek(weekIdx);
+    setCurrentDay(dayIdx);
+  };
+  
   // Toggle day expansion
   const toggleDayExpansion = (dayIdx) => {
     const newExpanded = new Set(expandedDays);
@@ -713,6 +719,16 @@ const TrainingManagement = () => {
   
   // Handle exercise name change
   const handleExerciseNameChange = (value) => {
+    if (value === '') {
+      setExerciseFormData(prev => ({
+        ...prev,
+        exercise_name: '',
+        exercise_name_he: ''
+      }));
+      lastEditedExerciseNameField.current = null;
+      return;
+    }
+    
     const isHeb = isHebrew(value);
     
     if (isHeb) {
@@ -763,6 +779,16 @@ const TrainingManagement = () => {
   
   // Handle exercise description change
   const handleExerciseDescriptionChange = (value) => {
+    if (value === '') {
+      setExerciseFormData(prev => ({
+        ...prev,
+        description: '',
+        description_he: ''
+      }));
+      lastEditedExerciseDescField.current = null;
+      return;
+    }
+    
     const isHeb = isHebrew(value);
     
     if (isHeb) {
@@ -2216,7 +2242,11 @@ const TrainingManagement = () => {
                         {expandedWeeks.has(weekIdx) && (
                           <CardContent className="space-y-3">
                             {week.days.map((day, dayIdx) => (
-                              <Card key={dayIdx} className={`${weekIdx === currentWeek && dayIdx === currentDay ? 'border-blue-400 bg-blue-50' : ''}`}>
+                              <Card
+                                key={dayIdx}
+                                className={`${weekIdx === currentWeek && dayIdx === currentDay ? 'border-blue-400 bg-blue-50' : ''} cursor-pointer`}
+                                onClick={() => selectBuilderDay(weekIdx, dayIdx)}
+                              >
                                 <CardHeader className="pb-2">
                                   <div className="flex items-center justify-between">
                                     <Input
@@ -2224,24 +2254,26 @@ const TrainingManagement = () => {
                                       value={day.day_name}
                                       onChange={(e) => updateDayName(weekIdx, dayIdx, e.target.value)}
                                       className="font-semibold text-sm max-w-xs"
-                                      onClick={() => {
-                                        setCurrentWeek(weekIdx);
-                                        setCurrentDay(dayIdx);
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        selectBuilderDay(weekIdx, dayIdx);
                                       }}
                                     />
                                     <Badge variant="outline" className="text-xs">
                                       {day.exercises.length} {translations.exercises}
                                     </Badge>
                                   </div>
+                                  {day.exercises.length > 0 && (
+                                    <p className="text-xs text-gray-500 mt-2" onClick={(e) => e.stopPropagation()}>
+                                      {translations.clickExerciseToAdd}
+                                    </p>
+                                  )}
                                 </CardHeader>
                                 <CardContent className="pt-2">
                                   {day.exercises.length === 0 ? (
                                     <div 
                                       className="text-center py-6 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all"
-                                      onClick={() => {
-                                        setCurrentWeek(weekIdx);
-                                        setCurrentDay(dayIdx);
-                                      }}
+                                      onClick={() => selectBuilderDay(weekIdx, dayIdx)}
                                     >
                                       {translations.clickExerciseToAdd}
                                     </div>

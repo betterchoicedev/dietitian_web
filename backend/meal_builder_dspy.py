@@ -6,7 +6,7 @@ Orchestrates multi-stage meal generation with specialized predictors.
 import dspy
 import json
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 from dotenv import load_dotenv
 
@@ -31,21 +31,18 @@ except ImportError:
 # ============================================================================
 
 class MealNaming(dspy.Signature):
-    """Generate meal name and ingredient list.
+    """Generate meal name + ingredient list (max 7 items).
     
-    STEP 1 - Client Preferences (MANDATORY):
-    If client_preference has specific foods → include ALL of them (even if in Hebrew/Arabic)
-    
-    BEFORE doing ANYTHING else, read client_preference carefully:
-    • Does it mention THIS meal type (meal_type) and specific foods?
-    • If YES → ALL those foods MUST be in your ingredients list
-    • This is NON-NEGOTIABLE - the client explicitly asked for these foods
-    
-    STEP 3 - Add complementary items to hit macros (max 7 ingredients total)
-    
-    Rules: Use healthy whole foods (real butter not margarine, real cheese not processed), include real brand names IN ENGLISH ONLY (Tnuva not תנובה, Angel not אנג'ל)
-    
-    ⚠️ CRITICAL: ALL OUTPUT MUST BE IN ENGLISH (dish name, ingredient names, brands)
+    1. Client requests are mandatory. Read client_preference FIRST and include every food they explicitly mentioned (even if bilingual).
+    2. Allergies/limitations override everything. If a client request conflicts → ignore the request and stay safe.
+    3. Dish name = promise. Before finalizing ingredients ask:
+       • What dish am I naming?
+       • What core ingredients define it?
+       • Are those ingredients in my list? If not, add them or rename the dish. (Shakshuka needs tomato base, Carbonara needs pasta/egg/cheese, etc.)
+       • If a core ingredient is banned (allergy/limitation) → pick a different dish name or clearly create an adapted version.
+    4. Always specify the exact variant for dairy/oils/anything sold in multiple fat/sugar levels (e.g., “Greek Yogurt 5% fat”, “Milk 1% fat”, “Cottage Cheese 3% fat”) so the nutrition stage knows which product you mean.
+    5. After core items, add complementary ingredients to hit macros using whole foods and real English brand names (Tnuva, Angel, Achla).
+    6. Output EVERYTHING in English only (dish_name + ingredients).
     """
     
     meal_type = dspy.InputField(desc="Type of meal")
@@ -351,6 +348,51 @@ class GeminiNutritionLookup(dspy.Module):
 # ============================================================================
 
 class MealBuilderChain(dspy.Module):
+    def _normalize_term(self, term: Optional[str]) -> str:
+        """Lowercase and strip non-alphanumeric characters for safe comparisons."""
+        if not term or not isinstance(term, str):
+            return ""
+        term = term.lower()
+        cleaned_chars = []
+        for ch in term:
+            if ch.isalnum():
+                cleaned_chars.append(ch)
+            elif ch.isspace():
+                cleaned_chars.append(" ")
+            else:
+                cleaned_chars.append(" ")
+        cleaned = "".join(cleaned_chars)
+        return " ".join(cleaned.split())
+    
+    def _build_prohibited_terms(
+        self,
+        allergies_list: List[str],
+        limitations_list: List[str],
+        avoid_ingredients: List[str]
+    ) -> List[str]:
+        """Build a normalized list of restricted terms from allergies, limitations, and avoid lists."""
+        prohibited_terms = []
+        
+        def add_term(term: str):
+            normalized = self._normalize_term(term)
+            if not normalized or normalized in {"none", "na", "n/a"}:
+                return
+            if normalized not in prohibited_terms:
+                prohibited_terms.append(normalized)
+            # Add individual words for better coverage (e.g., "gluten free" -> "gluten")
+            for part in normalized.split():
+                if len(part) >= 3 and part not in prohibited_terms:
+                    prohibited_terms.append(part)
+        
+        for term in (allergies_list or []):
+            add_term(term)
+        for term in (limitations_list or []):
+            add_term(term)
+        for term in (avoid_ingredients or []):
+            add_term(term)
+        
+        return prohibited_terms
+    
     """
     Full meal building pipeline:
     1. Generate meal name and ingredients (Claude)
@@ -522,8 +564,12 @@ The data must be for "{ingredient_query}" specifically, not a similar or substit
         
         # Extract preferences
         region = preferences.get("region", "israel")
-        allergies = ", ".join(preferences.get("allergies", []) or ["None"])
-        limitations = ", ".join(preferences.get("limitations", []) or ["None"])
+        raw_allergies = preferences.get("allergies", []) or []
+        raw_limitations = preferences.get("limitations", []) or []
+        allergies_list = [a.strip() for a in raw_allergies if isinstance(a, str) and a.strip()]
+        limitations_list = [l.strip() for l in raw_limitations if isinstance(l, str) and l.strip()]
+        allergies_display = ", ".join(allergies_list) if allergies_list else "None"
+        limitations_display = ", ".join(limitations_list) if limitations_list else "None"
         avoid_ingredients = preferences.get("avoid_ingredients", []) or []
         
         # Extract client preference for THIS specific meal from meal_plan_structure
@@ -598,13 +644,19 @@ The data must be for "{ingredient_query}" specifically, not a similar or substit
         
         logger.info(f"📐 Macro guidance being sent: {macro_guidance}")
         
+        safety_guidance = f"ALLERGIES FIRST: ABSOLUTELY FORBIDDEN ingredients = {allergies_display}. " \
+                          f"Dietary limitations: {limitations_display}. If a requested ingredient conflicts with these, " \
+                          f"IGNORE the request. Allergies and limitations ALWAYS override preferences."
+        
+        enhanced_client_pref = safety_guidance + " " + macro_guidance + (client_preference if client_preference else "")
+        
         naming_result = self.name_ingredients(
             meal_type=meal_type,
             macro_targets=json.dumps(macro_targets),
             required_protein_source=required_protein_source,
             region=region,
-            allergies=allergies,
-            limitations=limitations,
+            allergies=allergies_display,
+            limitations=limitations_display,
             avoid_ingredients=json.dumps(avoid_ingredients),
             client_preference=enhanced_client_pref
         )
@@ -632,6 +684,109 @@ The data must be for "{ingredient_query}" specifically, not a similar or substit
         if client_preference and client_preference.strip():
             logger.info(f"   ℹ️ Client requested description: {client_preference[:150]}...")
             logger.info(f"   ℹ️ Claude should have interpreted and included relevant foods from this")
+        
+        # ======================================================================
+        # SAFETY: Remove ingredients that violate allergies/limitations
+        # ======================================================================
+        prohibited_terms = self._build_prohibited_terms(allergies_list, limitations_list, avoid_ingredients)
+        
+        def violates_restriction(ingredient: str) -> Optional[str]:
+            norm_ing = self._normalize_term(ingredient)
+            for term in prohibited_terms:
+                if term and term in norm_ing:
+                    return term
+            return None
+        
+        cleaned_ingredients = []
+        for ingredient in ingredients_list:
+            violation = violates_restriction(ingredient)
+            if violation:
+                error_msg = (
+                    f"❌ SAFETY ERROR: Ingredient '{ingredient}' conflicts with restriction '{violation}'. "
+                    "Allergies and limitations have highest priority."
+                )
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            cleaned_ingredients.append(ingredient)
+        
+        ingredients_list = cleaned_ingredients
+        
+        # ======================================================================
+        # VALIDATION: Ask LLM to validate dish name matches ingredients
+        # ======================================================================
+        logger.info(f"🔍 Validating culinary logic: Does '{dish_name}' match ingredients {ingredients_list}?")
+        
+        # Quick validation prompt - just yes/no answer
+        validation_prompt = f"""Does the dish name match the ingredients, considering dietary restrictions?
+
+Dish name: "{dish_name}"
+Ingredients: {ingredients_list}
+Allergies: {allergies_display}
+Dietary Limitations: {limitations_display}
+
+REASONING PROCESS:
+1. What are the core/defining ingredients of "{dish_name}"?
+2. Are those core ingredients present in the ingredients list?
+3. If a core ingredient is missing:
+   - Is it missing because of allergies or dietary limitations? → VALID (acceptable substitution/adaptation)
+   - Is it missing for no good reason? → INVALID (culinary logic error)
+
+Answer ONLY with:
+- "VALID" if the dish name matches the ingredients (core ingredients are present OR missing for valid dietary reasons)
+- "INVALID: [reason]" if the dish name doesn't match (missing core ingredients for no valid reason)
+
+Examples:
+- "Shakshuka" with ingredients ["Eggs", "Bread", "Hummus"], allergies: none → INVALID: Shakshuka requires tomatoes/tomato sauce
+- "Shakshuka" with ingredients ["Eggs", "Bell Peppers", "Onions"], allergies: "tomatoes" → VALID: Adapted shakshuka due to tomato allergy
+- "Pasta Carbonara" with ingredients ["Chicken", "Rice", "Vegetables"], allergies: none → INVALID: Pasta Carbonara requires pasta, eggs, cheese
+- "Greek Salad" with ingredients ["Cucumber", "Olives", "Olive Oil"], limitations: "dairy-free" → VALID: Feta omitted due to dairy restriction
+"""
+        
+        try:
+            # Call Azure OpenAI directly for quick validation
+            from openai import AzureOpenAI
+            
+            deployment = os.getenv('AZURE_OPENAI_DEPLOYMENT', 'obi2')
+            api_base = os.getenv("AZURE_OPENAI_API_BASE")
+            api_key = os.getenv("AZURE_OPENAI_API_KEY")
+            api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+            
+            if api_base and api_key:
+                client = AzureOpenAI(
+                    azure_endpoint=api_base,
+                    api_key=api_key,
+                    api_version=api_version
+                )
+                
+                response = client.chat.completions.create(
+                    model=deployment,
+                    messages=[{"role": "user", "content": validation_prompt}],
+                    temperature=0.0,
+                    max_tokens=200
+                )
+                
+                validation_result = response.choices[0].message.content.strip()
+                logger.info(f"   Validation result: {validation_result}")
+                
+                if validation_result.startswith("INVALID"):
+                    error_msg = f"❌ CULINARY LOGIC ERROR: {validation_result}\n"
+                    error_msg += f"   Dish: '{dish_name}'\n"
+                    error_msg += f"   Ingredients: {ingredients_list}"
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
+                else:
+                    logger.info(f"✅ Culinary logic validation passed")
+            else:
+                logger.warning("⚠️ Azure OpenAI credentials not found, skipping validation")
+                
+        except Exception as e:
+            # If validation fails for technical reasons, log but don't block
+            if "CULINARY LOGIC ERROR" in str(e):
+                # This is our intentional error - re-raise it
+                raise
+            else:
+                logger.warning(f"⚠️ Validation check failed (technical): {e}")
+                logger.warning("   Proceeding without validation...")
         
         # ======================================================================
         # VALIDATE INGREDIENT COUNT: Backend has hard limit of 7 ingredients
