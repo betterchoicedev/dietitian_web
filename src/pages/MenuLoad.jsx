@@ -1016,7 +1016,8 @@ const MenuLoad = () => {
   const [statusForm, setStatusForm] = useState({
     status: 'draft',
     active_from: '',
-    active_until: ''
+    active_until: '',
+    active_days: [] // Array of day numbers: 0=Sunday, 1=Monday, ..., 6=Saturday
   });
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [checkingExpired, setCheckingExpired] = useState(false);
@@ -2196,6 +2197,48 @@ const MenuLoad = () => {
       const result = await Menu.update(selectedMenu.id, updatedMenu);
       console.log('✅ Menu updated successfully:', result);
       
+      // Check if this meal plan exists in the second database and update it
+      if (selectedMenu.status === 'active') {
+        try {
+          console.log('🔄 Checking if meal plan exists in second database...');
+          
+          // Check if meal plan exists in client_meal_plans table
+          const { data: existingClientMealPlan, error: checkError } = await secondSupabase
+            .from('client_meal_plans')
+            .select('id')
+            .eq('original_meal_plan_id', selectedMenu.id)
+            .single();
+          
+          if (!checkError && existingClientMealPlan) {
+            console.log('📝 Updating existing meal plan in second database...');
+            
+            // Update the dietitian_meal_plan with the new version
+            const { error: updateError } = await secondSupabase
+              .from('client_meal_plans')
+              .update({
+                meal_plan_name: updatedMenu.meal_plan_name,
+                dietitian_meal_plan: updatedMenu.meal_plan,
+                daily_total_calories: updatedMenu.daily_total_calories,
+                macros_target: updatedMenu.macros_target
+              })
+              .eq('id', existingClientMealPlan.id);
+            
+            if (updateError) {
+              console.error('Error updating meal plan in second database:', updateError);
+              console.warn('Main meal plan was saved, but failed to sync to second database');
+            } else {
+              console.log('✅ Meal plan synced to second database successfully');
+            }
+          } else {
+            console.log('ℹ️ Meal plan not found in second database (will be created when activated)');
+          }
+        } catch (syncError) {
+          console.error('Error syncing to second database:', syncError);
+          // Don't fail the entire operation, just log the error
+          console.warn('Main meal plan was saved, but failed to sync to second database');
+        }
+      }
+      
       alert('Menu updated successfully!');
       handleBackToList();
       loadMenus(); // Refresh the list
@@ -2213,7 +2256,8 @@ const MenuLoad = () => {
     setStatusForm({
       status: menu.status || 'draft',
       active_from: menu.active_from ? new Date(menu.active_from).toISOString().split('T')[0] : '',
-      active_until: menu.active_until ? new Date(menu.active_until).toISOString().split('T')[0] : ''
+      active_until: menu.active_until ? new Date(menu.active_until).toISOString().split('T')[0] : '',
+      active_days: menu.active_days || [] // Load existing active days or empty array
     });
     setShowStatusModal(true);
   };
@@ -2236,7 +2280,8 @@ const MenuLoad = () => {
         status: statusForm.status,
         user_code: selectedMenuForStatus.user_code, // Include user_code for backend validation
         ...(statusForm.active_from && { active_from: statusForm.active_from }),
-        ...(statusForm.active_until && { active_until: statusForm.active_until })
+        ...(statusForm.active_until && { active_until: statusForm.active_until }),
+        active_days: statusForm.active_days.length > 0 ? statusForm.active_days : null // Set to null if no days selected (means every day)
       };
 
       // If status is being set to draft or expired, clear active dates
@@ -2261,35 +2306,101 @@ const MenuLoad = () => {
       const result = await Menu.update(selectedMenuForStatus.id, updateData);
       console.log('✅ Menu status updated successfully:', result);
       
-      // If status is being set to 'active', add to the second Supabase table
+      // If status is being set to 'active', sync to the second Supabase table
       if (statusForm.status === 'active') {
         try {
           // Get the meal plan data from the selected menu
           const mealPlanData = selectedMenuForStatus.meal_plan;
           
           if (mealPlanData) {
-            // Insert into the second Supabase table
-            const { data: secondTableData, error: secondTableError } = await secondSupabase
-              .from('meal_plans')
-              .insert({
-                user_code: selectedMenuForStatus.user_code,
-                meal_plan: mealPlanData
-              });
+            console.log('🔄 Syncing meal plan to second database...');
+            
+            // Check if meal plan already exists in client_meal_plans table
+            const { data: existingClientMealPlan, error: checkError } = await secondSupabase
+              .from('client_meal_plans')
+              .select('id')
+              .eq('original_meal_plan_id', selectedMenuForStatus.id)
+              .maybeSingle();
+            
+            if (checkError) {
+              console.error('Error checking for existing meal plan:', checkError);
+              throw checkError;
+            }
+            
+            // Prepare the data for client_meal_plans table
+            const clientMealPlanData = {
+              user_code: selectedMenuForStatus.user_code,
+              dietitian_id: user.id, // Current authenticated user (dietitian)
+              original_meal_plan_id: selectedMenuForStatus.id,
+              meal_plan_name: selectedMenuForStatus.meal_plan_name || 'Untitled Meal Plan',
+              dietitian_meal_plan: mealPlanData,
+              active: true, // Set to active when activating
+              active_days: statusForm.active_days.length > 0 ? statusForm.active_days : null, // NULL means every day
+              active_from: statusForm.active_from ? new Date(statusForm.active_from).toISOString() : null,
+              active_until: statusForm.active_until ? new Date(statusForm.active_until).toISOString() : null,
+              daily_total_calories: selectedMenuForStatus.daily_total_calories || null,
+              macros_target: selectedMenuForStatus.macros_target || null
+            };
 
-            if (secondTableError) {
-              console.error('Error adding to second table:', secondTableError);
-              // Don't fail the entire operation, just log the error
-              console.warn('Failed to add meal plan to second table, but status was updated successfully');
+            if (existingClientMealPlan) {
+              // Update existing meal plan
+              console.log('📝 Updating existing meal plan in second database...');
+              const { error: updateError } = await secondSupabase
+                .from('client_meal_plans')
+                .update(clientMealPlanData)
+                .eq('id', existingClientMealPlan.id);
+
+              if (updateError) {
+                console.error('Error updating client_meal_plans table:', updateError);
+                console.warn('Failed to update meal plan in client_meal_plans table, but status was updated successfully');
+              } else {
+                console.log('✅ Meal plan updated in client_meal_plans table successfully');
+              }
             } else {
-              console.log('✅ Meal plan added to second table successfully:', secondTableData);
+              // Insert new meal plan
+              console.log('➕ Creating new meal plan in second database...');
+              clientMealPlanData.client_edited_meal_plan = null; // Initially null for new plans
+              
+              const { data: insertData, error: insertError } = await secondSupabase
+                .from('client_meal_plans')
+                .insert(clientMealPlanData);
+
+              if (insertError) {
+                console.error('Error inserting to client_meal_plans table:', insertError);
+                console.warn('Failed to add meal plan to client_meal_plans table, but status was updated successfully');
+              } else {
+                console.log('✅ Meal plan added to client_meal_plans table successfully:', insertData);
+              }
             }
           } else {
             console.warn('No meal plan data found in selected menu');
           }
         } catch (secondTableError) {
-          console.error('Error adding to second table:', secondTableError);
+          console.error('Error syncing to client_meal_plans table:', secondTableError);
           // Don't fail the entire operation, just log the error
-          console.warn('Failed to add meal plan to second table, but status was updated successfully');
+          console.warn('Failed to sync meal plan to client_meal_plans table, but status was updated successfully');
+        }
+      }
+      
+      // Handle deactivation in second database
+      if (statusForm.status !== 'active' && selectedMenuForStatus.status === 'active') {
+        try {
+          console.log('🔄 Deactivating meal plan in second database...');
+          
+          // Find and deactivate the meal plan in client_meal_plans
+          const { error: deactivateError } = await secondSupabase
+            .from('client_meal_plans')
+            .update({ active: false })
+            .eq('original_meal_plan_id', selectedMenuForStatus.id);
+          
+          if (deactivateError) {
+            console.error('Error deactivating meal plan in second database:', deactivateError);
+            console.warn('Failed to deactivate in second database, but status was updated successfully');
+          } else {
+            console.log('✅ Meal plan deactivated in second database successfully');
+          }
+        } catch (deactivateError) {
+          console.error('Error deactivating in second database:', deactivateError);
         }
       }
       
@@ -2350,6 +2461,26 @@ const MenuLoad = () => {
 
       await Menu.delete(menu.id);
       console.log('✅ Menu deleted successfully:', menu.id);
+      
+      // Also delete from second database if it exists there
+      try {
+        console.log('🔄 Checking if meal plan exists in second database to delete...');
+        
+        const { error: deleteSecondDbError } = await secondSupabase
+          .from('client_meal_plans')
+          .delete()
+          .eq('original_meal_plan_id', menu.id);
+        
+        if (deleteSecondDbError) {
+          console.error('Error deleting from second database:', deleteSecondDbError);
+          console.warn('Main meal plan was deleted, but failed to delete from second database');
+        } else {
+          console.log('✅ Meal plan deleted from second database successfully');
+        }
+      } catch (secondDbDeleteError) {
+        console.error('Error deleting from second database:', secondDbDeleteError);
+        console.warn('Main meal plan was deleted, but failed to delete from second database');
+      }
       
       // Show success message
       alert(`${translations.menuDeleted || 'Menu deleted successfully'}: ${menuName}`);
@@ -4547,6 +4678,33 @@ const MenuLoad = () => {
                       </span>
                     </div>
                   )}
+                  {menu.active_days && menu.active_days.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">{translations.activeDays || 'Active Days'}:</span>
+                      <div className="flex gap-1">
+                        {[
+                          { value: 0, label: 'S' },
+                          { value: 1, label: 'M' },
+                          { value: 2, label: 'T' },
+                          { value: 3, label: 'W' },
+                          { value: 4, label: 'T' },
+                          { value: 5, label: 'F' },
+                          { value: 6, label: 'S' }
+                        ].map(day => (
+                          <span
+                            key={day.value}
+                            className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-medium ${
+                              menu.active_days.includes(day.value)
+                                ? 'bg-green-500 text-white'
+                                : 'bg-gray-200 text-gray-400'
+                            }`}
+                          >
+                            {day.label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
 
@@ -4677,6 +4835,55 @@ const MenuLoad = () => {
                       onChange={(e) => setStatusForm(prev => ({ ...prev, active_until: e.target.value }))}
                       className="w-full"
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      {translations.activeDays || 'Active Days'} ({translations.optional || 'Optional'})
+                    </label>
+                    <p className="text-xs text-gray-500 mb-2">
+                      {translations.activeDaysDescription || 'Select specific days when this meal plan should be active. Leave empty for all days.'}
+                    </p>
+                    <div className="grid grid-cols-7 gap-2">
+                      {[
+                        { value: 0, label: translations.sunday || 'Sun', fullLabel: translations.sundayFull || 'Sunday' },
+                        { value: 1, label: translations.monday || 'Mon', fullLabel: translations.mondayFull || 'Monday' },
+                        { value: 2, label: translations.tuesday || 'Tue', fullLabel: translations.tuesdayFull || 'Tuesday' },
+                        { value: 3, label: translations.wednesday || 'Wed', fullLabel: translations.wednesdayFull || 'Wednesday' },
+                        { value: 4, label: translations.thursday || 'Thu', fullLabel: translations.thursdayFull || 'Thursday' },
+                        { value: 5, label: translations.friday || 'Fri', fullLabel: translations.fridayFull || 'Friday' },
+                        { value: 6, label: translations.saturday || 'Sat', fullLabel: translations.saturdayFull || 'Saturday' }
+                      ].map(day => (
+                        <div key={day.value} className="flex flex-col items-center">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const isSelected = statusForm.active_days.includes(day.value);
+                              setStatusForm(prev => ({
+                                ...prev,
+                                active_days: isSelected
+                                  ? prev.active_days.filter(d => d !== day.value)
+                                  : [...prev.active_days, day.value].sort((a, b) => a - b)
+                              }));
+                            }}
+                            className={`w-12 h-12 rounded-full flex items-center justify-center font-medium text-sm transition-all ${
+                              statusForm.active_days.includes(day.value)
+                                ? 'bg-green-500 text-white border-2 border-green-600 shadow-md'
+                                : 'bg-gray-100 text-gray-600 border-2 border-gray-300 hover:bg-gray-200'
+                            }`}
+                            title={day.fullLabel}
+                          >
+                            {day.label}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    {statusForm.active_days.length === 0 && (
+                      <p className="text-xs text-blue-600 mt-2 flex items-center gap-1">
+                        <span>ℹ️</span>
+                        {translations.allDaysSelected || 'No days selected - meal plan will be active every day'}
+                      </p>
+                    )}
                   </div>
                 </>
               )}
