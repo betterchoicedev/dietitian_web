@@ -313,7 +313,7 @@ export const entities = {
           let newActiveDays = data.active_days;
           if (newActiveDays === undefined) {
             const { data: currentMenu, error: fetchErr } = await supabase
-              .from('meal_plans_and_schemas')
+            .from('meal_plans_and_schemas')
               .select('active_days')
               .eq('id', id)
               .single();

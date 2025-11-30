@@ -2454,7 +2454,7 @@ const MenuLoad = () => {
         ...(statusForm.active_until && { active_until: statusForm.active_until }),
         active_days: statusForm.active_days.length > 0 ? statusForm.active_days : null // Set to null if no days selected (means every day)
       };
-      
+
       // If status is being set to draft or expired, clear active dates
       if (statusForm.status === 'draft' || statusForm.status === 'expired') {
         updateData.active_from = null;
