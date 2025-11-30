@@ -2407,10 +2407,27 @@ const MenuLoad = () => {
 
   const handleStatusChange = (menu) => {
     setSelectedMenuForStatus(menu);
+    
+    // Calculate default dates: today and 1 month later
+    const today = new Date();
+    const oneMonthLater = new Date();
+    oneMonthLater.setMonth(oneMonthLater.getMonth() + 1);
+    
+    const todayStr = today.toISOString().split('T')[0];
+    const oneMonthLaterStr = oneMonthLater.toISOString().split('T')[0];
+    
+    // Use existing dates if available, otherwise use defaults
+    const activeFrom = menu.active_from 
+      ? new Date(menu.active_from).toISOString().split('T')[0] 
+      : todayStr;
+    const activeUntil = menu.active_until 
+      ? new Date(menu.active_until).toISOString().split('T')[0] 
+      : oneMonthLaterStr;
+    
     setStatusForm({
       status: menu.status || 'draft',
-      active_from: menu.active_from ? new Date(menu.active_from).toISOString().split('T')[0] : '',
-      active_until: menu.active_until ? new Date(menu.active_until).toISOString().split('T')[0] : '',
+      active_from: activeFrom,
+      active_until: activeUntil,
       active_days: menu.active_days || [] // Load existing active days or empty array
     });
     setShowStatusModal(true);
@@ -2437,25 +2454,20 @@ const MenuLoad = () => {
         ...(statusForm.active_until && { active_until: statusForm.active_until }),
         active_days: statusForm.active_days.length > 0 ? statusForm.active_days : null // Set to null if no days selected (means every day)
       };
-
+      
       // If status is being set to draft or expired, clear active dates
       if (statusForm.status === 'draft' || statusForm.status === 'expired') {
         updateData.active_from = null;
         updateData.active_until = null;
       }
       
-      // If status is being set to active without an active_until date, set it to far future (2099-01-01)
+      // If status is being set to active without an active_until date, set it to 1 month from active_from
       if (statusForm.status === 'active' && !statusForm.active_until) {
-        updateData.active_until = '2099-01-01';
+        const activeFromDate = statusForm.active_from ? new Date(statusForm.active_from) : new Date();
+        const oneMonthLater = new Date(activeFromDate);
+        oneMonthLater.setMonth(oneMonthLater.getMonth() + 1);
+        updateData.active_until = oneMonthLater.toISOString().split('T')[0];
       }
-      
-      // If status is being set to scheduled, require active_from date
-      if (statusForm.status === 'scheduled' && !statusForm.active_from) {
-        setError('Scheduled status requires an activation date');
-        return;
-      }
-
-      // Deactivation of other active menus (if needed) is handled in the API layer
 
       const result = await Menu.update(selectedMenuForStatus.id, updateData);
       console.log('✅ Menu status updated successfully:', result);
@@ -2605,7 +2617,207 @@ const MenuLoad = () => {
       
     } catch (error) {
       console.error('Error updating menu status:', error);
-      setError('Failed to update menu status: ' + error.message);
+      
+      // Check if this is an overlap error
+      if (error.message && error.message.includes('Cannot activate meal plan')) {
+        // Fetch conflicting active meal plans
+        try {
+          const { data: conflictingPlans, error: fetchError } = await supabase
+            .from('meal_plans_and_schemas')
+            .select('id, meal_plan_name, active_days')
+            .eq('user_code', selectedMenuForStatus.user_code)
+            .eq('record_type', 'meal_plan')
+            .eq('status', 'active')
+            .neq('id', selectedMenuForStatus.id);
+          
+          if (!fetchError && conflictingPlans && conflictingPlans.length > 0) {
+            // Helper to convert day numbers to names
+            const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const formatDays = (days) => {
+              if (!days || days.length === 0) return 'all days';
+              return days.map(d => dayNames[d] || d).join(', ');
+            };
+            
+            // Format the conflicting plans list
+            const plansList = conflictingPlans.map(plan => {
+              const daysText = formatDays(plan.active_days);
+              return `"${plan.meal_plan_name}" (${daysText})`;
+            }).join('\n');
+            
+            // Ask user if they want to deactivate conflicting plans
+            const confirmMessage = 
+              `There are ${conflictingPlans.length} active meal plan(s) with overlapping days:\n\n${plansList}\n\n` +
+              `Would you like to set these to "draft" status so you can activate this meal plan?`;
+            
+            if (window.confirm(confirmMessage)) {
+              // Deactivate conflicting plans
+              const conflictingIds = conflictingPlans.map(p => p.id);
+              const { error: deactivateError } = await supabase
+                .from('meal_plans_and_schemas')
+                .update({
+                  status: 'draft',
+                  active_from: null,
+                  active_until: null,
+                  updated_at: new Date().toISOString()
+                })
+                .in('id', conflictingIds);
+              
+              if (deactivateError) {
+                alert('Failed to deactivate conflicting meal plans: ' + deactivateError.message);
+                setError(null);
+                setUpdatingStatus(false);
+                return;
+              }
+              
+              // Now retry the activation
+              console.log('🔄 Retrying activation after deactivating conflicting plans...');
+              const retryUpdateData = {
+                status: statusForm.status,
+                user_code: selectedMenuForStatus.user_code,
+                ...(statusForm.active_from && { active_from: statusForm.active_from }),
+                ...(statusForm.active_until && { active_until: statusForm.active_until }),
+                active_days: statusForm.active_days.length > 0 ? statusForm.active_days : null
+              };
+              
+              if (statusForm.status === 'draft' || statusForm.status === 'expired') {
+                retryUpdateData.active_from = null;
+                retryUpdateData.active_until = null;
+              }
+              
+              if (statusForm.status === 'active' && !statusForm.active_until) {
+                const activeFromDate = statusForm.active_from ? new Date(statusForm.active_from) : new Date();
+                const oneMonthLater = new Date(activeFromDate);
+                oneMonthLater.setMonth(oneMonthLater.getMonth() + 1);
+                retryUpdateData.active_until = oneMonthLater.toISOString().split('T')[0];
+              }
+              
+              // Retry the update
+              await Menu.update(selectedMenuForStatus.id, retryUpdateData);
+              
+              // Continue with the rest of the activation logic (sync to second DB, notifications, etc.)
+              // We need to re-run the activation logic here
+              if (statusForm.status === 'active') {
+                try {
+                  const mealPlanData = selectedMenuForStatus.meal_plan;
+                  
+                  if (mealPlanData) {
+                    console.log('🔄 Syncing meal plan to second database...');
+                    
+                    const { data: existingClientMealPlan, error: checkError } = await secondSupabase
+                      .from('client_meal_plans')
+                      .select('id')
+                      .eq('original_meal_plan_id', selectedMenuForStatus.id)
+                      .maybeSingle();
+                    
+                    if (!checkError) {
+                      const { data: { user } } = await supabase.auth.getUser();
+                      const clientMealPlanData = {
+                        user_code: selectedMenuForStatus.user_code,
+                        dietitian_id: user.id,
+                        original_meal_plan_id: selectedMenuForStatus.id,
+                        meal_plan_name: selectedMenuForStatus.meal_plan_name || 'Untitled Meal Plan',
+                        dietitian_meal_plan: mealPlanData,
+                        active: true,
+                        active_days: statusForm.active_days.length > 0 ? statusForm.active_days : null,
+                        active_from: statusForm.active_from ? new Date(statusForm.active_from).toISOString() : null,
+                        active_until: statusForm.active_until ? new Date(statusForm.active_until).toISOString() : null,
+                        daily_total_calories: selectedMenuForStatus.daily_total_calories || null,
+                        macros_target: selectedMenuForStatus.macros_target || null
+                      };
+                      
+                      if (existingClientMealPlan) {
+                        await secondSupabase
+                          .from('client_meal_plans')
+                          .update(clientMealPlanData)
+                          .eq('id', existingClientMealPlan.id);
+                      } else {
+                        clientMealPlanData.client_edited_meal_plan = null;
+                        await secondSupabase
+                          .from('client_meal_plans')
+                          .insert(clientMealPlanData);
+                      }
+                    }
+                  }
+                } catch (secondTableError) {
+                  console.error('Error syncing to client_meal_plans table:', secondTableError);
+                }
+                
+                // Send notification
+                try {
+                  const mealPlanName = selectedMenuForStatus.meal_plan_name || 'Untitled Meal Plan';
+                  const userCode = selectedMenuForStatus.user_code;
+                  const mealPlanId = selectedMenuForStatus.id;
+                  
+                  const { data: clientData, error: clientError } = await supabase
+                    .from('chat_users')
+                    .select('id')
+                    .eq('user_code', userCode)
+                    .single();
+                  
+                  if (clientData && !clientError) {
+                    const { data: { user } } = await supabase.auth.getUser();
+                    await sendMealPlanActivationNotification(userCode, mealPlanName, clientData.id);
+                    
+                    const activeFrom = statusForm.active_from || selectedMenuForStatus.active_from;
+                    const activeUntil = statusForm.active_until || selectedMenuForStatus.active_until;
+                    
+                    if (activeFrom && activeUntil) {
+                      await createWeeklyMealPlanReminders(
+                        userCode,
+                        mealPlanId,
+                        activeFrom,
+                        activeUntil,
+                        user.id
+                      );
+                    }
+                  }
+                } catch (notificationError) {
+                  console.error('Notification error (non-blocking):', notificationError);
+                }
+              }
+              
+              alert('Menu status updated successfully! Conflicting meal plans have been set to draft.');
+              setShowStatusModal(false);
+              setSelectedMenuForStatus(null);
+              loadMenus();
+              setUpdatingStatus(false);
+              return;
+            } else {
+              // User cancelled
+              setError(null);
+              setUpdatingStatus(false);
+              return;
+            }
+          }
+        } catch (fetchErr) {
+          console.error('Error fetching conflicting plans:', fetchErr);
+        }
+      }
+      
+      // Show error as popup alert for other errors
+      let errorMessage = error.message || 'Failed to update menu status';
+      
+      // Format the overlap error message to be more user-friendly
+      if (errorMessage.includes('Cannot activate meal plan')) {
+        // Extract and clean up the error message
+        const overlapMatch = errorMessage.match(/Cannot activate meal plan: (.+)/);
+        if (overlapMatch) {
+          let cleanMessage = overlapMatch[1];
+          // Format the message more nicely
+          cleanMessage = cleanMessage
+            .replace(/Existing plan covers: all days/g, 'Existing plan covers all days')
+            .replace(/New plan covers: all days/g, 'New plan covers all days')
+            .replace(/Existing plan covers: /g, 'Existing plan covers days: ')
+            .replace(/New plan covers: /g, 'New plan covers days: ');
+          errorMessage = cleanMessage;
+        }
+      } else if (errorMessage.includes('Failed to update menu status: ')) {
+        // Remove the prefix for cleaner message
+        errorMessage = errorMessage.replace('Failed to update menu status: ', '');
+      }
+      
+      alert(errorMessage);
+      setError(null); // Clear any inline error
     } finally {
       setUpdatingStatus(false);
     }
@@ -4967,22 +5179,36 @@ const MenuLoad = () => {
                 </label>
                 <Select 
                   value={statusForm.status} 
-                  onValueChange={(value) => setStatusForm(prev => ({ ...prev, status: value }))}
+                  onValueChange={(value) => {
+                    // Set default dates when switching to 'active' if not already set
+                    if (value === 'active' && !statusForm.active_from) {
+                      const today = new Date();
+                      const oneMonthLater = new Date();
+                      oneMonthLater.setMonth(oneMonthLater.getMonth() + 1);
+                      
+                      setStatusForm(prev => ({
+                        ...prev,
+                        status: value,
+                        active_from: today.toISOString().split('T')[0],
+                        active_until: oneMonthLater.toISOString().split('T')[0]
+                      }));
+                    } else {
+                      setStatusForm(prev => ({ ...prev, status: value }));
+                    }
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="draft">{translations.draft || 'Draft'}</SelectItem>
-                    <SelectItem value="scheduled">{translations.scheduled || 'Scheduled'}</SelectItem>
                     <SelectItem value="active">{translations.active || 'Active'}</SelectItem>
-                    <SelectItem value="published">{translations.published || 'Published'}</SelectItem>
                     <SelectItem value="expired">{translations.expired || 'Expired'}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              {(statusForm.status === 'active' || statusForm.status === 'scheduled') && (
+              {statusForm.status === 'active' && (
                 <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">

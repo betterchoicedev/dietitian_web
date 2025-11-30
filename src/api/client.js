@@ -292,10 +292,10 @@ export const entities = {
           throw new Error('User code is required to activate a menu.');
         }
 
-        // Find other active menus for this user
+        // Find other active menus for this user with their active_days
         const { data: existingActiveMenus, error: activeError } = await supabase
           .from('meal_plans_and_schemas')
-          .select('id')
+          .select('id, active_days')
           .eq('user_code', userCode)
           .eq('record_type', 'meal_plan')
           .eq('status', 'active');
@@ -306,21 +306,44 @@ export const entities = {
         }
 
         const otherActiveMenus = (existingActiveMenus || []).filter(menu => menu.id !== id);
+        
         if (otherActiveMenus.length > 0) {
-          // Deactivate (expire) other active menus for this user
-          const otherIds = otherActiveMenus.map(m => m.id);
-          const { error: deactivateErr } = await supabase
-            .from('meal_plans_and_schemas')
-            .update({
-              status: 'expired',
-              active_from: null,
-              active_until: null,
-              updated_at: new Date().toISOString()
-            })
-            .in('id', otherIds);
-          if (deactivateErr) {
-            console.error('❌ Failed to deactivate existing active menus:', deactivateErr);
-            throw new Error('Failed to deactivate existing active menus.');
+          // Get the new meal plan's active_days
+          // If active_days is not provided in data, fetch it from the current menu
+          let newActiveDays = data.active_days;
+          if (newActiveDays === undefined) {
+            const { data: currentMenu, error: fetchErr } = await supabase
+              .from('meal_plans_and_schemas')
+              .select('active_days')
+              .eq('id', id)
+              .single();
+            if (!fetchErr && currentMenu) {
+              newActiveDays = currentMenu.active_days;
+            }
+          }
+          
+          // Normalize: null or empty array means all days
+          const newDaysSet = (newActiveDays === null || (Array.isArray(newActiveDays) && newActiveDays.length === 0))
+            ? new Set([0, 1, 2, 3, 4, 5, 6]) // All days
+            : new Set(Array.isArray(newActiveDays) ? newActiveDays : []);
+          
+          // Check for conflicts with existing active menus
+          for (const existingMenu of otherActiveMenus) {
+            const existingDays = existingMenu.active_days;
+            const existingDaysSet = (existingDays === null || (Array.isArray(existingDays) && existingDays.length === 0))
+              ? new Set([0, 1, 2, 3, 4, 5, 6]) // All days
+              : new Set(Array.isArray(existingDays) ? existingDays : []);
+            
+            // Check if there's an overlap
+            const hasOverlap = [...newDaysSet].some(day => existingDaysSet.has(day));
+            
+            if (hasOverlap) {
+              throw new Error(
+                `Cannot activate meal plan: There is already an active meal plan for overlapping days. ` +
+                `Existing plan covers: ${existingDaysSet.size === 7 ? 'all days' : Array.from(existingDaysSet).join(', ')}, ` +
+                `New plan covers: ${newDaysSet.size === 7 ? 'all days' : Array.from(newDaysSet).join(', ')}`
+              );
+            }
           }
         }
       }

@@ -33,16 +33,31 @@ except ImportError:
 class MealNaming(dspy.Signature):
     """Generate meal name + ingredient list (max 7 items).
     
+    ⚠️ CRITICAL: ONLY USE REAL, EXISTING INGREDIENTS THAT CAN BE FOUND IN STORES/DATABASES.
+    
+    0. REAL INGREDIENTS ONLY - VERIFY EVERYTHING:
+       • Before suggesting ANY ingredient, verify it's a REAL, COMMONLY AVAILABLE food item
+       • Use web search if unsure about ingredient existence or availability - search online to confirm each ingredient is real
+    
     1. Client requests are mandatory. Read client_preference FIRST and include every food they explicitly mentioned (even if bilingual).
     2. Allergies/limitations override everything. If a client request conflicts → ignore the request and stay safe.
     3. Dish name = promise. Before finalizing ingredients ask:
        • What dish am I naming?
        • What core ingredients define it?
+       • Are those ingredients REAL and available? Search online if needed to verify.
        • Are those ingredients in my list? If not, add them or rename the dish. (Shakshuka needs tomato base, Carbonara needs pasta/egg/cheese, etc.)
-       • If a core ingredient is banned (allergy/limitation) → pick a different dish name or clearly create an adapted version.
-    4. Always specify the exact variant for dairy/oils/anything sold in multiple fat/sugar levels (e.g., “Greek Yogurt 5% fat”, “Milk 1% fat”, “Cottage Cheese 3% fat”) so the nutrition stage knows which product you mean.
+       • If a core ingredient is banned (allergy/limitation) → pick a different dish name or clearly create an adapted version with REAL substitutes.
+    4. Ingredient naming conventions:
+       • For GENERIC items (no brand needed): Use simple names like "Eggs", "Olive oil", "Cherry tomatoes", "Avocado", "Whole wheat bread", "Salmon", "Chicken breast"
+       • For BRANDED/PROCESSED items (typically sold with brands): Include brand + product specification:
+         - Dairy products: "Tnuva Cottage Cheese 5%", "Tnuva Greek Yogurt 5%", "Tnuva Milk 1%", "Yoplait Greek Yogurt"
+         - Packaged foods: "Hummus Achla", "Angel Whole Wheat Bread", "Osem Pasta"
+       • Format: "[Brand] [Product Name] [Variant if needed]" - e.g., "Tnuva Cottage Cheese 5%", "Achla Hummus"
     5. After core items, add complementary ingredients to hit macros using whole foods and real English brand names (Tnuva, Angel, Achla).
+       • Always verify each complementary ingredient is REAL and commonly available before including it
     6. Output EVERYTHING in English only (dish_name + ingredients).
+    
+    SEARCH THE WEB: If you're uncertain whether an ingredient exists or is commonly available, search the internet to verify before including it in the output.
     """
     
     meal_type = dspy.InputField(desc="Type of meal")
@@ -55,7 +70,7 @@ class MealNaming(dspy.Signature):
     client_preference = dspy.InputField(desc="Client's meal description (may be Hebrew/English). Parse and include ALL foods mentioned.")
     
     dish_name = dspy.OutputField(desc="Dish name in English (NEVER Hebrew)")
-    ingredients = dspy.OutputField(desc='JSON array with brands IN ENGLISH ONLY (translate Hebrew brands: Tnuva not תנובה, Achla not אחלה). Include ALL client-requested foods + complementary items (max 7 total). Example: ["Eggs, large", "Hummus, Achla", "Bread, Angel"]')
+    ingredients = dspy.OutputField(desc='JSON array of REAL, EXISTING ingredient names (max 7). CRITICAL: Only include ingredients that actually exist and can be found in stores/databases. For GENERIC items (eggs, vegetables, meat): use simple names like "Eggs", "Olive oil", "Cherry tomatoes", "Avocado", "Salmon". For BRANDED/PROCESSED items (dairy, packaged foods): include brand + product like "Tnuva Cottage Cheese 5%", "Hummus Achla", "Tnuva Greek Yogurt 5%", "Angel Whole Wheat Bread". Format: "[Brand] [Product] [Variant]" for branded items. Use real brands only (Tnuva not תנובה, Achla not אחלה). VERIFY each ingredient is real - search online if unsure. NO fictional or made-up ingredients. Include ALL client-requested foods + complementary items.')
 
 
 class PortionCalculation(dspy.Signature):
@@ -114,7 +129,14 @@ class MealAssembly(dspy.Signature):
     reasoning = dspy.OutputField(desc="Validate totals match targets within allowed ranges")
     final_meal_json = dspy.OutputField(desc="""JSON schema - ALL TEXT FIELDS MUST BE IN ENGLISH (NO HEBREW):
 {"meal_name": "<meal_type>", "meal_title": "<dish_name>", "ingredients": [{"item": "<name IN ENGLISH>", "portionSI(gram)": X, "household_measure": "<text IN ENGLISH>", "calories": X, "protein": X, "fat": X, "carbs": X, "brand of pruduct": "<real brand IN ENGLISH>"}]}
-Constraints: Max 7 ingredients, use EXACT field names (portionSI(gram), brand of pruduct), real brand names in English (Tnuva not תנובה, Achla not אחלה, Angel not אנג'ל), ALL text in English only""")
+Constraints: Max 7 ingredients, use EXACT field names (portionSI(gram), brand of pruduct), real brand names in English (Tnuva not תנובה, Achla not אחלה, Angel not אנג'ל), ALL text in English only
+
+CRITICAL BRAND EXTRACTION:
+- If ingredient item contains a brand (e.g., "Tnuva Cottage Cheese 5%"), extract the brand to "brand of pruduct" field (e.g., "Tnuva")
+- For "Tnuva Cottage Cheese 5%" → item: "Cottage Cheese 5%" or keep full name, brand of pruduct: "Tnuva"
+- For "Hummus Achla" → item: "Hummus", brand of pruduct: "Achla"
+- For generic items (e.g., "Eggs", "Olive oil") → brand of pruduct: "" (empty string)
+- Always extract brand from ingredient names and populate "brand of pruduct" field - NEVER leave it empty if ingredient contains a brand""")
 
 
 # ============================================================================
@@ -363,6 +385,94 @@ class MealBuilderChain(dspy.Module):
                 cleaned_chars.append(" ")
         cleaned = "".join(cleaned_chars)
         return " ".join(cleaned.split())
+    
+    def _extract_brand_from_ingredient(self, ingredient: str) -> tuple[str, str]:
+        """
+        Extract brand and product name from ingredient string.
+        Handles multiple formats:
+        - "Brand Product Variant" (e.g., "Tnuva Cottage Cheese 5%")
+        - "Product, Brand" (e.g., "Cottage Cheese, Tnuva")
+        - Generic items (no brand, e.g., "Eggs", "Olive oil")
+        
+        Returns: (product_name, brand_name)
+        """
+        if not ingredient:
+            return ("", "")
+        
+        ingredient = ingredient.strip()
+        
+        # Known Israeli/regional brands (case-insensitive matching)
+        # Comprehensive list of Israeli food brands
+        known_brands = [
+            # Major dairy brands
+            "Tnuva", "Strauss", "Yotvata", "Tara", "Gad", "Yoplait", "Danone",
+            "Milky", "Rivage", "Shamenet", "Gvina Levana",
+            # Hummus and spreads
+            "Achla", "Abu Gosh", "Sabra", "Tzabar", "Houmous Achla", "Al Arz",
+            # Bread and baked goods
+            "Angel", "Berman", "Lechem Achai", "Beigel Beigel", "Krembo",
+            "Berman Bread", "Angel Bakery", "Lechem Achai Bakery",
+            # Snacks and packaged foods
+            "Osem", "Telma", "Elite", "Bamba", "Bissli", "Doritos", "Lay's",
+            "Tapuchips", "Klik", "Kariot", "Kornfleks", "Cornflakes",
+            # Pasta and grains
+            "Pastolina", "Barilla", "Rummo", "Osem Pasta",
+            # Canned goods and ready meals
+            "Prigat", "Prima", "Tivall", "Gefen", "Haddar", "Maya",
+            # Oils and condiments
+            "Haifa", "Shemen", "Yad Mordechai", "Shemen Haaretz", "Shemen Hazait",
+            "Wissotzky", "Elite Coffee", "Nespresso",
+            # Meat and poultry
+            "Zoglowek", "Soglowek", "Tiv Taam", "Adom Adom",
+            # Beverages
+            "Coca Cola", "Pepsi", "Fanta", "Sprite", "Tempo", "Primor",
+            "Soda Stream", "Schweppes", "Kinley",
+            # Frozen foods
+            "Tivall", "Zoglowek", "Tnuva Frozen",
+            # International brands commonly found in Israel
+            "Nestle", "Unilever", "Danone", "Kraft", "Heinz", "Mondelēz",
+            # Baby food and formula
+            "Materna", "Remedia", "Milupa", "Similac", "Aptamil",
+            # Coffee and tea chains (food products)
+            "Aroma", "Landwer", "Cofix",
+            # Additional Israeli food brands
+            "Shahar", "Roladin", "Maya", "Gefen", "Haddar",
+            "Tara Dairy", "Gad Dairy", "Yotvata Dairy"
+        ]
+        
+        # Format 1: "Product, Brand" (comma-separated)
+        if "," in ingredient:
+            parts = [p.strip() for p in ingredient.split(",")]
+            if len(parts) == 2:
+                # Check if second part is a known brand
+                potential_brand = parts[1]
+                for brand in known_brands:
+                    if brand.lower() in potential_brand.lower():
+                        return (parts[0], brand)  # Return standardized brand name
+                # If not a known brand, assume second part is brand anyway
+                return (parts[0], parts[1])
+        
+        # Format 2: "Brand Product Variant" (brand at start)
+        ingredient_lower = ingredient.lower()
+        for brand in known_brands:
+            brand_lower = brand.lower()
+            if ingredient_lower.startswith(brand_lower):
+                # Extract product name after brand
+                product_part = ingredient[len(brand):].strip()
+                return (product_part, brand)
+        
+        # Format 3: Brand might be in the middle or end (less common)
+        # Check if any known brand appears in the ingredient
+        for brand in known_brands:
+            if brand.lower() in ingredient_lower:
+                # Try to extract - brand might be first word
+                words = ingredient.split()
+                if words and words[0].lower() == brand.lower():
+                    product_part = " ".join(words[1:])
+                    return (product_part, brand)
+        
+        # No brand found - generic ingredient
+        return (ingredient, "")
     
     def _build_prohibited_terms(
         self,
@@ -842,18 +952,11 @@ Examples:
         nutrition_per_100g = {}
         
         for ingredient in ingredients_list:
-            # Parse ingredient (might be "Eggs, large" or just "Eggs")
-            ingredient_name = ingredient
-            brand = ""
+            # Extract brand and product name from ingredient
+            product_name, brand = self._extract_brand_from_ingredient(ingredient)
             
-            # Try to extract brand if format is "Item, Brand"
-            if "," in ingredient and len(ingredient.split(",")) == 2:
-                parts = ingredient.split(",")
-                ingredient_name = parts[0].strip()
-                brand = parts[1].strip()
-            
-            # Build query string
-            query = f"{ingredient_name}, {brand}" if brand else ingredient_name
+            # For query, use full ingredient name (might include brand for better search results)
+            query = ingredient  # Use full name for better nutrition lookup
             
             # Look up nutrition per 100g (use dummy 100g portion)
             nutrition_100g = self.nutrition_lookup.forward(query, 100.0)
@@ -867,9 +970,10 @@ Examples:
                 if nutrition_100g is None:
                     raise Exception(f"❌ Could not find nutrition data for '{ingredient}' after trying Gemini and Claude. Cannot proceed with inaccurate data.")
             
-            # Store per-100g data (scale back to per 100g since lookup returns for portion)
+            # Store per-100g data with extracted brand info
             nutrition_per_100g[ingredient] = {
-                "ingredient_name": ingredient_name,
+                "ingredient_name": product_name if product_name else ingredient,  # Product name without brand
+                "full_ingredient_name": ingredient,  # Full name as provided
                 "brand": brand,
                 "calories_per_100g": nutrition_100g["calories"],
                 "protein_per_100g": nutrition_100g["protein_g"],
@@ -971,6 +1075,21 @@ CALCULATE & ADJUST:
                 
                 # Get the per-100g data
                 per_100g = nutrition_per_100g.get(ingredient, {})
+                
+                # Ensure brand is included - extract from ingredient name if missing from portion_info
+                brand_in_portion = portion_info.get("brand of pruduct", "").strip()
+                if not brand_in_portion:
+                    # Try to get brand from nutrition_per_100g (extracted in Stage 2)
+                    brand_from_stage2 = per_100g.get("brand", "").strip()
+                    if brand_from_stage2:
+                        portion_info["brand of pruduct"] = brand_from_stage2
+                        logger.info(f"   ✅ Added brand '{brand_from_stage2}' to portion info for '{ingredient}'")
+                    else:
+                        # Extract brand from ingredient name directly as fallback
+                        _, extracted_brand = self._extract_brand_from_ingredient(ingredient)
+                        if extracted_brand:
+                            portion_info["brand of pruduct"] = extracted_brand
+                            logger.info(f"   ✅ Extracted and added brand '{extracted_brand}' to portion info for '{ingredient}'")
                 
                 # Calculate scaled nutrition
                 scale_factor = portion_grams / 100.0
@@ -1161,9 +1280,25 @@ Keep portions culinary reasonable, but accuracy is more important than perfect p
                 raise
         
         # ======================================================================
-        # VALIDATION & CORRECTION: Ensure final meal actually meets targets
+        # POST-PROCESSING: Ensure brands are extracted and populated
         # ======================================================================
         ingredients = final_meal.get("ingredients", [])
+        
+        # Ensure brand is extracted from ingredient names if missing
+        for ing in ingredients:
+            item_name = ing.get("item", "")
+            brand_field = ing.get("brand of pruduct", "").strip()
+            
+            # If brand field is empty but item name contains a brand, extract it
+            if not brand_field and item_name:
+                _, extracted_brand = self._extract_brand_from_ingredient(item_name)
+                if extracted_brand:
+                    ing["brand of pruduct"] = extracted_brand
+                    logger.info(f"   ✅ Post-processing: Extracted brand '{extracted_brand}' from '{item_name}'")
+        
+        # ======================================================================
+        # VALIDATION & CORRECTION: Ensure final meal actually meets targets
+        # ======================================================================
         
         # CRITICAL: Backend validator has hard limit of 7 ingredients
         MAX_INGREDIENTS = 7

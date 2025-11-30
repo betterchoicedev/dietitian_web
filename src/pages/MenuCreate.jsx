@@ -3571,6 +3571,10 @@ const MenuCreate = () => {
   // State for minimizing Recommendations section
   const [isRecommendationsMinimized, setIsRecommendationsMinimized] = useState(true);
 
+  // State for tracking expanded description textareas
+  const [expandedDescriptionIndex, setExpandedDescriptionIndex] = useState(null);
+  const blurTimeoutRef = useRef(null);
+
   // Macro calculation functions (from Users.jsx)
   const calculateTotals = () => {
     const totalPercentage = macroInputs.protein.percentage + macroInputs.carbs.percentage + macroInputs.fat.percentage;
@@ -8805,9 +8809,9 @@ const MenuCreate = () => {
 
 
 
-      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
 
-      // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+      const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
 
         method: "POST",
 
@@ -8999,9 +9003,9 @@ const MenuCreate = () => {
 
 
 
-      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
 
-      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
 
         method: "POST",
 
@@ -9529,9 +9533,9 @@ const MenuCreate = () => {
 
 
 
-      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
 
-      // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+      const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
 
         method: "POST",
 
@@ -9687,9 +9691,9 @@ const MenuCreate = () => {
 
 
 
-      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
 
-      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
 
         method: "POST",
 
@@ -13214,7 +13218,7 @@ const MenuCreate = () => {
 
                     <div key={index} className="px-4 py-3 border-b last:border-b-0 bg-white">
 
-                      <div className="grid grid-cols-12 gap-2 items-center">
+                      <div className="grid grid-cols-12 gap-2 items-start">
 
                         {/* Meal Name */}
 
@@ -13238,21 +13242,73 @@ const MenuCreate = () => {
 
                         {/* Description */}
 
-                        <div className="col-span-2">
+                        <div className="col-span-2 flex">
 
-                          <div className="relative">
+                          <div className="relative flex-1 w-full" data-description-field="true">
 
-                            <Input
+                            {expandedDescriptionIndex === index ? (
+                              <Textarea
 
-                              value={meal.description}
+                                value={meal.description}
 
-                              onChange={(e) => updateMealInPlan(index, 'description', e.target.value)}
+                                onChange={(e) => {
+                                  updateMealInPlan(index, 'description', e.target.value);
+                                  // Auto-resize textarea when expanded
+                                  e.target.style.height = 'auto';
+                                  e.target.style.height = Math.min(e.target.scrollHeight, 300) + 'px';
+                                }}
 
-                              className={`text-sm ${!selectedTemplate && (!meal.description || meal.description.trim() === '') ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200' : ''}`}
+                                onBlur={() => {
+                                  // Clear any existing timeout
+                                  if (blurTimeoutRef.current) {
+                                    clearTimeout(blurTimeoutRef.current);
+                                  }
+                                  
+                                  // Delay collapse to allow clicking another field to expand first
+                                  blurTimeoutRef.current = setTimeout(() => {
+                                    setExpandedDescriptionIndex((currentExpanded) => {
+                                      // Only collapse if we're still expanded on this field
+                                      return currentExpanded === index ? null : currentExpanded;
+                                    });
+                                  }, 150);
+                                }}
 
-                              placeholder={!selectedTemplate ? (translations.required || 'Required') : (translations.mealDescriptionShort || translations.descriptionPlaceholder || 'Optional description')}
+                                className={`text-sm resize-none flex-1 w-full transition-all duration-200 min-h-[100px] max-h-[300px] ${!selectedTemplate && (!meal.description || meal.description.trim() === '') ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200' : ''}`}
 
-                            />
+                                placeholder={!selectedTemplate ? (translations.required || 'Required') : (translations.mealDescriptionShort || translations.descriptionPlaceholder || 'Optional description')}
+
+                                rows={4}
+
+                                autoFocus
+
+                              />
+                            ) : (
+                              <Input
+
+                                value={meal.description}
+
+                                onMouseDown={(e) => {
+                                  // Clear any pending blur timeout from previous field
+                                  if (blurTimeoutRef.current) {
+                                    clearTimeout(blurTimeoutRef.current);
+                                    blurTimeoutRef.current = null;
+                                  }
+                                  
+                                  // Set expanded index immediately on mouse down (before blur fires)
+                                  e.preventDefault();
+                                  setExpandedDescriptionIndex(index);
+                                }}
+
+                                readOnly
+
+                                className={`text-sm cursor-pointer truncate ${!selectedTemplate && (!meal.description || meal.description.trim() === '') ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200' : ''}`}
+
+                                placeholder={!selectedTemplate ? (translations.required || 'Required') : (translations.mealDescriptionShort || translations.descriptionPlaceholder || 'Optional description')}
+
+                                title={meal.description || ''}
+
+                              />
+                            )}
 
                             {!selectedTemplate && (!meal.description || meal.description.trim() === '') && (
 
