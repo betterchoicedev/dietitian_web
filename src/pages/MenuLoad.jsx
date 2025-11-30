@@ -2570,6 +2570,31 @@ const MenuLoad = () => {
         }
       }
       
+      // Delete all reminders when meal plan is deactivated (draft or expired)
+      if (statusForm.status === 'draft' || statusForm.status === 'expired') {
+        try {
+          console.log('🗑️ Deleting all reminders for deactivated meal plan...');
+          
+          const { data: deletedReminders, error: deleteRemindersError } = await supabase
+            .from('scheduled_reminders')
+            .delete()
+            .eq('plan_id', selectedMenuForStatus.id)
+            .eq('plan_type', 'meal_plan')
+            .select('id');
+          
+          if (deleteRemindersError) {
+            console.error('Error deleting reminders:', deleteRemindersError);
+            console.warn('Failed to delete reminders, but status was updated successfully');
+          } else {
+            const deletedCount = deletedReminders?.length || 0;
+            console.log(`✅ Deleted ${deletedCount} reminder(s) for meal plan ${selectedMenuForStatus.id}`);
+          }
+        } catch (deleteRemindersError) {
+          console.error('Error deleting reminders:', deleteRemindersError);
+          console.warn('Failed to delete reminders, but status was updated successfully');
+        }
+      }
+      
       // Send notification if meal plan was activated
       if (statusForm.status === 'active') {
         try {
@@ -2667,6 +2692,26 @@ const MenuLoad = () => {
                 setError(null);
                 setUpdatingStatus(false);
                 return;
+              }
+              
+              // Delete reminders for all conflicting plans that were deactivated
+              console.log('🗑️ Deleting reminders for conflicting meal plans...');
+              for (const conflictingPlan of conflictingPlans) {
+                try {
+                  const { error: deleteRemindersError } = await supabase
+                    .from('scheduled_reminders')
+                    .delete()
+                    .eq('plan_id', conflictingPlan.id)
+                    .eq('plan_type', 'meal_plan');
+                  
+                  if (deleteRemindersError) {
+                    console.error(`Error deleting reminders for plan ${conflictingPlan.id}:`, deleteRemindersError);
+                  } else {
+                    console.log(`✅ Deleted reminders for conflicting plan ${conflictingPlan.id}`);
+                  }
+                } catch (deleteError) {
+                  console.error(`Error deleting reminders for plan ${conflictingPlan.id}:`, deleteError);
+                }
               }
               
               // Now retry the activation
