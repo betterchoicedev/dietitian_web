@@ -109,6 +109,160 @@ const sendMealPlanActivationNotification = async (userCode, mealPlanName, client
   }
 };
 
+// Function to create weekly progress reminders for meal plan
+const createWeeklyMealPlanReminders = async (userCode, mealPlanId, activeFrom, activeUntil, dietitianId) => {
+  try {
+    console.log('📅 Creating weekly meal plan reminders...', { userCode, mealPlanId, activeFrom, activeUntil });
+    
+    // Get current user (dietitian) info
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      console.error('Error getting current user for reminders:', authError);
+      return;
+    }
+
+    // Get client data including phone_number and telegram_chat_id
+    const { data: clientData, error: clientError } = await supabase
+      .from('chat_users')
+      .select('phone_number, telegram_chat_id, id')
+      .eq('user_code', userCode)
+      .single();
+    
+    if (clientError || !clientData) {
+      console.error('Error fetching client data for reminders:', clientError);
+      return;
+    }
+    
+    // Determine channel based on telegram_chat_id
+    const channel = clientData.telegram_chat_id ? 'telegram' : 'whatsapp';
+    
+    // Calculate number of weeks
+    if (!activeFrom || !activeUntil) {
+      console.warn('Missing active_from or active_until dates, cannot create weekly reminders');
+      return;
+    }
+    
+    const startDate = new Date(activeFrom);
+    const endDate = new Date(activeUntil);
+    const diffTime = endDate - startDate;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const numberOfWeeks = Math.ceil(diffDays / 7);
+    
+    if (numberOfWeeks <= 0) {
+      console.warn('Invalid number of weeks calculated:', numberOfWeeks);
+      return;
+    }
+    
+    console.log(`📊 Creating ${numberOfWeeks} weekly reminders for meal plan`);
+    
+    // 10 encouraging messages that rotate for each week
+    const encouragingMessages = [
+      "Good luck! You're one week closer to your goals! 💪",
+      "Keep going! You're doing amazing on your meal plan! 🌟",
+      "You're making great progress! Stay strong! 💚",
+      "One week down! You're on the right track! 🎯",
+      "Keep up the excellent work! Your dedication is inspiring! ✨",
+      "You're one week stronger! Keep pushing forward! 🚀",
+      "Amazing progress! You're building healthy habits! 🌱",
+      "You're doing fantastic! One week at a time! 💫",
+      "Keep going strong! Your commitment is paying off! 🏆",
+      "You're one week closer to success! Stay motivated! 🌈"
+    ];
+    
+    // Calculate the first reminder date (week 1) - exactly 1 week after activation date, same day of week at 8 AM
+    const activationDate = new Date(startDate);
+    const firstReminderDate = new Date(activationDate);
+    firstReminderDate.setDate(firstReminderDate.getDate() + 7); // 1 week after activation
+    firstReminderDate.setHours(8, 0, 0, 0); // Set to 8 AM
+    
+    console.log('📅 Week 1 reminder on:', firstReminderDate, '(activation date was:', activationDate, ')');
+    
+    // Create reminders for each week
+    const reminders = [];
+    const endDateObj = new Date(activeUntil);
+    endDateObj.setHours(23, 59, 59, 999); // End of the day for comparison
+    
+    // Track the last valid reminder date for recurrence_end_date
+    let lastValidReminderDate = null;
+    
+    for (let week = 1; week <= numberOfWeeks; week++) {
+      // Calculate the date for this week (same day of week as activation, 1 week apart, at 8 AM)
+      const weekDate = new Date(firstReminderDate);
+      weekDate.setDate(weekDate.getDate() + ((week - 1) * 7));
+      
+      // Skip if reminder date is after active_until
+      if (weekDate > endDateObj) {
+        console.log(`⏭️ Skipping week ${week} reminder (date ${weekDate.toISOString().split('T')[0]} is after active_until ${activeUntil})`);
+        continue;
+      }
+      
+      // Track the last valid reminder date
+      lastValidReminderDate = weekDate;
+      
+      // Select message based on week (rotates through the 10 messages)
+      const messageIndex = (week - 1) % encouragingMessages.length;
+      const message = encouragingMessages[messageIndex];
+      
+      // Format date and time for scheduled_reminders table
+      const scheduledDate = weekDate.toISOString().split('T')[0];
+      const scheduledTime = '08:00:00';
+      
+      // Use active_until as recurrence_end_date (or the last reminder date if earlier)
+      const recurrenceEndDate = activeUntil;
+      
+      reminders.push({
+        message_type: 'reminder',
+        topic: 'system_reminder',
+        scheduled_date: scheduledDate,
+        scheduled_time: scheduledTime,
+        context: message,
+        status: 'pending',
+        priority: 'medium',
+        user_id: user.id, // Dietitian who created the reminder
+        user_code: userCode,
+        phone_number: clientData.phone_number,
+        channel: channel,
+        plan_type: 'meal_plan',
+        plan_id: mealPlanId,
+        week_number: week,
+        is_active: true,
+        recurrence_pattern: 'weekly',
+        recurrence_end_date: recurrenceEndDate,
+        media_attachments: null,
+        metadata: {
+          dietitian_id: dietitianId || user.id,
+          client_id: clientData.id,
+          reminder_type: 'weekly_progress'
+        }
+      });
+    }
+    
+    if (reminders.length === 0) {
+      console.log('⚠️ No reminders to create (all dates in past)');
+      return;
+    }
+    
+    // Insert all reminders in batch
+    const { data, error } = await supabase
+      .from('scheduled_reminders')
+      .insert(reminders)
+      .select();
+    
+    if (error) {
+      console.error('Error creating weekly reminders:', error);
+      throw error;
+    }
+    
+    console.log(`✅ Created ${reminders.length} weekly reminders successfully:`, data);
+    return data;
+  } catch (error) {
+    console.error('Failed to create weekly meal plan reminders:', error);
+    // Don't throw error to avoid breaking the main flow
+    console.warn('Weekly reminders creation failed, but meal plan was activated successfully');
+  }
+};
+
 // Function to check for future meal plans and send 2-3 day advance notifications
 const checkAndSendFutureMealPlanNotifications = async () => {
   try {
@@ -1196,7 +1350,7 @@ const MenuLoad = () => {
 
       const { data, error } = await supabase
         .from('chat_users')
-        .select('base_daily_total_calories, macros, region, food_allergies, food_limitations, age, gender, weight_kg, height_cm, client_preference')
+        .select('daily_target_total_calories, macros, region, food_allergies, food_limitations, age, gender, weight_kg, height_cm, client_preference')
         .eq('user_code', userCode)
         .single();
 
@@ -1224,7 +1378,7 @@ const MenuLoad = () => {
 
       // Check if essential fields are missing
       const missingFields = [];
-      if (!data.base_daily_total_calories) missingFields.push('base_daily_total_calories');
+      if (!data.daily_target_total_calories) missingFields.push('daily_target_total_calories');
       if (!data.macros) missingFields.push('macros');
       
       if (missingFields.length > 0) {
@@ -1257,7 +1411,7 @@ const MenuLoad = () => {
       };
 
       const userTargetsData = {
-        calories: data.base_daily_total_calories || 2000,
+        calories: data.daily_target_total_calories || 2000,
         macros: {
           protein: parseFloat(parsedMacros?.protein?.replace('g', '') || '150'),
           fat: parseFloat(parsedMacros?.fat?.replace('g', '') || '80'),
@@ -2409,6 +2563,7 @@ const MenuLoad = () => {
         try {
           const mealPlanName = selectedMenuForStatus.meal_plan_name || 'Untitled Meal Plan';
           const userCode = selectedMenuForStatus.user_code;
+          const mealPlanId = selectedMenuForStatus.id;
           
           // Get client ID for notification
           const { data: clientData, error: clientError } = await supabase
@@ -2419,6 +2574,22 @@ const MenuLoad = () => {
           
           if (clientData && !clientError) {
             await sendMealPlanActivationNotification(userCode, mealPlanName, clientData.id);
+            
+            // Create weekly progress reminders
+            const activeFrom = statusForm.active_from || selectedMenuForStatus.active_from;
+            const activeUntil = statusForm.active_until || selectedMenuForStatus.active_until;
+            
+            if (activeFrom && activeUntil) {
+              await createWeeklyMealPlanReminders(
+                userCode,
+                mealPlanId,
+                activeFrom,
+                activeUntil,
+                user.id
+              );
+            } else {
+              console.warn('Missing active_from or active_until dates, skipping weekly reminders');
+            }
           } else {
             console.warn('Could not find client ID for notification, but meal plan was activated successfully');
           }

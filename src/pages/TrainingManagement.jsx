@@ -5,6 +5,7 @@ import { entities } from '@/api/client';
 import { ExerciseLibrary, TrainingPlanTemplates } from '@/api/entities';
 import { getMyProfile, getCompanyProfileIds } from '@/utils/auth';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -45,7 +46,152 @@ import {
   Layers
 } from 'lucide-react';
 
-// Pre-built training plan templates
+// Function to create weekly training plan reminders
+const createWeeklyTrainingPlanReminders = async (userCode, trainingPlanId, activeFrom, activeUntil, dietitianId) => {
+  try {
+    console.log('📅 Creating weekly training plan reminders...', { userCode, trainingPlanId, activeFrom, activeUntil });
+    
+    // Get current user (dietitian) info
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      console.error('Error getting current user for reminders:', authError);
+      return;
+    }
+
+    // Get client data including phone_number and telegram_chat_id
+    const { data: clientData, error: clientError } = await supabase
+      .from('chat_users')
+      .select('phone_number, telegram_chat_id, id')
+      .eq('user_code', userCode)
+      .single();
+    
+    if (clientError || !clientData) {
+      console.error('Error fetching client data for reminders:', clientError);
+      return;
+    }
+    
+    // Determine channel based on telegram_chat_id
+    const channel = clientData.telegram_chat_id ? 'telegram' : 'whatsapp';
+    
+    // Calculate number of weeks
+    if (!activeFrom || !activeUntil) {
+      console.warn('Missing active_from or active_until dates, cannot create weekly reminders');
+      return;
+    }
+    
+    const startDate = new Date(activeFrom);
+    const endDate = new Date(activeUntil);
+    const diffTime = endDate - startDate;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const numberOfWeeks = Math.ceil(diffDays / 7);
+    
+    if (numberOfWeeks <= 0) {
+      console.warn('Invalid number of weeks calculated:', numberOfWeeks);
+      return;
+    }
+    
+    console.log(`📊 Creating ${numberOfWeeks} weekly reminders for training plan`);
+    
+    // 10 encouraging messages that rotate for each week
+    const encouragingMessages = [
+      "Great job! You're one week closer to your fitness goals! 💪",
+      "Keep pushing! Your dedication to training is inspiring! 🏋️",
+      "You're making amazing progress! Stay consistent! 🌟",
+      "One week stronger! You're building real strength! 💚",
+      "Keep up the excellent work! Your commitment shows! ✨",
+      "You're one week closer to your best self! Keep going! 🚀",
+      "Amazing dedication! You're creating powerful habits! 🌱",
+      "You're doing fantastic! One week at a time! 💫",
+      "Keep going strong! Your hard work is paying off! 🏆",
+      "You're one week closer to success! Stay motivated! 🌈"
+    ];
+    
+    // Calculate the first reminder date (week 1) - exactly 1 week after activation date, same day of week at 8 AM
+    const activationDate = new Date(startDate);
+    const firstReminderDate = new Date(activationDate);
+    firstReminderDate.setDate(firstReminderDate.getDate() + 7); // 1 week after activation
+    firstReminderDate.setHours(8, 0, 0, 0); // Set to 8 AM
+    
+    console.log('📅 Week 1 reminder on:', firstReminderDate, '(activation date was:', activationDate, ')');
+    
+    // Create reminders for each week
+    const reminders = [];
+    const endDateObj = new Date(activeUntil);
+    endDateObj.setHours(23, 59, 59, 999); // End of the day for comparison
+    
+    for (let week = 1; week <= numberOfWeeks; week++) {
+      // Calculate the date for this week (same day of week as activation, 1 week apart, at 8 AM)
+      const weekDate = new Date(firstReminderDate);
+      weekDate.setDate(weekDate.getDate() + ((week - 1) * 7));
+      
+      // Skip if reminder date is after active_until
+      if (weekDate > endDateObj) {
+        console.log(`⏭️ Skipping week ${week} reminder (date ${weekDate.toISOString().split('T')[0]} is after active_until ${activeUntil})`);
+        continue;
+      }
+      
+      // Select message based on week (rotates through the 10 messages)
+      const messageIndex = (week - 1) % encouragingMessages.length;
+      const message = encouragingMessages[messageIndex];
+      
+      // Format date and time for scheduled_reminders table
+      const scheduledDate = weekDate.toISOString().split('T')[0];
+      const scheduledTime = '10:00:00';
+      
+      reminders.push({
+        message_type: 'reminder',
+        topic: 'system_reminder',
+        scheduled_date: scheduledDate,
+        scheduled_time: scheduledTime,
+        context: message,
+        status: 'pending',
+        priority: 'medium',
+        user_id: user.id, // Dietitian who created the reminder
+        user_code: userCode,
+        phone_number: clientData.phone_number,
+        channel: channel,
+        plan_type: 'training_plan',
+        plan_id: trainingPlanId,
+        week_number: week,
+        is_active: true,
+        recurrence_pattern: 'weekly',
+        recurrence_end_date: activeUntil,
+        media_attachments: null,
+        metadata: {
+          dietitian_id: dietitianId || user.id,
+          client_id: clientData.id,
+          reminder_type: 'weekly_progress'
+        }
+      });
+    }
+    
+    if (reminders.length === 0) {
+      console.log('⚠️ No reminders to create (all dates in past or after active_until)');
+      return;
+    }
+    
+    // Insert all reminders in batch
+    const { data, error } = await supabase
+      .from('scheduled_reminders')
+      .insert(reminders)
+      .select();
+    
+    if (error) {
+      console.error('Error creating weekly reminders:', error);
+      throw error;
+    }
+    
+    console.log(`✅ Created ${reminders.length} weekly reminders successfully:`, data);
+    return data;
+  } catch (error) {
+    console.error('Failed to create weekly training plan reminders:', error);
+    // Don't throw error to avoid breaking the main flow
+    console.warn('Weekly reminders creation failed, but training plan was activated successfully');
+  }
+};
+
+// Pre-built training plan templates (10 templates)
 const TRAINING_PLAN_TEMPLATES = {
   beginnerStrength: {
     name: 'Beginner Strength Program',
@@ -955,7 +1101,7 @@ const TrainingManagement = () => {
       });
       
       setIsTemplateDialogOpen(false);
-      setSuccess('Template loaded successfully!');
+      setSuccess(translations.templateLoadedSuccessfully || 'Template loaded successfully!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
       console.error('Error loading template:', err);
@@ -993,7 +1139,7 @@ const TrainingManagement = () => {
         is_public: !template.is_public
       });
       
-      setSuccess(`Template is now ${!template.is_public ? 'public' : 'private'}`);
+      setSuccess(`${translations.templateIsNow || 'Template is now'} ${!template.is_public ? (translations.public || 'public') : (translations.private || 'private')}`);
       await loadTemplates();
       
       setTimeout(() => setSuccess(null), 3000);
@@ -1088,6 +1234,26 @@ const TrainingManagement = () => {
         const newPlan = await entities.TrainingPlans.create(planData);
         setTrainingPlans([newPlan, ...trainingPlans]);
         setSuccess(translations.success || 'Training plan created successfully!');
+        
+        // If plan is created with status 'active', create weekly reminders
+        if (planData.status === 'active') {
+          try {
+            // Get current user (dietitian) info
+            const { data: { user }, error: authError } = await supabase.auth.getUser();
+            
+            if (!authError && user && planData.active_from && planData.active_until) {
+              await createWeeklyTrainingPlanReminders(
+                planData.user_code,
+                newPlan.id,
+                planData.active_from,
+                planData.active_until,
+                user.id
+              );
+            }
+          } catch (reminderError) {
+            console.error('Error creating weekly reminders (non-blocking):', reminderError);
+          }
+        }
       }
       
       setIsPlanBuilderOpen(false);
@@ -1136,11 +1302,38 @@ const TrainingManagement = () => {
         p.id === planId ? updatedPlan : p
       ));
       
-      setSuccess(`Plan status updated to ${newStatus}`);
+      // If status is being set to 'active', create weekly reminders
+      if (newStatus === 'active') {
+        try {
+          // Get current user (dietitian) info
+          const { data: { user }, error: authError } = await supabase.auth.getUser();
+          
+          if (!authError && user) {
+            const activeFrom = updatedPlan.active_from;
+            const activeUntil = updatedPlan.active_until;
+            
+            if (activeFrom && activeUntil) {
+              await createWeeklyTrainingPlanReminders(
+                updatedPlan.user_code,
+                updatedPlan.id,
+                activeFrom,
+                activeUntil,
+                user.id
+              );
+            } else {
+              console.warn('Missing active_from or active_until dates, skipping weekly reminders');
+            }
+          }
+        } catch (reminderError) {
+          console.error('Error creating weekly reminders (non-blocking):', reminderError);
+        }
+      }
+      
+      setSuccess(`${translations.planStatusUpdatedTo || 'Plan status updated to'} ${newStatus}`);
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
       console.error('Error updating plan status:', err);
-      setError('Failed to update plan status');
+      setError(translations.failedToUpdatePlanStatus || 'Failed to update plan status');
     } finally {
       setLoading(false);
     }
@@ -1148,18 +1341,18 @@ const TrainingManagement = () => {
 
   // Handle delete plan
   const handleDeletePlan = async (planId) => {
-    if (!confirm('Are you sure you want to delete this training plan?')) return;
+    if (!confirm(translations.confirmDeleteTrainingPlan || 'Are you sure you want to delete this training plan?')) return;
 
     try {
       setLoading(true);
       await entities.TrainingPlans.delete(planId);
       
       setTrainingPlans(trainingPlans.filter(p => p.id !== planId));
-      setSuccess('Training plan deleted successfully');
+      setSuccess(translations.trainingPlanDeleted || 'Training plan deleted successfully');
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
       console.error('Error deleting plan:', err);
-      setError('Failed to delete training plan');
+      setError(translations.failedToDeleteTrainingPlan || 'Failed to delete training plan');
     } finally {
       setLoading(false);
     }
@@ -1181,7 +1374,7 @@ const TrainingManagement = () => {
           {translations.trainingManagement}
         </h1>
         <p className="text-muted-foreground mt-2">
-          Manage client training plans, track progress, and monitor workout logs
+          {translations.trainingManagement || 'Manage client training plans, track progress, and monitor workout logs'}
         </p>
       </div>
 
@@ -1234,7 +1427,7 @@ const TrainingManagement = () => {
                 <DialogHeader>
                   <DialogTitle>{translations.createTrainingPlan}</DialogTitle>
                   <DialogDescription>
-                    Create a custom plan or use a pre-built template
+                    {translations.createCustomPlan || 'Create a custom plan or use a pre-built template'}
                   </DialogDescription>
                 </DialogHeader>
 
@@ -1244,26 +1437,105 @@ const TrainingManagement = () => {
                     <Label htmlFor="select_template">{translations.selectTemplate}</Label>
                     <Select
                       onValueChange={(templateId) => {
-                        const template = templates.find(t => t.id === templateId);
-                        if (template) {
-                          isLoadingTemplate.current = true; // Set flag to prevent auto-adjust
+                        // Check if it's a pre-built template
+                        if (templateId.startsWith('prebuilt-')) {
+                          const templateKey = templateId.replace('prebuilt-', '');
+                          const prebuiltTemplate = TRAINING_PLAN_TEMPLATES[templateKey];
                           
-                          setPlanFormData({
-                            ...planFormData,
-                            plan_name: language === 'he' && template.template_name_he 
-                              ? template.template_name_he 
-                              : template.template_name,
-                            description: language === 'he' && template.description_he 
-                              ? template.description_he 
-                              : template.description,
-                            goal: template.goal || 'strength_training',
-                            difficulty_level: template.difficulty_level || 'beginner',
-                            duration_weeks: template.duration_weeks || 4,
-                            weekly_frequency: template.weekly_frequency || 3
-                          });
-                          // Load template structure into builder
-                          const templateWeeks = template.plan_structure?.weeks || [];
-                          setBuilderWeeks(JSON.parse(JSON.stringify(templateWeeks)));
+                          if (prebuiltTemplate) {
+                            isLoadingTemplate.current = true; // Set flag to prevent auto-adjust
+                            
+                            setPlanFormData({
+                              ...planFormData,
+                              plan_name: language === 'he' && prebuiltTemplate.name_he 
+                                ? prebuiltTemplate.name_he 
+                                : prebuiltTemplate.name,
+                              description: language === 'he' && prebuiltTemplate.description_he 
+                                ? prebuiltTemplate.description_he 
+                                : prebuiltTemplate.description,
+                              goal: prebuiltTemplate.goal || 'strength_training',
+                              difficulty_level: prebuiltTemplate.difficulty_level || 'beginner',
+                              duration_weeks: prebuiltTemplate.duration_weeks || 4,
+                              weekly_frequency: prebuiltTemplate.weekly_frequency || 3
+                            });
+                            
+                            // Convert pre-built template structure (days format) to weeks format
+                            const planStructure = prebuiltTemplate.plan_structure;
+                            let templateWeeks = [];
+                            
+                            if (planStructure?.weeks) {
+                              // Already in weeks format
+                              templateWeeks = JSON.parse(JSON.stringify(planStructure.weeks));
+                            } else if (planStructure?.days) {
+                              // Convert days format to weeks format
+                              // Create the base day structure
+                              const baseDays = planStructure.days.map((day, idx) => ({
+                                day_number: idx + 1,
+                                day_name: language === 'he' && day.name_he ? day.name_he : day.name,
+                                exercises: (day.exercises || []).map((ex, exIdx) => ({
+                                  exercise_name: ex.name,
+                                  sets: ex.sets || 3,
+                                  reps: ex.reps || '8-10',
+                                  rest_seconds: ex.rest || 90,
+                                  notes: ex.notes || '',
+                                  order: exIdx + 1,
+                                  target_weight_kg: null
+                                }))
+                              }));
+                              
+                              // Create weeks based on duration_weeks
+                              // Each week gets a copy of the days structure
+                              for (let w = 0; w < prebuiltTemplate.duration_weeks; w++) {
+                                templateWeeks.push({
+                                  week_number: w + 1,
+                                  focus: '',
+                                  days: JSON.parse(JSON.stringify(baseDays))
+                                });
+                              }
+                            } else {
+                              // No structure, create empty weeks
+                              for (let w = 0; w < prebuiltTemplate.duration_weeks; w++) {
+                                const days = [];
+                                for (let d = 0; d < prebuiltTemplate.weekly_frequency; d++) {
+                                  days.push({
+                                    day_number: d + 1,
+                                    day_name: `${translations.day} ${d + 1}`,
+                                    exercises: []
+                                  });
+                                }
+                                templateWeeks.push({
+                                  week_number: w + 1,
+                                  focus: '',
+                                  days: days
+                                });
+                              }
+                            }
+                            
+                            setBuilderWeeks(templateWeeks);
+                          }
+                        } else {
+                          // Regular template from database
+                          const template = templates.find(t => t.id === templateId);
+                          if (template) {
+                            isLoadingTemplate.current = true; // Set flag to prevent auto-adjust
+                            
+                            setPlanFormData({
+                              ...planFormData,
+                              plan_name: language === 'he' && template.template_name_he 
+                                ? template.template_name_he 
+                                : template.template_name,
+                              description: language === 'he' && template.description_he 
+                                ? template.description_he 
+                                : template.description,
+                              goal: template.goal || 'strength_training',
+                              difficulty_level: template.difficulty_level || 'beginner',
+                              duration_weeks: template.duration_weeks || 4,
+                              weekly_frequency: template.weekly_frequency || 3
+                            });
+                            // Load template structure into builder
+                            const templateWeeks = template.plan_structure?.weeks || [];
+                            setBuilderWeeks(JSON.parse(JSON.stringify(templateWeeks)));
+                          }
                         }
                       }}
                     >
@@ -1271,11 +1543,30 @@ const TrainingManagement = () => {
                         <SelectValue placeholder={translations.selectTemplate} />
                       </SelectTrigger>
                       <SelectContent>
+                        {/* Pre-built Templates Section */}
+                        <div className="px-2 py-1.5 text-xs font-semibold text-gray-500">
+                          {translations.preBuiltTemplates || translations.usePrebuiltPlan || 'Pre-built Templates'}
+                        </div>
+                        {Object.entries(TRAINING_PLAN_TEMPLATES).map(([key, template]) => (
+                          <SelectItem key={`prebuilt-${key}`} value={`prebuilt-${key}`}>
+                            <div className="flex items-center gap-2">
+                              <Award className="h-3 w-3" />
+                              {language === 'he' && template.name_he 
+                                ? template.name_he 
+                                : template.name}
+                              <span className="text-xs text-gray-500">
+                                ({template.duration_weeks}w • {template.weekly_frequency}x)
+                              </span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                        
                         {myTemplates.length > 0 && (
                           <>
+                            <div className="border-t my-1"></div>
                             <div className="px-2 py-1.5 text-xs font-semibold text-gray-500">
                               {translations.myTemplates}
-                    </div>
+                            </div>
                             {myTemplates.map((template) => (
                               <SelectItem key={template.id} value={template.id}>
                                 <div className="flex items-center gap-2">
@@ -1293,7 +1584,7 @@ const TrainingManagement = () => {
                         )}
                         {publicTemplates.length > 0 && (
                           <>
-                            {myTemplates.length > 0 && (
+                            {(myTemplates.length > 0 || Object.keys(TRAINING_PLAN_TEMPLATES).length > 0) && (
                               <div className="border-t my-1"></div>
                             )}
                             <div className="px-2 py-1.5 text-xs font-semibold text-gray-500">
@@ -1314,7 +1605,7 @@ const TrainingManagement = () => {
                             ))}
                           </>
                         )}
-                        {myTemplates.length === 0 && publicTemplates.length === 0 && (
+                        {myTemplates.length === 0 && publicTemplates.length === 0 && Object.keys(TRAINING_PLAN_TEMPLATES).length === 0 && (
                           <div className="px-2 py-6 text-center text-sm text-gray-500">
                             {translations.noTemplatesFound}
                           </div>
@@ -1353,7 +1644,7 @@ const TrainingManagement = () => {
                         id="plan_name"
                         value={planFormData.plan_name}
                         onChange={(e) => setPlanFormData({ ...planFormData, plan_name: e.target.value })}
-                        placeholder="e.g., 4-Week Strength Builder"
+                        placeholder={translations.planNamePlaceholder || "e.g., 4-Week Strength Builder"}
                       />
                     </div>
 
@@ -1364,7 +1655,7 @@ const TrainingManagement = () => {
                         id="description"
                         value={planFormData.description}
                         onChange={(e) => setPlanFormData({ ...planFormData, description: e.target.value })}
-                        placeholder="Describe the plan goals and approach..."
+                        placeholder={translations.planDescriptionPlaceholder || "Describe the plan goals and approach..."}
                         rows={3}
                       />
                     </div>
@@ -1458,7 +1749,7 @@ const TrainingManagement = () => {
                           className="bg-gray-100 cursor-not-allowed"
                         />
                         <p className="text-xs text-gray-500">
-                          {translations.autoCalculated || 'Auto-calculated based on start date and duration'}
+                          {translations.autoCalculatedBasedOnDates || translations.autoCalculated || 'Auto-calculated based on start date and duration'}
                         </p>
                       </div>
                     </div>
@@ -1470,7 +1761,7 @@ const TrainingManagement = () => {
                         id="notes"
                         value={planFormData.notes}
                         onChange={(e) => setPlanFormData({ ...planFormData, notes: e.target.value })}
-                        placeholder="Additional notes for the client..."
+                        placeholder={translations.additionalNotesPlaceholder || "Additional notes for the client..."}
                         rows={2}
                       />
                     </div>
@@ -1498,7 +1789,7 @@ const TrainingManagement = () => {
               {trainingPlans.length === 0 ? (
                 <div className="text-center py-12">
                   <Dumbbell className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">No training plans yet. Create one to get started!</p>
+                  <p className="text-muted-foreground">{translations.noTrainingPlansYet || 'No training plans yet. Create one to get started!'}</p>
                 </div>
               ) : (
                 <Table dir={isRTL ? 'rtl' : 'ltr'}>
@@ -1651,10 +1942,10 @@ const TrainingManagement = () => {
                   <Label htmlFor="filter-client">{translations.client}</Label>
                   <Select value={selectedUserCode} onValueChange={setSelectedUserCode}>
                     <SelectTrigger id="filter-client">
-                      <SelectValue placeholder="All clients" />
+                      <SelectValue placeholder={translations.allClients || "All clients"} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All clients</SelectItem>
+                      <SelectItem value="all">{translations.allClients || "All clients"}</SelectItem>
                       {clients.map(client => (
                         <SelectItem key={client.user_code} value={client.user_code}>
                           {client.full_name || client.name}
@@ -1688,7 +1979,7 @@ const TrainingManagement = () => {
                     setDateFilter({ start: '', end: '' });
                   }}
                 >
-                  Clear Filters
+                  {translations.clearFilters || 'Clear Filters'}
                 </Button>
               </div>
             </CardContent>
@@ -1734,7 +2025,7 @@ const TrainingManagement = () => {
                           </div>
                           {log.perceived_exertion && (
                             <Badge variant="outline">
-                              Effort: {log.perceived_exertion}/10
+                              {translations.effort || 'Effort'}: {log.perceived_exertion}/10
                             </Badge>
                           )}
                         </div>
@@ -1749,7 +2040,7 @@ const TrainingManagement = () => {
                                 <div key={idx} className="bg-muted/50 p-3 rounded-md">
                                   <div className="font-medium">{exercise.name || exercise.exercise_name}</div>
                                   <div className="text-sm text-muted-foreground">
-                                    {exercise.sets?.length || 0} sets
+                                    {exercise.sets?.length || 0} {translations.sets || 'sets'}
                                     {exercise.sets && exercise.sets.length > 0 && (
                                       <span className="ml-2">
                                         ({exercise.sets.map(s => `${s.reps}×${s.weight}kg`).join(', ')})
@@ -1786,14 +2077,14 @@ const TrainingManagement = () => {
                 {translations.progressOverview}
               </CardTitle>
               <CardDescription>
-                Track client progress and workout consistency
+                {translations.trackClientProgress || 'Track client progress and workout consistency'}
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="text-center py-12">
                 <BarChart3 className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                 <p className="text-muted-foreground">
-                  Analytics dashboard coming soon. Track volume, strength progression, and consistency metrics.
+                  {translations.analyticsDashboardComingSoon || 'Analytics dashboard coming soon. Track volume, strength progression, and consistency metrics.'}
                 </p>
               </div>
             </CardContent>
@@ -1809,14 +2100,14 @@ const TrainingManagement = () => {
                 {translations.trainingReminders}
               </CardTitle>
               <CardDescription>
-                Manage workout reminders for clients
+                {translations.manageWorkoutReminders || 'Manage workout reminders for clients'}
               </CardDescription>
             </CardHeader>
             <CardContent>
               {reminders.length === 0 ? (
                 <div className="text-center py-12">
                   <Bell className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">No pending reminders</p>
+                  <p className="text-muted-foreground">{translations.noPendingReminders || 'No pending reminders'}</p>
                 </div>
               ) : (
                 <Table dir={isRTL ? 'rtl' : 'ltr'}>

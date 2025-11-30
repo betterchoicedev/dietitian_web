@@ -8,10 +8,11 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useClient } from '@/contexts/ClientContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Image as ImageIcon, Send, Loader2, MessageSquare, InfoIcon, RefreshCw, Users, X, CheckCircle, Clock, Calendar } from 'lucide-react';
+import { Image as ImageIcon, Send, Loader2, MessageSquare, InfoIcon, RefreshCw, Users, X, CheckCircle, Clock, Calendar, Edit, Trash2, UtensilsCrossed, Dumbbell } from 'lucide-react';
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/lib/supabase';
@@ -54,6 +55,12 @@ export default function Chat() {
   const [scheduledDate, setScheduledDate] = useState(''); // Date for scheduled message (YYYY-MM-DD)
   const [scheduledTime, setScheduledTime] = useState(''); // Time for scheduled message (HH:MM)
   const [showScheduleDialog, setShowScheduleDialog] = useState(false); // Show schedule dialog
+  const [scheduledReminders, setScheduledReminders] = useState([]); // List of scheduled reminders
+  const [showRemindersDialog, setShowRemindersDialog] = useState(false); // Show scheduled reminders dialog
+  const [editingReminder, setEditingReminder] = useState(null); // Currently editing reminder
+  const [editReminderDate, setEditReminderDate] = useState(''); // Edit reminder date
+  const [editReminderTime, setEditReminderTime] = useState(''); // Edit reminder time
+  const [editReminderContext, setEditReminderContext] = useState(''); // Edit reminder message
   
   // Scroll position tracking for auto-refresh
   const [userScrollPosition, setUserScrollPosition] = useState('bottom'); // 'bottom', 'middle', 'top'
@@ -161,52 +168,73 @@ export default function Chat() {
         // Reverse to show oldest at top, newest at bottom
         const reversedMessages = filterValidMessages(latestMessages.reverse());
         
-        // Check for new messages by comparing IDs instead of just length
-        const currentMessageIds = new Set(messages.map(m => m.id));
-        const newMessages = reversedMessages.filter(msg => !currentMessageIds.has(msg.id));
+        // Capture user's scroll position before updating messages
+        const scrollArea = scrollAreaRef.current;
+        const viewport = scrollArea?.querySelector('[data-radix-scroll-area-viewport]');
+        const prevScrollTop = viewport ? viewport.scrollTop : 0;
+        const prevScrollHeight = viewport ? viewport.scrollHeight : 0;
+        const prevClientHeight = viewport ? viewport.clientHeight : 0;
         
-        if (newMessages.length > 0) {
-          console.log(`🔄 Simple auto-refresh: New messages detected! Found ${newMessages.length} new messages`);
+        // Check if user was at the bottom (within 50px)
+        const distanceFromBottom = prevScrollHeight - prevScrollTop - prevClientHeight;
+        const wasAtBottom = distanceFromBottom <= 50;
+        
+        // Check for new messages by comparing IDs instead of just length
+        setMessages(prev => {
+          const currentMessageIds = new Set(prev.map(m => m.id));
+          const newMessages = reversedMessages.filter(msg => !currentMessageIds.has(msg.id));
           
-          // Capture user's scroll position before updating messages
-          const scrollArea = scrollAreaRef.current;
-          const viewport = scrollArea?.querySelector('[data-radix-scroll-area-viewport]');
-          const prevScrollTop = viewport ? viewport.scrollTop : 0;
-          const prevScrollHeight = viewport ? viewport.scrollHeight : 0;
-          const prevClientHeight = viewport ? viewport.clientHeight : 0;
-          
-          // Check if user was at the bottom (within 50px)
-          const distanceFromBottom = prevScrollHeight - prevScrollTop - prevClientHeight;
-          const wasAtBottom = distanceFromBottom <= 50;
-          
-          setMessages(reversedMessages);
-          // Only update firstMessageId if we don't have one yet (initial load)
-          // or if we're loading more messages and need to update it
-          if (!firstMessageId) {
-            setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
-          }
-          setHasMoreMessages(latestMessages.length === 20);
-          setLastRefreshTime(new Date());
-          
-          // Restore scroll position after DOM updates
-          setTimeout(() => {
-            if (wasAtBottom) {
-              // User was at bottom, scroll to new messages
-              console.log('🔄 Auto-scrolling to bottom for new messages');
-              chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
-              setHasNewMessages(false); // Clear flag since we're scrolling to new messages
+          if (newMessages.length > 0) {
+            console.log(`🔄 Simple auto-refresh: New messages detected! Found ${newMessages.length} new messages`);
+            
+            // If we have loaded older messages (indicated by firstMessageId matching first message),
+            // preserve them and only append new messages at the end
+            let mergedMessages;
+            if (prev.length > 0 && firstMessageId && prev[0].id === firstMessageId) {
+              // User has loaded older messages, preserve them and append new messages
+              // Filter new messages to only include those that are actually newer
+              const existingNewest = prev[prev.length - 1];
+              const newMessagesToAdd = newMessages.filter(msg => {
+                if (!existingNewest?.created_at) return true;
+                return new Date(msg.created_at) > new Date(existingNewest.created_at);
+              });
+              mergedMessages = [...prev, ...newMessagesToAdd];
             } else {
-              // User was scrolling up, don't adjust scroll position at all
-              // Just show the new message indicator
-              console.log('🔄 Preserving scroll position, user was not at bottom');
-              setHasNewMessages(true); // Set flag to show new message indicator
+              // No older messages loaded, replace with latest 20
+              mergedMessages = reversedMessages;
             }
-          }, 0);
-        } else {
-          console.log('Simple auto-refresh: No new messages found');
-          // No new messages, preserve scroll position
-          setLastRefreshTime(new Date());
-        }
+            
+            // Update other state outside of setState callback
+            setTimeout(() => {
+              // Only update firstMessageId if we don't have one yet (initial load)
+              if (!firstMessageId) {
+                setFirstMessageId(mergedMessages.length > 0 ? mergedMessages[0].id : null);
+              }
+              setHasMoreMessages(latestMessages.length === 20);
+              setLastRefreshTime(new Date());
+              
+              // Restore scroll position after DOM updates
+              if (wasAtBottom) {
+                // User was at bottom, scroll to new messages
+                console.log('🔄 Auto-scrolling to bottom for new messages');
+                chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
+                setHasNewMessages(false); // Clear flag since we're scrolling to new messages
+              } else {
+                // User was scrolling up, don't adjust scroll position at all
+                // Just show the new message indicator
+                console.log('🔄 Preserving scroll position, user was not at bottom');
+                setHasNewMessages(true); // Set flag to show new message indicator
+              }
+            }, 0);
+            
+            return mergedMessages;
+          } else {
+            console.log('Simple auto-refresh: No new messages found');
+            // No new messages, preserve scroll position
+            setLastRefreshTime(new Date());
+            return prev;
+          }
+        });
       } catch (error) {
         console.warn('Simple auto-refresh failed:', error);
       }
@@ -568,11 +596,124 @@ export default function Chat() {
     }
   };
 
+  // Fetch scheduled reminders for the selected client
+  const fetchScheduledReminders = async () => {
+    if (!selectedClient?.user_code) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('scheduled_reminders')
+        .select('*')
+        .eq('user_code', selectedClient.user_code)
+        .in('status', ['pending', 'scheduled'])
+        .order('scheduled_date', { ascending: true })
+        .order('scheduled_time', { ascending: true });
+      
+      if (error) {
+        console.error('Error fetching scheduled reminders:', error);
+        throw error;
+      }
+      
+      setScheduledReminders(data || []);
+      console.log('✅ Fetched scheduled reminders:', data?.length || 0);
+    } catch (error) {
+      console.error('Failed to fetch scheduled reminders:', error);
+      showToast(translations.failedToLoadScheduledMessages || 'Failed to load scheduled messages', 'error');
+    }
+  };
+
+  // Update scheduled reminder
+  const updateScheduledReminder = async (reminderId, updates) => {
+    try {
+      const { data, error } = await supabase
+        .from('scheduled_reminders')
+        .update(updates)
+        .eq('id', reminderId)
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('Error updating scheduled reminder:', error);
+        throw error;
+      }
+      
+      // Refresh the list
+      await fetchScheduledReminders();
+      showToast(translations.scheduledMessageUpdated || 'Scheduled message updated successfully!', 'success');
+      return data;
+    } catch (error) {
+      console.error('Failed to update scheduled reminder:', error);
+      showToast(translations.failedToUpdateScheduledMessage || 'Failed to update scheduled message', 'error');
+      throw error;
+    }
+  };
+
+  // Delete scheduled reminder
+  const deleteScheduledReminder = async (reminderId) => {
+    if (!confirm(translations.confirmDeleteScheduledMessage || 'Are you sure you want to delete this scheduled message?')) {
+      return;
+    }
+    
+    try {
+      const { error } = await supabase
+        .from('scheduled_reminders')
+        .delete()
+        .eq('id', reminderId);
+      
+      if (error) {
+        console.error('Error deleting scheduled reminder:', error);
+        throw error;
+      }
+      
+      // Refresh the list
+      await fetchScheduledReminders();
+      showToast(translations.scheduledMessageDeleted || 'Scheduled message deleted successfully!', 'success');
+    } catch (error) {
+      console.error('Failed to delete scheduled reminder:', error);
+      showToast(translations.failedToDeleteScheduledMessage || 'Failed to delete scheduled message', 'error');
+    }
+  };
+
+  // Open edit dialog for a reminder
+  const openEditReminder = (reminder) => {
+    setEditingReminder(reminder);
+    setEditReminderDate(reminder.scheduled_date);
+    setEditReminderTime(reminder.scheduled_time);
+    setEditReminderContext(reminder.context);
+  };
+
+  // Save edited reminder
+  const saveEditedReminder = async () => {
+    if (!editingReminder) return;
+    
+    if (!editReminderDate || !editReminderTime || !editReminderContext.trim()) {
+      showToast(translations.pleaseFillAllFields || 'Please fill in all required fields', 'error');
+      return;
+    }
+    
+    try {
+      await updateScheduledReminder(editingReminder.id, {
+        scheduled_date: editReminderDate,
+        scheduled_time: editReminderTime,
+        context: editReminderContext.trim(),
+        updated_at: new Date().toISOString()
+      });
+      
+      setEditingReminder(null);
+      setEditReminderDate('');
+      setEditReminderTime('');
+      setEditReminderContext('');
+    } catch (error) {
+      // Error already handled in updateScheduledReminder
+    }
+  };
+
   // Fetch conversation and initial messages when client is selected
   useEffect(() => {
     if (selectedClient?.user_code) {
       loadClientData(selectedClient.user_code);
       loadConversationAndMessages(selectedClient.user_code);
+      fetchScheduledReminders(); // Also fetch scheduled reminders
     }
   }, [selectedClient?.user_code]);
 
@@ -580,6 +721,10 @@ export default function Chat() {
   const loadConversationAndMessages = async (userCode) => {
     setIsFetchingData(true);
     setError(null);
+    // Reset pagination state when switching clients (IMPORTANT: reset firstMessageId immediately)
+    setIsLoadingMore(false);
+    setHasNewMessages(false);
+    setFirstMessageId(null); // Reset immediately to prevent loading messages from previous client
     try {
       const conversation = await ChatConversation.getByUserCode(userCode);
       setConversationId(conversation.id);
@@ -712,7 +857,7 @@ export default function Chat() {
         let scheduledForTimestamp = null;
         if (isScheduled) {
           if (!scheduledDate || !scheduledTime) {
-            setError('Please select both date and time for scheduled message');
+            setError(translations.pleaseSelectDateAndTime || 'Please select both date and time for scheduled message');
             setIsLoading(false);
             return;
           }
@@ -722,13 +867,109 @@ export default function Chat() {
           
           // Validate that scheduled time is in the future
           if (scheduleDateTime <= new Date()) {
-            setError('Scheduled time must be in the future');
+            setError(translations.scheduledTimeMustBeFuture || 'Scheduled time must be in the future');
             setIsLoading(false);
             return;
           }
           
           scheduledForTimestamp = scheduleDateTime.toISOString();
           console.log('📅 Scheduling message for:', scheduledForTimestamp);
+          
+          // Insert into scheduled_reminders table
+          try {
+            // Get client data including phone_number and telegram_chat_id
+            const { data: clientData, error: clientError } = await supabase
+              .from('chat_users')
+              .select('phone_number, telegram_chat_id')
+              .eq('user_code', selectedClient.user_code)
+              .single();
+            
+            if (clientError) {
+              console.error('Error fetching client data:', clientError);
+              throw clientError;
+            }
+            
+            // Determine channel based on telegram_chat_id
+            const channel = clientData.telegram_chat_id ? 'telegram' : 'whatsapp';
+            
+            // Get active meal plan ID from meal_plans_and_schemas
+            const { data: mealPlanData, error: mealPlanError } = await supabase
+              .from('meal_plans_and_schemas')
+              .select('id')
+              .eq('user_code', selectedClient.user_code)
+              .eq('record_type', 'meal_plan')
+              .eq('status', 'active')
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .single();
+            
+            let planId = null;
+            if (mealPlanError) {
+              console.warn('No active meal plan found:', mealPlanError);
+            } else if (mealPlanData) {
+              planId = mealPlanData.id;
+            }
+            
+            // Prepare media attachments if file is attached
+            let mediaAttachments = [];
+            if (fileAttachments) {
+              mediaAttachments = [{
+                type: fileAttachments.file_type === 'image' ? 'photo' : 
+                      fileAttachments.file_type === 'video' ? 'video' : 'link',
+                url: fileAttachments.file_url,
+                caption: fileAttachments.file_name || null
+              }];
+            }
+            
+            // Insert into scheduled_reminders table
+            const { data: scheduledReminder, error: reminderError } = await supabase
+              .from('scheduled_reminders')
+              .insert({
+                message_type: 'scheduled',
+                topic: 'chat_message_scheduled',
+                scheduled_date: scheduledDate,
+                scheduled_time: scheduledTime,
+                context: message,
+                status: 'pending',
+                priority: 'high',
+                user_id: currentDietitian.id, // Required for RLS policy
+                user_code: selectedClient.user_code,
+                phone_number: clientData.phone_number,
+                channel: channel,
+                plan_type: null, // Regular scheduled messages are not tied to a plan
+                plan_id: null,
+                week_number: null,
+                is_active: true,
+                media_attachments: mediaAttachments.length > 0 ? mediaAttachments : null,
+                metadata: {
+                  conversation_id: conversationId,
+                  dietitian_id: currentDietitian.id,
+                  client_id: clientId,
+                  message_type: messageType,
+                  isSystemReminder: messageType === 'system_reminder'
+                }
+              })
+              .select()
+              .single();
+            
+            if (reminderError) {
+              console.error('Error inserting into scheduled_reminders:', reminderError);
+              throw reminderError;
+            }
+            
+            console.log('✅ Scheduled reminder added to scheduled_reminders table:', scheduledReminder);
+            
+            // Refresh scheduled reminders list if dialog is open
+            if (showRemindersDialog) {
+              await fetchScheduledReminders();
+            }
+          } catch (scheduledError) {
+            console.error('Error creating scheduled reminder:', scheduledError);
+            setError('Failed to schedule message. Please try again.');
+            showToast(`❌ Failed to schedule message: ${scheduledError.message}`, 'error');
+            setIsLoading(false);
+            return;
+          }
         }
         
         let queueData;
@@ -837,7 +1078,10 @@ export default function Chat() {
         // Show success toast
         if (isScheduled) {
           const scheduleDate = new Date(scheduledForTimestamp);
-          showToast(`📅 ${messageType === 'system_reminder' ? 'System reminder' : 'Message'} scheduled for ${scheduleDate.toLocaleString()} to ${selectedClient.full_name}!`, 'success');
+          const scheduledMessage = messageType === 'system_reminder' 
+            ? (translations.systemReminderScheduledFor || 'System reminder scheduled for')
+            : (translations.messageScheduledFor || 'Message scheduled for');
+          showToast(`📅 ${scheduledMessage} ${scheduleDate.toLocaleString()} ${translations.to || 'to'} ${selectedClient.full_name}!`, 'success');
         } else {
           showToast(`✅ ${messageType === 'system_reminder' ? 'System reminder' : 'Message'} sent to ${selectedClient.full_name}!`, 'success');
         }
@@ -1571,93 +1815,140 @@ Your task is to respond to the user's message below, taking into account their s
   const handleLoadMore = async () => {
     if (!conversationId || !firstMessageId || isLoadingMore) return;
     
-    console.log('🔄 Loading more messages...', {
-      conversationId,
-      firstMessageId,
-      currentMessageCount: messages.length,
-      hasMoreMessages
+    // Validate that firstMessageId belongs to current conversation
+    // Use functional update to get current messages and verify
+    setMessages(currentMessages => {
+      const firstMessage = currentMessages.find(m => m.id === firstMessageId);
+      if (!firstMessage) {
+        console.error('❌ Could not find first message with ID:', firstMessageId, 'in current messages. Conversation may have changed.');
+        setIsLoadingMore(false);
+        return currentMessages;
+      }
+      
+      // Verify the message belongs to the current conversation
+      if (firstMessage.conversation_id !== conversationId) {
+        console.error('❌ First message belongs to different conversation. Current:', conversationId, 'Message conversation:', firstMessage.conversation_id);
+        console.error('❌ Aborting load more - conversation mismatch detected');
+        setIsLoadingMore(false);
+        return currentMessages;
+      }
+      
+      // Proceed with loading more messages
+      loadMoreMessagesAsync(conversationId, firstMessageId, currentMessages);
+      return currentMessages; // Return unchanged for now, will be updated in async function
     });
+  };
+
+  const loadMoreMessagesAsync = async (currentConversationId, currentFirstMessageId, currentMessages) => {
+    setIsLoadingMore(true);
     
+    // Capture scroll position before loading (critical for maintaining position)
     const scrollArea = scrollAreaRef.current;
     const viewport = scrollArea?.querySelector('[data-radix-scroll-area-viewport]');
+    const prevScrollTop = viewport ? viewport.scrollTop : 0;
     const prevScrollHeight = viewport ? viewport.scrollHeight : 0;
-    setIsLoadingMore(true);
+    
     try {
-      // Fetch older messages (before the current first message)
-      // We need to get messages with created_at before the first message's created_at
-      // Since the API uses lt('id', beforeMessageId) which gets newer messages, we need a different approach
-      const firstMessage = messages.find(m => m.id === firstMessageId);
-      if (!firstMessage) {
-        console.error('❌ Could not find first message with ID:', firstMessageId);
+      // Double-check conversation hasn't changed
+      if (currentConversationId !== conversationId) {
+        console.warn('⚠️ Conversation changed during load, aborting');
+        setIsLoadingMore(false);
         return;
       }
       
-      // Get messages with created_at before the first message's created_at
-      const { data: olderMsgs, error } = await supabase
-        .from('chat_messages')
-        .select('*')
-        .eq('conversation_id', conversationId)
-        .lt('created_at', firstMessage.created_at)
-        .order('created_at', { ascending: false })
-        .limit(20);
-      
-      if (error) {
-        console.error('❌ Error fetching older messages:', error);
-        throw error;
-      }
-      
-      console.log('📬 Fetched older messages:', {
-        count: olderMsgs?.length || 0,
-        firstMessageId: olderMsgs?.[0]?.id,
-        lastMessageId: olderMsgs?.[olderMsgs.length - 1]?.id,
-        messages: olderMsgs?.map(m => ({ id: m.id, content: m.content.substring(0, 50) + '...', created_at: m.created_at })) || []
+      console.log('🔄 Loading more messages...', {
+        conversationId: currentConversationId,
+        firstMessageId: currentFirstMessageId,
+        currentMessageCount: currentMessages.length
       });
       
-      if (olderMsgs && olderMsgs.length > 0) {
-        // Reverse older messages to maintain chronological order (oldest first)
-        const reversedOlderMsgs = filterValidMessages(olderMsgs.reverse());
-        
-        console.log('🔄 Reversed older messages:', {
-          count: reversedOlderMsgs.length,
-          firstMessageId: reversedOlderMsgs[0]?.id,
-          lastMessageId: reversedOlderMsgs[reversedOlderMsgs.length - 1]?.id
-        });
+      // Use the exact same API and logic as initial load
+      // Fetch 20 older messages using beforeMessageId (same as initial load but with pagination)
+      const olderMsgs = await ChatMessage.listByConversation(currentConversationId, { 
+        limit: 20, 
+        beforeMessageId: currentFirstMessageId 
+      });
+      
+      // Reverse to show oldest at top, newest at bottom (same as initial load)
+      const reversedOlderMsgs = filterValidMessages(olderMsgs.reverse());
+      
+      if (reversedOlderMsgs.length > 0) {
+        // Double-check conversation hasn't changed before updating
+        if (currentConversationId !== conversationId) {
+          console.warn('⚠️ Conversation changed during load, aborting message update');
+          setIsLoadingMore(false);
+          return;
+        }
         
         // Prepend older messages to the beginning of the array
         setMessages(prev => {
-          const newMessages = [...reversedOlderMsgs, ...prev];
-          console.log('📝 Updated messages array:', {
-            oldCount: prev.length,
-            newCount: newMessages.length,
-            addedCount: reversedOlderMsgs.length
+          // Verify all existing messages belong to current conversation
+          const invalidMessages = prev.filter(m => m.conversation_id !== currentConversationId);
+          if (invalidMessages.length > 0) {
+            console.warn('⚠️ Found messages from different conversation, resetting');
+            // Reset to only valid messages
+            const validMessages = prev.filter(m => m.conversation_id === currentConversationId);
+            if (validMessages.length === 0) {
+              // No valid messages, don't add older messages
+              setIsLoadingMore(false);
+              return prev;
+            }
+            // Use valid messages as base
+            prev = validMessages;
+          }
+          
+          // Create a Set of existing message IDs to avoid duplicates
+          const existingIds = new Set(prev.map(m => m.id));
+          
+          // Filter out messages that already exist AND ensure they belong to current conversation
+          const newMessagesToAdd = reversedOlderMsgs.filter(m => 
+            !existingIds.has(m.id) && m.conversation_id === currentConversationId
+          );
+          
+          if (newMessagesToAdd.length === 0) {
+            console.log('⚠️ All messages already exist, skipping duplicates');
+            setHasMoreMessages(olderMsgs.length === 20);
+            setIsLoadingMore(false);
+            return prev;
+          }
+          
+          // Prepend new messages (oldest first, same order as initial load)
+          const newMessages = [...newMessagesToAdd, ...prev];
+          
+          console.log('✅ Load more completed:', {
+            addedCount: newMessagesToAdd.length,
+            totalCount: newMessages.length,
+            hasMoreMessages: olderMsgs.length === 20
           });
+          
+          // Update firstMessageId to the oldest message (first in reversed array, same as initial load)
+          setFirstMessageId(newMessagesToAdd[0].id);
+          setHasMoreMessages(olderMsgs.length === 20);
+          
+          // Restore scroll position after messages are rendered
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              const currentViewport = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+              if (currentViewport) {
+                const newScrollHeight = currentViewport.scrollHeight;
+                const heightDifference = newScrollHeight - prevScrollHeight;
+                
+                if (heightDifference > 0) {
+                  // Maintain the same visual position by adjusting scrollTop
+                  currentViewport.scrollTop = prevScrollTop + heightDifference;
+                }
+              }
+            });
+          });
+          
           return newMessages;
-        });
-        
-        // Update firstMessageId to the oldest message in the new batch
-        // Since we reversed, the oldest message is now at index 0 of reversedOlderMsgs
-        setFirstMessageId(reversedOlderMsgs[0].id);
-        setHasMoreMessages(olderMsgs.length === 20);
-        
-        console.log('✅ Load more completed:', {
-          newFirstMessageId: reversedOlderMsgs[0].id,
-          hasMoreMessages: olderMsgs.length === 20
         });
       } else {
         console.log('📭 No more messages to load');
         setHasMoreMessages(false);
       }
-      // After messages update, restore scroll position
-      setTimeout(() => {
-        if (viewport) {
-          const newScrollHeight = viewport.scrollHeight;
-          const heightDifference = newScrollHeight - prevScrollHeight;
-          viewport.scrollTop = heightDifference;
-        }
-      }, 0);
     } catch (err) {
       console.error('❌ Error loading more messages:', err);
-      // Don't show error in chat UI - just log it
     } finally {
       setIsLoadingMore(false);
     }
@@ -1751,6 +2042,22 @@ Your task is to respond to the user's message below, taking into account their s
                       </button>
                     </div>
                   )}
+                  {/* Scheduled Messages Button - only show for dietitians */}
+                  {currentDietitian?.id && clientId && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        fetchScheduledReminders();
+                        setShowRemindersDialog(true);
+                      }}
+                      className="px-3 py-2 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 hover:from-purple-100 hover:to-indigo-100 text-purple-700 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300"
+                    >
+                      <Calendar className="h-4 w-4 mr-2" />
+                      {translations.scheduled || 'Scheduled'}
+                    </Button>
+                  )}
+                  
                   <Button
                     variant="outline"
                     size="sm"
@@ -1924,7 +2231,7 @@ Your task is to respond to the user's message below, taking into account their s
                       >
                         <Clock className="h-4 w-4" />
                         <span className="text-sm font-medium">
-                          {isScheduled ? 'Scheduled' : 'Send Now'}
+                          {isScheduled ? (translations.scheduled || 'Scheduled') : (translations.sendNow || 'Send Now')}
                         </span>
                       </button>
                       
@@ -1958,7 +2265,7 @@ Your task is to respond to the user's message below, taking into account their s
                         <div className="flex items-center gap-2 text-purple-700 text-xs">
                           <Clock className="h-4 w-4" />
                           <span className="font-medium">
-                            Scheduled for: {new Date(`${scheduledDate}T${scheduledTime}`).toLocaleString()}
+                            {translations.scheduledFor || 'Scheduled for'}: {new Date(`${scheduledDate}T${scheduledTime}`).toLocaleString()}
                           </span>
                         </div>
                       </div>
@@ -2130,6 +2437,298 @@ Your task is to respond to the user's message below, taking into account their s
           </div>
         </div>
       )}
+
+      {/* Scheduled Reminders Dialog */}
+      <Dialog open={showRemindersDialog} onOpenChange={setShowRemindersDialog}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              {translations.scheduledMessages || 'Scheduled Messages'}
+            </DialogTitle>
+          </DialogHeader>
+          
+          {editingReminder ? (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{translations.scheduledMessageDate || 'Date'}</label>
+                <Input
+                  type="date"
+                  value={editReminderDate}
+                  onChange={(e) => setEditReminderDate(e.target.value)}
+                  min={new Date().toISOString().split('T')[0]}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{translations.scheduledMessageTime || 'Time'}</label>
+                <Input
+                  type="time"
+                  value={editReminderTime}
+                  onChange={(e) => setEditReminderTime(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{translations.scheduledMessageContent || 'Message'}</label>
+                <Textarea
+                  className="min-h-[100px]"
+                  value={editReminderContext}
+                  onChange={(e) => setEditReminderContext(e.target.value)}
+                  placeholder={translations.enterMessageContent || 'Enter message content...'}
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEditingReminder(null);
+                    setEditReminderDate('');
+                    setEditReminderTime('');
+                    setEditReminderContext('');
+                  }}
+                >
+                  {translations.cancel || 'Cancel'}
+                </Button>
+                <Button onClick={saveEditedReminder}>
+                  {translations.saveChanges || 'Save Changes'}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {scheduledReminders.length === 0 ? (
+                <div className="text-center py-8 text-slate-500">
+                  <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>{translations.noScheduledMessages || 'No scheduled messages'}</p>
+                </div>
+              ) : (
+                <>
+                  {/* Regular Scheduled Messages Section */}
+                  {scheduledReminders.filter(r => r.plan_type !== 'meal_plan' && r.plan_type !== 'training_plan').length > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 pb-2 border-b-2 border-purple-200">
+                        <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-600 rounded-lg flex items-center justify-center shadow-sm">
+                          <MessageSquare className="h-4 w-4 text-white" />
+                        </div>
+                        <h3 className="font-semibold text-slate-700">
+                          {translations.scheduledMessages || 'Scheduled Messages'}
+                        </h3>
+                        <span className="ml-auto px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-medium">
+                          {scheduledReminders.filter(r => r.plan_type !== 'meal_plan' && r.plan_type !== 'training_plan').length}
+                        </span>
+                      </div>
+                      <div className="space-y-2 pl-2">
+                        {scheduledReminders
+                          .filter(r => r.plan_type !== 'meal_plan' && r.plan_type !== 'training_plan')
+                          .map((reminder) => (
+                            <div
+                              key={reminder.id}
+                              className="p-4 border rounded-lg bg-gradient-to-r from-purple-50/50 to-pink-50/50 hover:shadow-md transition-shadow border-purple-200/50"
+                            >
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="flex-1 space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <Clock className="h-4 w-4 text-purple-600" />
+                                    <span className="font-medium">
+                                      {new Date(`${reminder.scheduled_date}T${reminder.scheduled_time}`).toLocaleString()}
+                                    </span>
+                                    {reminder.week_number && (
+                                      <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-medium">
+                                        {translations.week || 'Week'} {reminder.week_number}
+                                      </span>
+                                    )}
+                                    <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                      reminder.status === 'pending' 
+                                        ? 'bg-yellow-100 text-yellow-700' 
+                                        : 'bg-green-100 text-green-700'
+                                    }`}>
+                                      {reminder.status}
+                                    </span>
+                                  </div>
+                                  <p className="text-slate-700 text-sm">{reminder.context}</p>
+                                  {reminder.topic && (
+                                    <p className="text-xs text-slate-500">{translations.topic || 'Topic'}: {reminder.topic}</p>
+                                  )}
+                                </div>
+                                <div className="flex gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => openEditReminder(reminder)}
+                                    className="h-8 w-8 p-0"
+                                    title={translations.edit || 'Edit'}
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => deleteScheduledReminder(reminder.id)}
+                                    className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    title={translations.delete || 'Delete'}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Meal Plan Reminders Section */}
+                  {scheduledReminders.filter(r => r.plan_type === 'meal_plan').length > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 pb-2 border-b-2 border-orange-200">
+                        <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-amber-600 rounded-lg flex items-center justify-center shadow-sm">
+                          <UtensilsCrossed className="h-4 w-4 text-white" />
+                        </div>
+                        <h3 className="font-semibold text-slate-700">
+                          {translations.mealPlanReminders || 'Meal Plan Reminders'}
+                        </h3>
+                        <span className="ml-auto px-2 py-1 bg-orange-100 text-orange-700 rounded text-xs font-medium">
+                          {scheduledReminders.filter(r => r.plan_type === 'meal_plan').length}
+                        </span>
+                      </div>
+                      <div className="space-y-2 pl-2">
+                        {scheduledReminders
+                          .filter(r => r.plan_type === 'meal_plan')
+                          .map((reminder) => (
+                            <div
+                              key={reminder.id}
+                              className="p-4 border rounded-lg bg-gradient-to-r from-orange-50/50 to-amber-50/50 hover:shadow-md transition-shadow border-orange-200/50"
+                            >
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="flex-1 space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <Clock className="h-4 w-4 text-orange-600" />
+                                    <span className="font-medium">
+                                      {new Date(`${reminder.scheduled_date}T${reminder.scheduled_time}`).toLocaleString()}
+                                    </span>
+                                    {reminder.week_number && (
+                                      <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded text-xs font-medium">
+                                        {translations.week || 'Week'} {reminder.week_number}
+                                      </span>
+                                    )}
+                                    <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                      reminder.status === 'pending' 
+                                        ? 'bg-yellow-100 text-yellow-700' 
+                                        : 'bg-green-100 text-green-700'
+                                    }`}>
+                                      {reminder.status}
+                                    </span>
+                                  </div>
+                                  <p className="text-slate-700 text-sm">{reminder.context}</p>
+                                  {reminder.topic && (
+                                    <p className="text-xs text-slate-500">{translations.topic || 'Topic'}: {reminder.topic}</p>
+                                  )}
+                                </div>
+                                <div className="flex gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => openEditReminder(reminder)}
+                                    className="h-8 w-8 p-0"
+                                    title={translations.edit || 'Edit'}
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => deleteScheduledReminder(reminder.id)}
+                                    className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    title={translations.delete || 'Delete'}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Training Plan Reminders Section */}
+                  {scheduledReminders.filter(r => r.plan_type === 'training_plan').length > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 pb-2 border-b-2 border-blue-200">
+                        <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center shadow-sm">
+                          <Dumbbell className="h-4 w-4 text-white" />
+                        </div>
+                        <h3 className="font-semibold text-slate-700">
+                          {translations.trainingPlanReminders || 'Training Plan Reminders'}
+                        </h3>
+                        <span className="ml-auto px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                          {scheduledReminders.filter(r => r.plan_type === 'training_plan').length}
+                        </span>
+                      </div>
+                      <div className="space-y-2 pl-2">
+                        {scheduledReminders
+                          .filter(r => r.plan_type === 'training_plan')
+                          .map((reminder) => (
+                            <div
+                              key={reminder.id}
+                              className="p-4 border rounded-lg bg-gradient-to-r from-blue-50/50 to-indigo-50/50 hover:shadow-md transition-shadow border-blue-200/50"
+                            >
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="flex-1 space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <Clock className="h-4 w-4 text-blue-600" />
+                                    <span className="font-medium">
+                                      {new Date(`${reminder.scheduled_date}T${reminder.scheduled_time}`).toLocaleString()}
+                                    </span>
+                                    {reminder.week_number && (
+                                      <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                                        {translations.week || 'Week'} {reminder.week_number}
+                                      </span>
+                                    )}
+                                    <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                      reminder.status === 'pending' 
+                                        ? 'bg-yellow-100 text-yellow-700' 
+                                        : 'bg-green-100 text-green-700'
+                                    }`}>
+                                      {reminder.status}
+                                    </span>
+                                  </div>
+                                  <p className="text-slate-700 text-sm">{reminder.context}</p>
+                                  {reminder.topic && (
+                                    <p className="text-xs text-slate-500">{translations.topic || 'Topic'}: {reminder.topic}</p>
+                                  )}
+                                </div>
+                                <div className="flex gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => openEditReminder(reminder)}
+                                    className="h-8 w-8 p-0"
+                                    title={translations.edit || 'Edit'}
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => deleteScheduledReminder(reminder.id)}
+                                    className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    title={translations.delete || 'Delete'}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
