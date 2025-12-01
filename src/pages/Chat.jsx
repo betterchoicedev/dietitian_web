@@ -71,15 +71,27 @@ export default function Chat() {
   const autoRefreshIntervalRef = useRef(null);
   const simpleRefreshIntervalRef = useRef(null);
 
-  // Helper function to filter out assistant messages with null "message" column
+  // Helper function to filter messages based on role and content
   const filterValidMessages = (messages) => {
     return messages.filter(msg => {
-      // If role is "assistant", only keep messages where "message" column is not null
-      if (msg.role === 'assistant') {
-        return msg.message !== null && msg.message !== undefined;
+      // Show messages only where role is "assistant" or "user"
+      if (msg.role === 'assistant' || msg.role === 'user') {
+        // If role is "assistant", only keep messages where "message" column is not null
+        if (msg.role === 'assistant') {
+          return msg.message !== null && msg.message !== undefined;
+        }
+        // Keep all user messages
+        return true;
       }
-      // Keep all non-assistant messages
-      return true;
+      
+      // Show role "system" only if it contains "ANALYZED FOOD CONTEXT" or "Score"
+      if (msg.role === 'system') {
+        const messageContent = String(msg.message || msg.content || '');
+        return messageContent.includes('ANALYZED FOOD CONTEXT') || messageContent.includes('Image URL');
+      }
+      
+      // Filter out all other roles
+      return false;
     });
   };
 
