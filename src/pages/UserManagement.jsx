@@ -126,7 +126,14 @@ export default function UserManagement() {
       const visibleProfiles =
         currentProfile.role === 'sys_admin'
           ? profileRows
-          : profileRows.filter((p) => p.company_id === currentProfile.company_id);
+          : profileRows.filter((p) => {
+              // Company managers: only show profiles from their company and exclude sys_admins
+              if (currentProfile.role === 'company_manager') {
+                return p.company_id === currentProfile.company_id && p.role !== 'sys_admin';
+              }
+              // Employees: only show profiles from their company
+              return p.company_id === currentProfile.company_id;
+            });
 
       const companyMembers = new Set(visibleProfiles.map((p) => p.id));
 
@@ -189,6 +196,75 @@ export default function UserManagement() {
     } catch (err) {
       console.warn('Failed to parse date', value, err);
       return value;
+    }
+  };
+
+  const isSubscriptionActive = (client) => {
+    if (!client.subscription_status) return false;
+    if (client.subscription_status.toLowerCase() !== 'active') return false;
+    if (client.subscription_expires_at) {
+      const expiresAt = new Date(client.subscription_expires_at).getTime();
+      const now = Date.now();
+      return expiresAt > now;
+    }
+    return true;
+  };
+
+  const isActiveButExpired = (client) => {
+    // Status is "active" but expiration date has passed
+    if (!client.subscription_status) return false;
+    if (client.subscription_status.toLowerCase() !== 'active') return false;
+    if (client.subscription_expires_at) {
+      const expiresAt = new Date(client.subscription_expires_at).getTime();
+      const now = Date.now();
+      return expiresAt <= now; // Expired
+    }
+    return false;
+  };
+
+  const getSubscriptionInfo = (client) => {
+    const isActive = isSubscriptionActive(client);
+    const isActiveExpired = isActiveButExpired(client);
+    const status = client.subscription_status || 'none';
+    const type = client.subscription_type || null;
+    const expiresAt = client.subscription_expires_at || null;
+
+    return {
+      isActive,
+      isActiveExpired,
+      status,
+      type,
+      expiresAt,
+    };
+  };
+
+  const formatSubscriptionType = (type) => {
+    if (!type) return translations?.noSubscription || 'No subscription';
+    return type.charAt(0).toUpperCase() + type.slice(1).toLowerCase();
+  };
+
+  const formatSubscriptionExpiry = (expiresAt) => {
+    if (!expiresAt) return translations?.noExpiration || 'No expiration';
+    try {
+      const expiryDate = new Date(expiresAt);
+      const now = Date.now();
+      const diffMs = expiryDate.getTime() - now;
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+      if (diffDays < 0) {
+        return translations?.expired || 'Expired';
+      } else if (diffDays === 0) {
+        return translations?.expiresToday || 'Expires today';
+      } else if (diffDays === 1) {
+        return translations?.expiresTomorrow || 'Expires tomorrow';
+      } else if (diffDays <= 7) {
+        return `${diffDays} ${translations?.days || 'days'}`;
+      } else {
+        return expiryDate.toLocaleDateString();
+      }
+    } catch (err) {
+      console.warn('Failed to parse expiry date', expiresAt, err);
+      return expiresAt;
     }
   };
 
@@ -345,14 +421,46 @@ export default function UserManagement() {
   }, [profiles]);
 
   const filteredClients = useMemo(() => {
-    if (!clientSearchTerm.trim()) return clients;
-    const term = clientSearchTerm.trim().toLowerCase();
-    return clients.filter((client) => {
-      const nameMatch = client.full_name?.toLowerCase().includes(term);
-      const codeMatch = client.user_code?.toLowerCase().includes(term);
-      const emailMatch = client.email?.toLowerCase().includes(term);
-      const phoneMatch = client.phone_number?.toLowerCase().includes(term);
-      return nameMatch || codeMatch || emailMatch || phoneMatch;
+    let result = clients;
+    
+    // Filter by search term if provided
+    if (clientSearchTerm.trim()) {
+      const term = clientSearchTerm.trim().toLowerCase();
+      result = result.filter((client) => {
+        const nameMatch = client.full_name?.toLowerCase().includes(term);
+        const codeMatch = client.user_code?.toLowerCase().includes(term);
+        const emailMatch = client.email?.toLowerCase().includes(term);
+        const phoneMatch = client.phone_number?.toLowerCase().includes(term);
+        return nameMatch || codeMatch || emailMatch || phoneMatch;
+      });
+    }
+    
+    // Sort: active subscriptions first, then active but expired (yellow), then clients with names, then alphabetically
+    return result.sort((a, b) => {
+      const aActive = isSubscriptionActive(a);
+      const bActive = isSubscriptionActive(b);
+      const aActiveExpired = isActiveButExpired(a);
+      const bActiveExpired = isActiveButExpired(b);
+      
+      // Priority: 1 = truly active, 2 = active but expired, 3 = everything else
+      const aPriority = aActive ? 1 : aActiveExpired ? 2 : 3;
+      const bPriority = bActive ? 1 : bActiveExpired ? 2 : 3;
+      
+      if (aPriority !== bPriority) {
+        return aPriority - bPriority;
+      }
+      
+      // If both have same priority, prioritize clients with names
+      const aHasName = Boolean(a.full_name?.trim());
+      const bHasName = Boolean(b.full_name?.trim());
+      
+      if (aHasName && !bHasName) return -1;
+      if (!aHasName && bHasName) return 1;
+      
+      // If both have same name status, sort alphabetically by name
+      const aName = a.full_name || '';
+      const bName = b.full_name || '';
+      return aName.localeCompare(bName);
     });
   }, [clients, clientSearchTerm]);
 
@@ -858,10 +966,17 @@ export default function UserManagement() {
                       ? baseRoleOptions
                       : baseRoleOptions.filter((option) => option.value !== 'sys_admin');
 
+                  const isCurrentUser = profile.id === me?.id;
+
                   return (
                     <TableRow key={profile.id}>
                       <TableCell className={cn('font-medium', isRTL ? 'text-right' : 'text-left')}>
-                        {profile.name || translations?.noName || 'No name'}
+                        <div className="flex items-center gap-2">
+                          <span>{profile.name || translations?.noName || 'No name'}</span>
+                          {isCurrentUser && (
+                            <span className="text-xs text-muted-foreground">me :)</span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell
                         className={cn(
@@ -979,6 +1094,15 @@ export default function UserManagement() {
                   {translations?.clientCode || 'Client Code'}
                 </TableHead>
                 <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                  {translations?.subscriptionStatus || 'Subscription Status'}
+                </TableHead>
+                <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                  {translations?.subscriptionType || 'Subscription Type'}
+                </TableHead>
+                <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
+                  {translations?.subscriptionExpires || 'Expires'}
+                </TableHead>
+                <TableHead className={cn(isRTL ? 'text-right' : 'text-left')}>
                   {translations?.assignedTo || 'Assigned To'}
                 </TableHead>
               </TableRow>
@@ -986,7 +1110,7 @@ export default function UserManagement() {
             <TableBody>
               {displayedClients.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center text-muted-foreground">
                     {clientSearchTerm.trim()
                       ? translations?.noClientsFound || 'No clients found.'
                       : translations?.noClientsFoundGeneral ||
@@ -1009,6 +1133,8 @@ export default function UserManagement() {
                   const providerIsSysAdmin =
                     assignedProfile?.role === 'sys_admin' && isCompanyManager;
 
+                  const subscriptionInfo = getSubscriptionInfo(client);
+
                   return (
                     <TableRow key={client.user_code}>
                       <TableCell className={cn('font-medium', isRTL ? 'text-right' : 'text-left')}>
@@ -1021,6 +1147,37 @@ export default function UserManagement() {
                         )}
                       >
                         {client.user_code}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={subscriptionInfo.isActive || subscriptionInfo.isActiveExpired ? 'default' : 'secondary'}
+                          className={
+                            subscriptionInfo.isActive
+                              ? 'bg-green-500 hover:bg-green-600'
+                              : subscriptionInfo.isActiveExpired
+                              ? 'bg-yellow-500 hover:bg-yellow-600'
+                              : ''
+                          }
+                        >
+                          {subscriptionInfo.isActive
+                            ? translations?.active || 'Active'
+                            : subscriptionInfo.isActiveExpired
+                            ? translations?.active || 'Active'
+                            : subscriptionInfo.status
+                            ? subscriptionInfo.status.charAt(0).toUpperCase() +
+                              subscriptionInfo.status.slice(1).toLowerCase()
+                            : translations?.inactive || 'Inactive'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className={cn(isRTL ? 'text-right' : 'text-left')}>
+                        <span className="text-sm">
+                          {formatSubscriptionType(subscriptionInfo.type)}
+                        </span>
+                      </TableCell>
+                      <TableCell className={cn(isRTL ? 'text-right' : 'text-left')}>
+                        <span className="text-sm text-muted-foreground">
+                          {formatSubscriptionExpiry(subscriptionInfo.expiresAt)}
+                        </span>
                       </TableCell>
                       <TableCell>
                         <Select
