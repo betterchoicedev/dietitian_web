@@ -25,14 +25,7 @@ export const secondSupabase = createClient(secondSupabaseUrl, secondSupabaseKey,
   }
 })
 
-// Second Supabase admin client for auth operations (if service role key is available)
-const secondSupabaseServiceRoleKey = import.meta.env.VITE_SECOND_SUPABASE_SERVICE_ROLE_KEY
-
-export const secondSupabaseAdmin = secondSupabaseServiceRoleKey
-  ? createClient(secondSupabaseUrl, secondSupabaseServiceRoleKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false
-      }
-    })
-  : null 
+// ⚠️ SECURITY NOTE: Admin operations (like deleting auth users) require service role keys.
+// These operations are currently done via direct API calls in Users.jsx.
+// For better security, consider moving these operations to your Python backend (backend/backend.py).
+// The service role key should NEVER be exposed in the frontend - it bypasses all RLS policies. 

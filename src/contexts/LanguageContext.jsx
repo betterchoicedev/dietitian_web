@@ -112,6 +112,7 @@ export const translations = {
     allClients: 'All Clients',
     clearFilters: 'Clear Filters',
     effort: 'Effort',
+
     trackClientProgress: 'Track client progress and workout consistency',
     analyticsDashboardComingSoon: 'Analytics dashboard coming soon. Track volume, strength progression, and consistency metrics.',
     manageWorkoutReminders: 'Manage workout reminders for clients',

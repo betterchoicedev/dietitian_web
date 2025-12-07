@@ -2664,84 +2664,31 @@ export default function Clients() {
         }
 
         // Delete from auth.users if we have the user_id or email
+        // Use secure backend endpoint instead of exposing service role key in frontend
         if (clientRecord && (clientRecord.user_id || clientRecord.email)) {
           try {
-            const secondSupabaseUrl = import.meta.env.VITE_SECOND_SUPABASE_URL;
-            const secondSupabaseServiceRoleKey = import.meta.env.VITE_SECOND_SUPABASE_SERVICE_ROLE_KEY;
+            const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net';
+            const deleteResponse = await fetch(`${backendUrl}/api/auth/delete-second-user`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                user_id: clientRecord.user_id,
+                email: clientRecord.email
+              })
+            });
 
-            if (!secondSupabaseServiceRoleKey) {
+            if (!deleteResponse.ok) {
+              const errorData = await deleteResponse.json().catch(() => ({ error: 'Unknown error' }));
               console.warn(
-                'VITE_SECOND_SUPABASE_SERVICE_ROLE_KEY not configured. Cannot delete auth user. Please add the service role key to environment variables.'
+                `Failed to delete auth user from secondary Supabase for user_code ${clientId}:`,
+                errorData
               );
             } else {
-              // Use admin API to delete auth user
-              let authUserId = clientRecord.user_id;
-              const authUserEmail = clientRecord.email;
-
-              const adminHeaders = {
-                apikey: secondSupabaseServiceRoleKey,
-                Authorization: `Bearer ${secondSupabaseServiceRoleKey}`,
-                'Content-Type': 'application/json'
-              };
-
-              // If we don't have user_id, look it up by email first
-              if (!authUserId && authUserEmail) {
-                try {
-                  const lookupResponse = await fetch(
-                    `${secondSupabaseUrl}/auth/v1/admin/users?email=${encodeURIComponent(authUserEmail)}`,
-                    {
-                      method: 'GET',
-                      headers: adminHeaders
-                    }
-                  );
-
-                  if (lookupResponse.ok) {
-                    const lookupData = await lookupResponse.json();
-                    if (lookupData.users && lookupData.users.length > 0) {
-                      authUserId = lookupData.users[0].id;
-                      console.log(`Found auth user_id ${authUserId} for email ${authUserEmail}`);
-                    }
-                  }
-                } catch (lookupError) {
-                  console.warn(
-                    `Failed to lookup auth user by email ${authUserEmail}:`,
-                    lookupError
-                  );
-                }
-              }
-
-              // Delete by user_id (UUID) - this is the only supported method
-              if (authUserId) {
-                const deleteEndpoint = `${secondSupabaseUrl}/auth/v1/admin/users/${authUserId}`;
-
-                const deleteResponse = await fetch(deleteEndpoint, {
-                  method: 'DELETE',
-                  headers: adminHeaders
-                });
-
-                if (!deleteResponse.ok) {
-                  const errorText = await deleteResponse.text();
-                  let errorData;
-                  try {
-                    errorData = JSON.parse(errorText);
-                  } catch {
-                    errorData = { error: errorText };
-                  }
-
-                  console.warn(
-                    `Failed to delete auth user from secondary Supabase for user_id ${authUserId}:`,
-                    errorData
-                  );
-                } else {
-                  console.log(
-                    `Successfully deleted auth user from secondary Supabase for user_id ${authUserId}`
-                  );
-                }
-              } else {
-                console.warn(
-                  `Cannot delete auth user: no user_id found and could not lookup by email ${authUserEmail}`
-                );
-              }
+              console.log(
+                `Successfully deleted auth user from secondary Supabase for user_code ${clientId}`
+              );
             }
           } catch (authDeleteError) {
             console.warn(

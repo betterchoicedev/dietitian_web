@@ -112,6 +112,19 @@ supabase_key = (
 
 supabase: Client = create_client(supabase_url, supabase_key)
 
+# Initialize second Supabase client (for meal_plans database)
+second_supabase_url = os.getenv("SECOND_SUPABASE_URL") or os.getenv("secondSupabaseUrl")
+second_supabase_key = (
+    os.getenv("SECOND_SUPABASE_SERVICE_ROLE_KEY")
+    or os.getenv("secondSupabaseServiceRoleKey")
+    or os.getenv("secondSupabaseServiceKey")
+    or os.getenv("secondSupabaseKey")
+)
+
+second_supabase: Client = None
+if second_supabase_url and second_supabase_key:
+    second_supabase = create_client(second_supabase_url, second_supabase_key)
+
 GCS_BUCKET_NAME = os.getenv("GCS_CHAT_BUCKET", "users-chat-uploads")
 GCS_SERVICE_ACCOUNT_FILE = os.getenv("GCS_SERVICE_ACCOUNT_FILE")
 GCS_SERVICE_ACCOUNT_JSON = os.getenv("GCS_SERVICE_ACCOUNT_JSON")
@@ -393,6 +406,78 @@ def api_chat_delete_media():
         logger.exception("Failed to delete chat media from GCS")
 
         return jsonify({"error": "Failed to delete file", "details": str(exc)}), 500
+
+
+
+@app.route("/api/auth/delete-second-user", methods=["POST"])
+def api_delete_second_auth_user():
+    """
+    Delete an auth user from the second Supabase instance.
+    Requires: user_id (UUID) or email
+    """
+    if not second_supabase_url or not second_supabase_key:
+        return jsonify({"error": "Second Supabase is not configured"}), 500
+
+    try:
+        payload = request.get_json()
+        if not payload:
+            return jsonify({"error": "Request body is required"}), 400
+
+        user_id = payload.get("user_id")
+        email = payload.get("email")
+
+        if not user_id and not email:
+            return jsonify({"error": "Either user_id or email is required"}), 400
+
+        admin_headers = {
+            "apikey": second_supabase_key,
+            "Authorization": f"Bearer {second_supabase_key}",
+            "Content-Type": "application/json",
+        }
+
+        # If we don't have user_id, look it up by email first
+        if not user_id and email:
+            try:
+                lookup_response = requests.get(
+                    f"{second_supabase_url}/auth/v1/admin/users?email={email}",
+                    headers=admin_headers,
+                    timeout=15,
+                )
+                if lookup_response.status_code == 200:
+                    lookup_data = lookup_response.json()
+                    if lookup_data.get("users") and len(lookup_data["users"]) > 0:
+                        user_id = lookup_data["users"][0]["id"]
+                        logger.info(f"Found auth user_id {user_id} for email {email}")
+            except Exception as lookup_err:
+                logger.warning(f"Failed to lookup auth user by email {email}: {lookup_err}")
+                return jsonify({"error": f"Failed to lookup user by email: {str(lookup_err)}"}), 500
+
+        # Delete by user_id (UUID) - this is the only supported method
+        if user_id:
+            delete_endpoint = f"{second_supabase_url}/auth/v1/admin/users/{user_id}"
+            delete_response = requests.delete(
+                delete_endpoint,
+                headers=admin_headers,
+                timeout=15,
+            )
+
+            if delete_response.status_code == 200 or delete_response.status_code == 204:
+                logger.info(f"Successfully deleted auth user from second Supabase for user_id {user_id}")
+                return jsonify({"success": True, "message": "Auth user deleted successfully"}), 200
+            else:
+                error_text = delete_response.text
+                try:
+                    error_data = delete_response.json()
+                except:
+                    error_data = {"error": error_text}
+                logger.warning(f"Failed to delete auth user from second Supabase: {error_data}")
+                return jsonify({"error": "Failed to delete auth user", "details": error_data}), delete_response.status_code
+        else:
+            return jsonify({"error": "Cannot delete auth user: no user_id found"}), 400
+
+    except Exception as exc:
+        logger.exception("Failed to delete auth user from second Supabase")
+        return jsonify({"error": "Failed to delete auth user", "details": str(exc)}), 500
 
 
 
