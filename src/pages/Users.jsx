@@ -14,7 +14,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 
 import { getMyProfile, getCompanyProfileIds } from '@/utils/auth';
 
-import { secondSupabase } from '@/lib/supabase';
+import { supabase, secondSupabase } from '@/lib/supabase';
 
 import { 
 
@@ -2580,6 +2580,35 @@ export default function Clients() {
         }
       }
 
+      // Ensure all meal plans are deleted by user_code (fallback for any that failed above)
+      // This is critical - we must delete all meal plans before deleting the user to avoid foreign key constraint errors
+      try {
+        const { error: mealPlanDeleteError } = await supabase
+          .from('meal_plans_and_schemas')
+          .delete()
+          .eq('user_code', clientId);
+        
+        if (mealPlanDeleteError) {
+          console.error(
+            `Failed to delete meal plans for user_code ${clientId}:`,
+            mealPlanDeleteError
+          );
+          throw new Error(
+            `Cannot delete client: Failed to delete associated meal plans. ` +
+            `This is required to avoid database constraint errors. Error: ${mealPlanDeleteError.message}`
+          );
+        } else {
+          console.log(`✅ Ensured all meal plans deleted for user_code ${clientId}`);
+        }
+      } catch (mealPlanCleanupError) {
+        console.error(
+          `Error during meal plan cleanup for user_code ${clientId}:`,
+          mealPlanCleanupError
+        );
+        // Re-throw to prevent user deletion (which would fail with foreign key constraint anyway)
+        throw mealPlanCleanupError;
+      }
+
       if (clientQueuedMessages.length && MessageQueue?.deleteByUserCode) {
         try {
           await MessageQueue.deleteByUserCode(clientId);
@@ -2665,41 +2694,56 @@ export default function Clients() {
 
         // Delete from auth.users if we have the user_id or email
         // Use secure backend endpoint instead of exposing service role key in frontend
+        console.log('🔍 Checking if auth user deletion is needed. clientRecord:', clientRecord);
+        
         if (clientRecord && (clientRecord.user_id || clientRecord.email)) {
           try {
             const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net';
+            const requestBody = {
+              user_id: clientRecord.user_id,
+              email: clientRecord.email
+            };
+            
+            console.log(`📤 Calling backend to delete auth user: ${backendUrl}/api/auth/delete-second-user`, requestBody);
+            
             const deleteResponse = await fetch(`${backendUrl}/api/auth/delete-second-user`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json'
               },
-              body: JSON.stringify({
-                user_id: clientRecord.user_id,
-                email: clientRecord.email
-              })
+              body: JSON.stringify(requestBody)
             });
 
+            const responseData = await deleteResponse.json().catch(() => ({ error: 'Failed to parse response' }));
+            
             if (!deleteResponse.ok) {
-              const errorData = await deleteResponse.json().catch(() => ({ error: 'Unknown error' }));
-              console.warn(
-                `Failed to delete auth user from secondary Supabase for user_code ${clientId}:`,
-                errorData
+              console.error(
+                `❌ Failed to delete auth user from secondary Supabase for user_code ${clientId}:`,
+                {
+                  status: deleteResponse.status,
+                  statusText: deleteResponse.statusText,
+                  error: responseData
+                }
               );
+              // Don't throw - continue with deletion even if auth deletion fails
+              // But log it as an error so it's visible
             } else {
               console.log(
-                `Successfully deleted auth user from secondary Supabase for user_code ${clientId}`
+                `✅ Successfully deleted auth user from secondary Supabase for user_code ${clientId}`,
+                responseData
               );
             }
           } catch (authDeleteError) {
-            console.warn(
-              `Error deleting auth user from secondary Supabase for user_code ${clientId}:`,
+            console.error(
+              `❌ Exception while deleting auth user from secondary Supabase for user_code ${clientId}:`,
               authDeleteError
             );
             // Don't throw - continue with deletion even if auth deletion fails
           }
         } else {
-          console.log(
-            `No user_id or email found in client record for user_code ${clientId}. Skipping auth user deletion.`
+          console.warn(
+            `⚠️ No user_id or email found in client record for user_code ${clientId}. ` +
+            `clientRecord: ${JSON.stringify(clientRecord)}. Skipping auth user deletion.`
           );
         }
       } catch (secondaryDeleteError) {

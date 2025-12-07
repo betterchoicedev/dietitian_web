@@ -415,18 +415,38 @@ def api_delete_second_auth_user():
     Delete an auth user from the second Supabase instance.
     Requires: user_id (UUID) or email
     """
-    if not second_supabase_url or not second_supabase_key:
-        return jsonify({"error": "Second Supabase is not configured"}), 500
+    logger.info("🔍 Received request to delete second Supabase auth user")
+    
+    # Check configuration
+    url_configured = bool(second_supabase_url)
+    key_configured = bool(second_supabase_key)
+    
+    logger.info("🔍 Second Supabase config check - URL configured: %s, Key configured: %s", 
+                url_configured, key_configured)
+    
+    if not url_configured or not key_configured:
+        error_msg = f"Second Supabase is not configured. URL configured: {url_configured}, Key configured: {key_configured}"
+        logger.error("❌ %s", error_msg)
+        logger.error("❌ Please set environment variables: SECOND_SUPABASE_URL (or secondSupabaseUrl) and SECOND_SUPABASE_SERVICE_ROLE_KEY (or secondSupabaseServiceRoleKey)")
+        return jsonify({"error": error_msg}), 500
+    
+    # Ensure URL doesn't have trailing slash
+    base_url = second_supabase_url.rstrip('/') if second_supabase_url else None
+    logger.info("🔍 Using second Supabase URL: %s", base_url)
 
     try:
         payload = request.get_json()
         if not payload:
+            logger.error("❌ Request body is missing")
             return jsonify({"error": "Request body is required"}), 400
 
         user_id = payload.get("user_id")
         email = payload.get("email")
+        
+        logger.info("📥 Request payload - user_id: %s, email: %s", user_id, email)
 
         if not user_id and not email:
+            logger.error("❌ Neither user_id nor email provided")
             return jsonify({"error": "Either user_id or email is required"}), 400
 
         admin_headers = {
@@ -438,31 +458,46 @@ def api_delete_second_auth_user():
         # If we don't have user_id, look it up by email first
         if not user_id and email:
             try:
+                logger.info("🔍 Looking up user by email: %s", email)
+                lookup_url = f"{base_url}/auth/v1/admin/users?email={email}"
+                logger.info("🔍 Lookup URL: %s", lookup_url)
                 lookup_response = requests.get(
-                    f"{second_supabase_url}/auth/v1/admin/users?email={email}",
+                    lookup_url,
                     headers=admin_headers,
                     timeout=15,
                 )
+                logger.info("📥 Lookup response status: %s", lookup_response.status_code)
                 if lookup_response.status_code == 200:
                     lookup_data = lookup_response.json()
+                    logger.info("📥 Lookup response data: %s", lookup_data)
                     if lookup_data.get("users") and len(lookup_data["users"]) > 0:
                         user_id = lookup_data["users"][0]["id"]
-                        logger.info(f"Found auth user_id {user_id} for email {email}")
+                        logger.info("✅ Found auth user_id %s for email %s", user_id, email)
+                    else:
+                        logger.warning("⚠️ No users found for email %s", email)
+                else:
+                    logger.warning("⚠️ Lookup failed with status %s: %s", 
+                                  lookup_response.status_code, lookup_response.text)
             except Exception as lookup_err:
-                logger.warning(f"Failed to lookup auth user by email {email}: {lookup_err}")
+                logger.exception("❌ Failed to lookup auth user by email %s: %s", email, lookup_err)
                 return jsonify({"error": f"Failed to lookup user by email: {str(lookup_err)}"}), 500
 
         # Delete by user_id (UUID) - this is the only supported method
         if user_id:
-            delete_endpoint = f"{second_supabase_url}/auth/v1/admin/users/{user_id}"
+            delete_endpoint = f"{base_url}/auth/v1/admin/users/{user_id}"
+            logger.info("🗑️ Attempting to delete auth user at: %s", delete_endpoint)
+            
             delete_response = requests.delete(
                 delete_endpoint,
                 headers=admin_headers,
                 timeout=15,
             )
 
+            logger.info("📥 Delete response status: %s", delete_response.status_code)
+            logger.info("📥 Delete response text: %s", delete_response.text)
+
             if delete_response.status_code == 200 or delete_response.status_code == 204:
-                logger.info(f"Successfully deleted auth user from second Supabase for user_id {user_id}")
+                logger.info("✅ Successfully deleted auth user from second Supabase for user_id %s", user_id)
                 return jsonify({"success": True, "message": "Auth user deleted successfully"}), 200
             else:
                 error_text = delete_response.text
@@ -470,13 +505,15 @@ def api_delete_second_auth_user():
                     error_data = delete_response.json()
                 except:
                     error_data = {"error": error_text}
-                logger.warning(f"Failed to delete auth user from second Supabase: {error_data}")
+                logger.error("❌ Failed to delete auth user from second Supabase. Status: %s, Error: %s", 
+                           delete_response.status_code, error_data)
                 return jsonify({"error": "Failed to delete auth user", "details": error_data}), delete_response.status_code
         else:
+            logger.error("❌ Cannot delete auth user: no user_id found after lookup")
             return jsonify({"error": "Cannot delete auth user: no user_id found"}), 400
 
     except Exception as exc:
-        logger.exception("Failed to delete auth user from second Supabase")
+        logger.exception("❌ Failed to delete auth user from second Supabase")
         return jsonify({"error": "Failed to delete auth user", "details": str(exc)}), 500
 
 
