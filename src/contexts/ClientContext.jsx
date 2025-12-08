@@ -32,6 +32,29 @@ export function ClientProvider({ children }) {
     loadClients();
   }, []);
 
+  // Handle tab visibility changes to restore selection
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // When tab becomes visible, restore selection from localStorage
+        try {
+          const storedUserCode = localStorage.getItem('selectedUserCode');
+          if (storedUserCode && storedUserCode !== selectedUserCode) {
+            console.log('🔄 Tab became visible, restoring selection:', storedUserCode);
+            setSelectedUserCode(storedUserCode);
+          }
+        } catch (error) {
+          console.error('Error restoring selection on visibility change:', error);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [selectedUserCode]);
+
   // Listen to cross-app client refresh events (e.g., after creating a new user)
   useEffect(() => {
     const handler = () => loadClients();
@@ -90,6 +113,14 @@ export function ClientProvider({ children }) {
       setError(null);
       console.log('👥 Loading clients from chat_users table...');
       
+      // Read current selection from localStorage to avoid stale closure values
+      let currentStoredUserCode = null;
+      try {
+        currentStoredUserCode = localStorage.getItem('selectedUserCode');
+      } catch {
+        // ignore storage errors
+      }
+      
       // 1) Fetch all clients (unchanged)
       const all = await ChatUser.list(); // returns chat_users rows
       console.log('📋 All clients fetched:', all?.length || 0, 'records');
@@ -137,19 +168,33 @@ export function ClientProvider({ children }) {
       console.log('✅ Clients loaded:', visible?.length || 0, 'records (filtered by role)');
       setClients(visible || []);
       
-      // If there is a stored selection but it no longer exists, fall back to first client
+      // Preserve selection: only change if stored selection is invalid or missing
       if (visible && visible.length > 0) {
-        const hasStored = selectedUserCode && visible.some(c => c.user_code === selectedUserCode);
-        if (!hasStored && !selectedUserCode) {
-          console.log('🔄 No stored selection, selecting first client:', visible[0].user_code);
-          setSelectedUserCode(visible[0].user_code);
-        }
-        if (!hasStored && selectedUserCode) {
+        const storedSelectionValid = currentStoredUserCode && visible.some(c => c.user_code === currentStoredUserCode);
+        
+        if (currentStoredUserCode && storedSelectionValid) {
+          // Stored selection is valid, ensure it's set (in case state was lost)
+          if (currentStoredUserCode !== selectedUserCode) {
+            console.log('🔄 Restoring valid stored selection:', currentStoredUserCode);
+            setSelectedUserCode(currentStoredUserCode);
+          }
+        } else if (!currentStoredUserCode) {
+          // No stored selection, select first client only if no current selection
+          if (!selectedUserCode) {
+            console.log('🔄 No stored selection, selecting first client:', visible[0].user_code);
+            setSelectedUserCode(visible[0].user_code);
+          }
+        } else {
+          // Stored selection exists but is invalid, fall back to first client
           console.log('🔄 Stored selection no longer valid, selecting first client:', visible[0].user_code);
           setSelectedUserCode(visible[0].user_code);
         }
       } else {
         console.log('⚠️ No visible clients after filtering');
+        // Clear selection if no clients available
+        if (currentStoredUserCode) {
+          setSelectedUserCode(null);
+        }
       }
     } catch (error) {
       console.error("❌ Error loading clients:", error);
