@@ -1834,33 +1834,6 @@ Your task is to respond to the user's message below, taking into account their s
         ) : (
           <div className="whitespace-pre-wrap text-sm leading-relaxed">{text}</div>
         )}
-
-        {/* WhatsApp-style buttons - display only (from existing chat) */}
-        {whatsappButtons && whatsappButtons.length > 0 && (
-          <div className="mt-3 space-y-1.5">
-            {whatsappButtons.map((button, index) => {
-              if (button.type === 'reply' && button.reply) {
-                return (
-                  <div
-                    key={index}
-                    className="relative w-full text-left pl-4 pr-3 py-2.5 bg-white border-l-[3px] border-blue-500 rounded-r-md shadow-sm text-sm font-medium text-slate-700 flex items-center gap-2.5 group"
-                  >
-                    {/* WhatsApp-style vertical line indicator */}
-                    <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-blue-500 rounded-l-md"></div>
-                    {/* Arrow icon */}
-                    <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center opacity-60">
-                      <svg className="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </div>
-                    <span className="flex-1 text-slate-700">{button.reply.title}</span>
-                  </div>
-                );
-              }
-              return null;
-            })}
-          </div>
-        )}
       </>
     );
   };

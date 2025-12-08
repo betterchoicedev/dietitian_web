@@ -196,7 +196,7 @@
 ### 17. Fix Translation of Exercise Descriptions When Building and Editing Exercises
 - **Files**: `src/pages/TrainingManagement.jsx`, `src/contexts/LanguageContext.jsx`
 - **Issue**: Exercise descriptions are not properly translated when building/creating or editing exercises in the training management system
-- **Status**: Pending
+- **Status**: fixed
 - **Added**: 2025-11-10
 - **Implementation**:
   - Investigate exercise description translation logic in TrainingManagement.jsx

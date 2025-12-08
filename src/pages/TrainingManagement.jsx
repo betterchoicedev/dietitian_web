@@ -878,9 +878,11 @@ const TrainingManagement = () => {
     const isHeb = isHebrew(value);
     
     if (isHeb) {
+      // Hebrew input: store in exercise_name_he, translate to English for exercise_name
       setExerciseFormData(prev => ({ ...prev, exercise_name_he: value }));
       lastEditedExerciseNameField.current = 'he';
     } else {
+      // English input: store in exercise_name, translate to Hebrew for exercise_name_he
       setExerciseFormData(prev => ({ ...prev, exercise_name: value }));
       lastEditedExerciseNameField.current = 'en';
     }
@@ -899,12 +901,12 @@ const TrainingManagement = () => {
     let targetField = null;
     
     if (lastEdited === 'en' && currentEn && !isHebrew(currentEn)) {
-      // English was edited, translate to Hebrew
+      // English was edited, translate to Hebrew and put in exercise_name_he
       valueToTranslate = currentEn;
       targetLang = 'he';
       targetField = 'exercise_name_he';
     } else if (lastEdited === 'he' && currentHe && isHebrew(currentHe)) {
-      // Hebrew was edited, translate to English
+      // Hebrew was edited, translate to English and put in exercise_name
       valueToTranslate = currentHe;
       targetLang = 'en';
       targetField = 'exercise_name';
@@ -938,9 +940,11 @@ const TrainingManagement = () => {
     const isHeb = isHebrew(value);
     
     if (isHeb) {
+      // Hebrew input: store in description_he, translate to English for description
       setExerciseFormData(prev => ({ ...prev, description_he: value }));
       lastEditedExerciseDescField.current = 'he';
     } else {
+      // English input: store in description, translate to Hebrew for description_he
       setExerciseFormData(prev => ({ ...prev, description: value }));
       lastEditedExerciseDescField.current = 'en';
     }
@@ -959,12 +963,12 @@ const TrainingManagement = () => {
     let targetField = null;
     
     if (lastEdited === 'en' && currentEn && !isHebrew(currentEn)) {
-      // English was edited, translate to Hebrew
+      // English was edited, translate to Hebrew and put in description_he
       valueToTranslate = currentEn;
       targetLang = 'he';
       targetField = 'description_he';
     } else if (lastEdited === 'he' && currentHe && isHebrew(currentHe)) {
-      // Hebrew was edited, translate to English
+      // Hebrew was edited, translate to English and put in description
       valueToTranslate = currentHe;
       targetLang = 'en';
       targetField = 'description';
@@ -3051,17 +3055,32 @@ const TrainingManagement = () => {
               <Label htmlFor="exercise_name">{translations.exerciseName} *</Label>
               <Input
                 id="exercise_name"
-                value={language === 'he' ? exerciseFormData.exercise_name_he : exerciseFormData.exercise_name}
+                value={
+                  lastEditedExerciseNameField.current === 'he' 
+                    ? exerciseFormData.exercise_name_he 
+                    : lastEditedExerciseNameField.current === 'en'
+                    ? exerciseFormData.exercise_name
+                    : exerciseFormData.exercise_name_he || exerciseFormData.exercise_name || ''
+                }
                 onChange={(e) => handleExerciseNameChange(e.target.value)}
                 onBlur={handleExerciseNameBlur}
-                placeholder={language === 'he' ? 'למשל: לחיצת חזה עם משקולת' : 'e.g., Barbell Bench Press'}
+                placeholder={language === 'he' ? 'למשל: לחיצת חזה עם משקולת (תמיד יתרגם לאנגלית)' : 'e.g., Barbell Bench Press (will auto-translate to Hebrew)'}
               />
               {(exerciseFormData.exercise_name || exerciseFormData.exercise_name_he) && (
                 <div className="text-xs text-gray-500 mt-1">
-                  {language === 'he' 
-                    ? `English: ${exerciseFormData.exercise_name}` 
-                    : `Hebrew: ${exerciseFormData.exercise_name_he}`
-                  }
+                  {lastEditedExerciseNameField.current === 'he' && exerciseFormData.exercise_name && (
+                    <span>English: {exerciseFormData.exercise_name}</span>
+                  )}
+                  {lastEditedExerciseNameField.current === 'en' && exerciseFormData.exercise_name_he && (
+                    <span>Hebrew: {exerciseFormData.exercise_name_he}</span>
+                  )}
+                  {!lastEditedExerciseNameField.current && exerciseFormData.exercise_name && exerciseFormData.exercise_name_he && (
+                    <>
+                      <span>Hebrew: {exerciseFormData.exercise_name_he}</span>
+                      {' • '}
+                      <span>English: {exerciseFormData.exercise_name}</span>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -3113,18 +3132,33 @@ const TrainingManagement = () => {
               <Label htmlFor="exercise_description">{translations.exerciseDescription}</Label>
               <Textarea
                 id="exercise_description"
-                value={language === 'he' ? exerciseFormData.description_he : exerciseFormData.description}
+                value={
+                  lastEditedExerciseDescField.current === 'he' 
+                    ? exerciseFormData.description_he 
+                    : lastEditedExerciseDescField.current === 'en'
+                    ? exerciseFormData.description
+                    : exerciseFormData.description_he || exerciseFormData.description || ''
+                }
                 onChange={(e) => handleExerciseDescriptionChange(e.target.value)}
                 onBlur={handleExerciseDescriptionBlur}
-                placeholder={language === 'he' ? 'תאר את התרגיל...' : 'Describe the exercise...'}
+                placeholder={language === 'he' ? 'תאר את התרגיל... (תמיד יתרגם לאנגלית)' : 'Describe the exercise... (will auto-translate to Hebrew)'}
                 rows={3}
               />
               {(exerciseFormData.description || exerciseFormData.description_he) && (
                 <div className="text-xs text-gray-500 mt-1">
-                  {language === 'he' 
-                    ? `English: ${exerciseFormData.description}` 
-                    : `Hebrew: ${exerciseFormData.description_he}`
-                  }
+                  {lastEditedExerciseDescField.current === 'he' && exerciseFormData.description && (
+                    <span>English: {exerciseFormData.description}</span>
+                  )}
+                  {lastEditedExerciseDescField.current === 'en' && exerciseFormData.description_he && (
+                    <span>Hebrew: {exerciseFormData.description_he}</span>
+                  )}
+                  {!lastEditedExerciseDescField.current && exerciseFormData.description && exerciseFormData.description_he && (
+                    <>
+                      <span>Hebrew: {exerciseFormData.description_he}</span>
+                      {' • '}
+                      <span>English: {exerciseFormData.description}</span>
+                    </>
+                  )}
                 </div>
               )}
             </div>
