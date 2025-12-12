@@ -3148,6 +3148,8 @@ const MenuCreate = () => {
 
   const [showEmptyMealPlanDialog, setShowEmptyMealPlanDialog] = useState(false);
 
+  const [showMissingCaloriesDialog, setShowMissingCaloriesDialog] = useState(false);
+
   const [users, setUsers] = useState([]);
 
   const [removeBrandsFromPdf, setRemoveBrandsFromPdf] = useState(false);
@@ -8665,6 +8667,12 @@ const MenuCreate = () => {
 
     setError(null);
 
+    // Check if client has daily_target_total_calories
+    if (!selectedClient?.daily_target_total_calories) {
+      setShowMissingCaloriesDialog(true);
+      return;
+    }
+
     
 
     // Clear the old menu immediately when starting new generation
@@ -9237,6 +9245,12 @@ const MenuCreate = () => {
 
       return;
 
+    }
+
+    // Check if client has daily_target_total_calories
+    if (!selectedClient.daily_target_total_calories) {
+      setShowMissingCaloriesDialog(true);
+      return;
     }
 
     
@@ -15874,6 +15888,54 @@ const MenuCreate = () => {
 
         </DialogContent>
 
+      </Dialog>
+
+      {/* Missing Daily Target Calories Dialog */}
+      <Dialog open={showMissingCaloriesDialog} onOpenChange={setShowMissingCaloriesDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <span className="text-2xl">⚠️</span>
+              {translations.missingCaloriesWarning || 'Missing Client Profile Information'}
+            </DialogTitle>
+            <DialogDescription className="text-gray-600 pt-2">
+              {translations.missingCaloriesMessage || `The client "${selectedClient?.full_name || 'selected client'}" does not have a daily target calories value set. Please complete the client profile information before generating a meal plan.`}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 my-4">
+            <div className="flex items-start gap-3">
+              <div className="text-red-600 text-lg">ℹ️</div>
+              <div>
+                <h4 className="font-medium text-red-800 mb-1">
+                  {translations.whatYouNeedToDo || 'What you need to do:'}
+                </h4>
+                <p className="text-sm text-red-700">
+                  {translations.completeClientProfile || 'Go to the "Clients" page and finish setting up the client profile information, including the daily target calories.'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-3 sm:gap-3">
+            <Button
+              variant="outline"
+              onClick={() => setShowMissingCaloriesDialog(false)}
+              className="flex-1 border-gray-300 text-gray-700 hover:bg-gray-50"
+            >
+              {translations.cancel || 'Cancel'}
+            </Button>
+            <Button
+              onClick={() => {
+                setShowMissingCaloriesDialog(false);
+                navigate(`/users?edit=${selectedClient?.user_code || ''}`);
+              }}
+              className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+            >
+              {translations.goToClients || 'Go to Clients Page'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
 
       {/* Template Limitation Warning Dialog */}

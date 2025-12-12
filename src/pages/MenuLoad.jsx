@@ -2541,6 +2541,62 @@ const MenuLoad = () => {
           } else {
             console.warn('No meal plan data found in selected menu');
           }
+          
+          // Check if backend automatically deactivated any conflicting meal plans and delete them from client_meal_plans
+          try {
+            console.log('🔍 Checking for automatically deactivated conflicting meal plans...');
+            
+            // Get the active days for the newly activated plan
+            const newPlanActiveDays = statusForm.active_days && statusForm.active_days.length > 0 
+              ? statusForm.active_days 
+              : [0, 1, 2, 3, 4, 5, 6]; // All days if null/empty
+            
+            // Fetch draft meal plans for the same user
+            const { data: draftPlans, error: draftCheckError } = await supabase
+              .from('meal_plans_and_schemas')
+              .select('id, meal_plan_name, active_days')
+              .eq('user_code', selectedMenuForStatus.user_code)
+              .eq('record_type', 'meal_plan')
+              .eq('status', 'draft')
+              .neq('id', selectedMenuForStatus.id);
+            
+            if (!draftCheckError && draftPlans && draftPlans.length > 0) {
+              // Check which draft plans have overlapping days with the newly activated plan
+              const conflictingDraftPlans = draftPlans.filter(plan => {
+                const planActiveDays = plan.active_days && plan.active_days.length > 0 
+                  ? plan.active_days 
+                  : [0, 1, 2, 3, 4, 5, 6]; // All days if null/empty
+                
+                // Check if there's any overlap in days
+                return planActiveDays.some(day => newPlanActiveDays.includes(day));
+              });
+              
+              if (conflictingDraftPlans.length > 0) {
+                console.log(`📋 Found ${conflictingDraftPlans.length} conflicting draft meal plan(s) that may have been automatically deactivated`);
+                
+                // Delete these conflicting plans from client_meal_plans
+                for (const deactivatedPlan of conflictingDraftPlans) {
+                  try {
+                    const { error: deleteError } = await secondSupabase
+                      .from('client_meal_plans')
+                      .delete()
+                      .eq('original_meal_plan_id', deactivatedPlan.id);
+                    
+                    if (deleteError) {
+                      console.error(`Error deleting automatically deactivated meal plan ${deactivatedPlan.id} from client_meal_plans:`, deleteError);
+                    } else {
+                      console.log(`✅ Deleted automatically deactivated meal plan ${deactivatedPlan.id} (${deactivatedPlan.meal_plan_name}) from client_meal_plans`);
+                    }
+                  } catch (deleteError) {
+                    console.error(`Error deleting automatically deactivated meal plan ${deactivatedPlan.id}:`, deleteError);
+                  }
+                }
+              }
+            }
+          } catch (autoDeactivateCheckError) {
+            console.error('Error checking for automatically deactivated meal plans:', autoDeactivateCheckError);
+            // Don't fail the operation, just log the error
+          }
         } catch (secondTableError) {
           console.error('Error syncing to client_meal_plans table:', secondTableError);
           // Don't fail the entire operation, just log the error
@@ -2548,25 +2604,25 @@ const MenuLoad = () => {
         }
       }
       
-      // Handle deactivation in second database
-      if (statusForm.status !== 'active' && selectedMenuForStatus.status === 'active') {
+      // Handle deactivation in second database - delete from client_meal_plans when deactivated (draft or expired)
+      if ((statusForm.status === 'draft' || statusForm.status === 'expired') && selectedMenuForStatus.status === 'active') {
         try {
-          console.log('🔄 Deactivating meal plan in second database...');
+          console.log('🔄 Deleting meal plan from client_meal_plans table (deactivation to draft/expired)...');
           
-          // Find and deactivate the meal plan in client_meal_plans
-          const { error: deactivateError } = await secondSupabase
+          // Delete the meal plan from client_meal_plans when deactivated to draft or expired
+          const { error: deleteError } = await secondSupabase
             .from('client_meal_plans')
-            .update({ active: false })
+            .delete()
             .eq('original_meal_plan_id', selectedMenuForStatus.id);
           
-          if (deactivateError) {
-            console.error('Error deactivating meal plan in second database:', deactivateError);
-            console.warn('Failed to deactivate in second database, but status was updated successfully');
+          if (deleteError) {
+            console.error('Error deleting meal plan from client_meal_plans:', deleteError);
+            console.warn('Failed to delete from client_meal_plans, but status was updated successfully');
           } else {
-            console.log('✅ Meal plan deactivated in second database successfully');
+            console.log('✅ Meal plan deleted from client_meal_plans table successfully');
           }
-        } catch (deactivateError) {
-          console.error('Error deactivating in second database:', deactivateError);
+        } catch (deleteError) {
+          console.error('Error deleting from client_meal_plans:', deleteError);
         }
       }
       
@@ -2692,6 +2748,29 @@ const MenuLoad = () => {
                 setError(null);
                 setUpdatingStatus(false);
                 return;
+              }
+              
+              // Delete conflicting meal plans from client_meal_plans table (second Supabase)
+              console.log('🗑️ Deleting conflicting meal plans from client_meal_plans table...');
+              for (const conflictingPlan of conflictingPlans) {
+                try {
+                  const { error: deleteClientMealPlanError } = await secondSupabase
+                    .from('client_meal_plans')
+                    .delete()
+                    .eq('original_meal_plan_id', conflictingPlan.id);
+                  
+                  if (deleteClientMealPlanError) {
+                    console.error(`Error deleting meal plan ${conflictingPlan.id} from client_meal_plans:`, deleteClientMealPlanError);
+                    // Don't fail the entire operation, just log the error
+                    console.warn(`Failed to delete meal plan ${conflictingPlan.id} from client_meal_plans, but it was deactivated successfully`);
+                  } else {
+                    console.log(`✅ Deleted meal plan ${conflictingPlan.id} from client_meal_plans table`);
+                  }
+                } catch (deleteError) {
+                  console.error(`Error deleting meal plan ${conflictingPlan.id} from client_meal_plans:`, deleteError);
+                  // Don't fail the entire operation, just log the error
+                  console.warn(`Failed to delete meal plan ${conflictingPlan.id} from client_meal_plans, but it was deactivated successfully`);
+                }
               }
               
               // Delete reminders for all conflicting plans that were deactivated
