@@ -1260,6 +1260,10 @@ export const translations = {
     // Meal Plan Structure (shared UI labels)
     mealPlanStructure: 'Meal Plan Structure',
     mealPlanDescription: 'Configure how daily calories are distributed across meals',
+    howToBuildMealPlan: 'How to Build with This Structure:',
+    mealPlanStructureExplanationEn: 'This meal plan structure allows you to create main meals and alternative meals. Each meal can have its own macros (calories, protein, fat, carbs). The main meals represent the primary meal plan, while alternative meals provide substitution options. Both must equal the daily targets shown on the right.',
+    mealPlanStructureExplanationHe: 'מבנה תכנית הארוחות הזה מאפשר לך ליצור ארוחות עיקריות וארוחות חלופיות. לכל ארוחה יכולים להיות מאקרו-נוטריינטים משלה (קלוריות, חלבון, שומן, פחמימות). הארוחות העיקריות מייצגות את תכנית הארוחות הראשית, בעוד שהארוחות החלופיות מספקות אפשרויות החלפה. שתיהן חייבות להיות שוות ליעדים היומיים המוצגים מימין.',
+    totalMacrosSummary: 'Total Macros Summary (must equal daily targets)',
     description: 'Description',
     percentage: 'Percentage',
     lock: 'Lock',
@@ -2479,6 +2483,10 @@ export const translations = {
     // Meal Plan Structure (shared UI labels)
     mealPlanStructure: 'מבנה תוכנית ארוחות',
     mealPlanDescription: 'הגדר כיצד מחולקות הקלוריות היומיות בין הארוחות',
+    howToBuildMealPlan: 'איך לבנות עם המבנה הזה:',
+    mealPlanStructureExplanationEn: 'This meal plan structure allows you to create main meals and alternative meals. Each meal can have its own macros (calories, protein, fat, carbs). The main meals represent the primary meal plan, while alternative meals provide substitution options. Both must equal the daily targets shown on the right.',
+    mealPlanStructureExplanationHe: 'מבנה תכנית הארוחות הזה מאפשר לך ליצור ארוחות עיקריות וארוחות חלופיות. לכל ארוחה יכולים להיות מאקרו-נוטריינטים משלה (קלוריות, חלבון, שומן, פחמימות). הארוחות העיקריות מייצגות את תכנית הארוחות הראשית, בעוד שהארוחות החלופיות מספקות אפשרויות החלפה. שתיהן חייבות להיות שוות ליעדים היומיים המוצגים מימין.',
+    totalMacrosSummary: 'סיכום מאקרו כולל (חייב להיות שווה ליעדים יומיים)',
     description: 'תיאור',
     percentage: 'אחוזים',
     lock: 'נעילה',

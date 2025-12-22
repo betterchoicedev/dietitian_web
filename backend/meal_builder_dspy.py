@@ -682,11 +682,13 @@ The data must be for "{ingredient_query}" specifically, not a similar or substit
         limitations_display = ", ".join(limitations_list) if limitations_list else "None"
         avoid_ingredients = preferences.get("avoid_ingredients", []) or []
         
-        # Extract client preference for THIS specific meal from meal_plan_structure
-        # IMPORTANT: Only use client preferences for MAIN meals, not ALTERNATIVE
-        # ALTERNATIVE should be completely different from MAIN for variety
+        # Extract client preference for THIS specific meal from meal_plan_structure.
+        # MAIN uses client preferences; ALTERNATIVE historically ignored them for variety.
+        # However, if the menu "template" supplies an explicit dish title (template_meal_title),
+        # we MUST follow it for BOTH MAIN and ALTERNATIVE so the generated meal matches the template.
         meal_plan_structure = preferences.get("meal_plan_structure", [])
         client_preference = ""
+        template_meal_title = preferences.get("template_meal_title", "")
         
         if option_type.upper() == "MAIN":
             # Only extract preferences for MAIN meals
@@ -714,8 +716,9 @@ The data must be for "{ingredient_query}" specifically, not a similar or substit
                 elif isinstance(client_preference_raw, str):
                     client_preference = client_preference_raw
         else:
-            # ALTERNATIVE meal - ignore client preferences for variety
-            logger.info(f"🔀 ALTERNATIVE meal - ignoring client preferences for variety")
+            # ALTERNATIVE meal - ignore free-text client preferences for variety,
+            # BUT still enforce template-provided title if available.
+            logger.info(f"🔀 ALTERNATIVE meal - ignoring client preferences for variety (template title may still be enforced)")
         
         # ======================================================================
         # STAGE 1: Generate meal name and ingredient list (Claude)
@@ -749,8 +752,17 @@ The data must be for "{ingredient_query}" specifically, not a similar or substit
         if target_protein >= 25:
             macro_guidance += f"Protein is {target_protein}g - ensure substantial protein source. "
         
-        # Prepend macro guidance to client_preference so Claude sees it first
-        enhanced_client_pref = macro_guidance + (client_preference if client_preference else "")
+        # If template provides an explicit intended dish title, enforce it.
+        # This is critical to make the built menu match the generated template structure.
+        template_title_instruction = ""
+        if isinstance(template_meal_title, str) and template_meal_title.strip():
+            template_title_instruction = (
+                f'TEMPLATE MEAL TITLE (MANDATORY): "{template_meal_title.strip()}". '
+                "You MUST create this dish (or a clearly faithful version) and keep the dish name aligned with this title. "
+            )
+
+        # Prepend guidance so Claude sees it first
+        enhanced_client_pref = template_title_instruction + macro_guidance + (client_preference if client_preference else "")
         
         logger.info(f"📐 Macro guidance being sent: {macro_guidance}")
         
@@ -758,7 +770,7 @@ The data must be for "{ingredient_query}" specifically, not a similar or substit
                           f"Dietary limitations: {limitations_display}. If a requested ingredient conflicts with these, " \
                           f"IGNORE the request. Allergies and limitations ALWAYS override preferences."
         
-        enhanced_client_pref = safety_guidance + " " + macro_guidance + (client_preference if client_preference else "")
+        enhanced_client_pref = safety_guidance + " " + template_title_instruction + macro_guidance + (client_preference if client_preference else "")
         
         naming_result = self.name_ingredients(
             meal_type=meal_type,

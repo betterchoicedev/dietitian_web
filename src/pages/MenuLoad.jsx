@@ -2169,8 +2169,8 @@ const MenuLoad = () => {
   };
 
   async function generateAlternativeMeal(main, alternative) {
-    const response = await fetch('http://127.0.0.1:8000/api/generate-alternative-meal', {
-    // const response = await fetch('https://dietitian-be.azurewebsites.net/api/generate-alternative-meal', {
+    // const response = await fetch('http://127.0.0.1:8000/api/generate-alternative-meal', {
+    const response = await fetch('https://dietitian-be.azurewebsites.net/api/generate-alternative-meal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

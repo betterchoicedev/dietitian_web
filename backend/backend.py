@@ -3414,19 +3414,9 @@ Your previous meal attempt failed validation. Review the failed meal and issues 
             user_message_content = user_payload  # Already a formatted string
 
         # Use OBI2 for first attempt, Claude for validation corrections
-        if i == 0:
-            # First attempt: Use OBI2 (Azure OpenAI)
-            response = client.chat.completions.create(
-                model=deployment,
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": user_message_content}
-                ]
-            )
-        else:
-            # Retry attempts: Use Claude for validation corrections
-            if not anthropic_client:
-                logger.warning("⚠️ Anthropic not configured, falling back to OBI2 for corrections")
+        try:
+            if i == 0:
+                # First attempt: Use OBI2 (Azure OpenAI)
                 response = client.chat.completions.create(
                     model=deployment,
                     messages=[
@@ -3435,34 +3425,75 @@ Your previous meal attempt failed validation. Review the failed meal and issues 
                     ]
                 )
             else:
-                logger.info(f"🔧 Using Claude for validation correction (attempt {i+1})")
-                # Combine prompt and user message for Claude
-                full_content = f"{prompt}\n\n{user_message_content}"
-                
-                message = anthropic_client.messages.create(
-                    model=anthropic_deployment,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": full_content
-                        }
-                    ],
-                    max_tokens=2048,
-                    temperature=0.3
-                )
-                
-                # Extract text from Claude response
-                raw_text = ""
-                for content_block in message.content:
-                    if hasattr(content_block, 'text'):
-                        raw_text += content_block.text
-                
-                # Create a mock response object to maintain compatibility with existing code
-                class MockResponse:
-                    def __init__(self, content):
-                        self.choices = [type('obj', (object,), {'message': type('obj', (object,), {'content': content})()})]
-                
-                response = MockResponse(raw_text)
+                # Retry attempts: Use Claude for validation corrections
+                if not anthropic_client:
+                    logger.warning("⚠️ Anthropic not configured, falling back to OBI2 for corrections")
+                    response = client.chat.completions.create(
+                        model=deployment,
+                        messages=[
+                            {"role": "system", "content": prompt},
+                            {"role": "user", "content": user_message_content}
+                        ]
+                    )
+                else:
+                    logger.info(f"🔧 Using Claude for validation correction (attempt {i+1})")
+                    # Combine prompt and user message for Claude
+                    full_content = f"{prompt}\n\n{user_message_content}"
+                    
+                    message = anthropic_client.messages.create(
+                        model=anthropic_deployment,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": full_content
+                            }
+                        ],
+                        max_tokens=2048,
+                        temperature=0.3
+                    )
+                    
+                    # Extract text from Claude response
+                    raw_text = ""
+                    for content_block in message.content:
+                        if hasattr(content_block, 'text'):
+                            raw_text += content_block.text
+                    
+                    # Create a mock response object to maintain compatibility with existing code
+                    class MockResponse:
+                        def __init__(self, content):
+                            self.choices = [type('obj', (object,), {'message': type('obj', (object,), {'content': content})()})]
+                    
+                    response = MockResponse(raw_text)
+        except Exception as api_error:
+            # Extract detailed error information from OpenAI API exceptions
+            error_details = str(api_error)
+            error_type = type(api_error).__name__
+            
+            # Try to extract more detailed error information if available
+            if hasattr(api_error, 'response') and api_error.response is not None:
+                try:
+                    error_body = api_error.response.json() if hasattr(api_error.response, 'json') else {}
+                    error_details = json.dumps(error_body, ensure_ascii=False)
+                    logger.error(f"❌ OpenAI API error details: {error_details}")
+                except:
+                    pass
+            
+            # Check for specific error types
+            error_msg = f"OpenAI API error ({error_type}): {error_details}"
+            
+            # Provide helpful error messages for common issues
+            if "organization has been disabled" in error_details.lower():
+                error_msg = f"Azure OpenAI organization has been disabled. Please check your Azure OpenAI account status and billing. Error details: {error_details}"
+            elif "invalid_api_key" in error_details.lower() or "authentication" in error_details.lower():
+                error_msg = f"Azure OpenAI authentication failed. Please verify your API key and endpoint configuration. Error details: {error_details}"
+            elif "quota" in error_details.lower() or "rate limit" in error_details.lower():
+                error_msg = f"Azure OpenAI rate limit or quota exceeded. Please check your usage limits. Error details: {error_details}"
+            
+            logger.error(f"❌ {error_msg} for {option_type} '{meal_name}' (attempt {i+1})")
+            
+            # Raise an exception with the error message so it gets properly propagated
+            # Don't retry API configuration errors - these are unlikely to be fixed by retrying
+            raise Exception(f"Error code: 400 - {error_details}")
 
         raw = _strip_markdown_fences(response.choices[0].message.content)
 
@@ -3589,6 +3620,7 @@ def _build_single_meal_option(
             macros = template_meal.get("alternative", {})
         
         required_protein = macros.get("main_protein_source")
+        template_meal_title = macros.get("name")
         
         # Extract macro targets from template
         calories = macros.get("calories")
@@ -3613,13 +3645,21 @@ def _build_single_meal_option(
             logger.error(f"❌ Template missing macro targets for {option_type} '{meal_name}'")
             return (meal_name, option_type, None, f"Missing macro targets: {targets}")
         
+        # Build per-option preferences so the meal builder can follow the template's intended title
+        # (especially important for ALTERNATIVE, which otherwise intentionally ignores user text preferences for variety)
+        prefs_for_option = dict(preferences or {})
+        if template_meal_title:
+            prefs_for_option["template_meal_title"] = template_meal_title
+        prefs_for_option["template_meal_slot"] = meal_name
+        prefs_for_option["template_option_type"] = option_type
+
         # Build the option (without correction, that happens inside _build_option_with_retries now)
         result = _build_option_with_retries(
             option_type=option_type,
             meal_name=meal_name,
             macro_targets=targets,
             required_protein_source=required_protein,
-            preferences=preferences,
+            preferences=prefs_for_option,
             user_code=user_code,
             region_instruction=region_instruction,
             avoid_proteins=avoid_proteins,
@@ -4563,9 +4603,11 @@ def api_validate_template():
 
 
 
-        # Check for equality between main and alternative macros
+        # Check for equality between main and alternative macros (with ±3g tolerance)
 
         main_alt_issues = []
+
+        TOLERANCE_GRAMS = 3.0
 
         for macro in total_main:
 
@@ -4573,11 +4615,13 @@ def api_validate_template():
 
             alt_val = round(total_alt[macro], 1)
 
-            if main_val != alt_val:
+            diff = abs(main_val - alt_val)
+
+            if diff > TOLERANCE_GRAMS:
 
                 main_alt_issues.append(
 
-                    f"Main vs Alternative {macro} mismatch: Main={main_val}, Alt={alt_val} (PERFECT EQUALITY REQUIRED)"
+                    f"Main vs Alternative {macro} mismatch: Main={main_val}, Alt={alt_val} (diff={diff:.1f}g, allowed: ±{TOLERANCE_GRAMS}g)"
 
                 )
 

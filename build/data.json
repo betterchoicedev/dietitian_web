@@ -1,407 +1,80 @@
 {
-"programName": "Roee Bina - Personalized Nutrition Plan",
-"dailyTotalCalories": 2100,
-"macros": {
-  "fat": "65g",  
-  "carbs": "180g",
-  "protein": "160g"
-},
-"recommendations": {
-  "supplements": "Consider omega-3 (600mg), Vitamin D (1000 IU), and a daily multivitamin.",
-  "hydration": "Drink at least 2.5 liters of water daily.",
-  "sleep": "Aim for 7–8 hours of uninterrupted sleep.",
-  "general": "Avoid skipping meals; stay consistent with meal timing."
-},
-"client": {
-  "name": "Roee Bina",
-  "email": "roee.bina@example.com",
-  "phone": "+972-50-1234567",
-  "usercode": "AABBCC",
-  "userid": 1111,
-  "age": 28,
-  "height_cm": 182,
-  "weight_kg": 77,
-  "food_allergies": [""],
-  "food_limitations": [
-    "Pork",
-    "Shellfish"
+  "template": [
+    {
+      "main": {
+        "fat": 23,
+        "name": "Greek Yogurt with Protein Granola and Berries",
+        "carbs": 66,
+        "protein": 51,
+        "calories": 675,
+        "main_protein_source": "yogurt"
+      },
+      "meal": "Breakfast",
+      "alternative": {
+        "fat": 26,
+        "name": "Egg Omelette with Whole Wheat Toast and Cottage Cheese",
+        "carbs": 67,
+        "protein": 53,
+        "calories": 634,
+        "main_protein_source": "eggs"
+      }
+    },
+    {
+      "main": {
+        "fat": 20,
+        "name": "Whole-Wheat Turkey Sandwich with Veggies",
+        "carbs": 64,
+        "protein": 50,
+        "calories": 675,
+        "main_protein_source": "turkey breast"
+      },
+      "meal": "Lunch",
+      "alternative": {
+        "fat": 28,
+        "name": "Tuna Quinoa Bowl with Eggs and Veggies",
+        "carbs": 50,
+        "protein": 57,
+        "calories": 672,
+        "main_protein_source": "tuna"
+      }
+    },
+    {
+      "main": {
+        "fat": 18,
+        "name": "Protein Shake with Oats, Peanut Butter, and Banana",
+        "carbs": 64,
+        "protein": 57,
+        "calories": 610,
+        "main_protein_source": "protein powder"
+      },
+      "meal": "Afternoon Snack",
+      "alternative": {
+        "fat": 32,
+        "name": "Cottage Cheese Power Bowl with Quinoa, Egg, and Vegetables",
+        "carbs": 66,
+        "protein": 46,
+        "calories": 675,
+        "main_protein_source": "cottage cheese"
+      }
+    },
+    {
+      "main": {
+        "fat": 24,
+        "name": "Beef Pasta with Tomato Sauce and Side Salad",
+        "carbs": 56,
+        "protein": 62,
+        "calories": 696,
+        "main_protein_source": "beef"
+      },
+      "meal": "Dinner",
+      "alternative": {
+        "fat": 30,
+        "name": "Grilled Salmon with Quinoa and Steamed Broccoli",
+        "carbs": 54,
+        "protein": 48,
+        "calories": 670,
+        "main_protein_source": "salmon"
+      }
+    }
   ]
-},
-"timezone": "Asia/Jerusalem",
-"status": "active",
-"active_from": "2025-06-05",
-"active_until": "2025-06-06",
-"meals": [
-  {
-    "mealName": "Pre-Morning",
-    "recommendedTime": "06:30",
-    "prepTimeMinutes": 1,
-    "reminder": "Quick snack for energy boost.",
-    "mealCalories": 300,
-    "mealProtein": "20g",
-    "mealFat": "8g",
-    "items": [
-      {
-        "itemName": "Yogurt PRO with chocolate crisps and banana",
-        "itemCalories": 300,
-        "itemProtein": "20g",
-        "itemFat": "8g",
-        "ingredients": [
-          {
-            "ingredientName": "Yogurt PRO chocolate",
-            "brand": "Tnuva",
-            "upc": "7290004111223",
-            "portionSI": "200 g",
-            "portionUser": "1 container",
-            "protein": "18g",
-            "fat": "3g",
-            "alternatives": []
-          },
-          {
-            "ingredientName": "Banana",
-            "brand": "Generic",
-            "upc": "0",
-            "portionSI": "120 g",
-            "portionUser": "1 medium banana",
-            "protein": "1g",
-            "fat": "0.3g",
-            "alternatives": []
-          }
-        ],
-        "alternatives": [
-          {
-            "itemName": "Protein bar and a pear",
-            "itemCalories": 295,
-            "itemProtein": "19g",
-            "itemFat": "7g",
-            "ingredients": [
-              {
-                "ingredientName": "Protein bar chocolate",
-                "brand": "Quest",
-                "upc": "888849000003",
-                "portionSI": "60 g",
-                "portionUser": "1 bar",
-                "protein": "18g",
-                "fat": "7g",
-                "alternatives": []
-              },
-              {
-                "ingredientName": "Pear",
-                "brand": "Generic",
-                "upc": "0",
-                "portionSI": "130 g",
-                "portionUser": "1 medium pear",
-                "protein": "1g",
-                "fat": "0.2g",
-                "alternatives": []
-              }
-            ]
-          }
-        ]
-      }
-    ],
-    "notes": []
-  },
-  {
-    "mealName": "Breakfast",
-    "recommendedTime": "0730",
-    "prepTimeMinutes": 5,
-    "reminder": "Choose one of the toast options.",
-    "mealCalories": 400,
-    "mealProtein": "25g",
-    "mealFat": "15g",
-    "items": [
-      {
-        "itemName": "Spelt toast with 2 eggs and mayo",
-        "itemCalories": 400,
-        "itemProtein": "25g",
-        "itemFat": "15g",
-        "ingredients": [
-          {
-            "ingredientName": "Spelt bread",
-            "brand": "Lechem Eretz",
-            "upc": "7290002222221",
-            "portionSI": "80 g",
-            "portionUser": "2 slices",
-            "protein": "8g",
-            "fat": "2g",
-            "alternatives": []
-          },
-          {
-            "ingredientName": "Eggs",
-            "brand": "Generic",
-            "upc": "0",
-            "portionSI": "100 g",
-            "portionUser": "2 eggs",
-            "protein": "14g",
-            "fat": "10g",
-            "alternatives": []
-          },
-          {
-            "ingredientName": "Mayonnaise",
-            "brand": "Hellmann's",
-            "upc": "048001204224",
-            "portionSI": "15 g",
-            "portionUser": "1 tbsp",
-            "protein": "0g",
-            "fat": "3g",
-            "alternatives": []
-          }
-        ],
-        "alternatives": [
-          {
-            "itemName": "Spelt toast with 2 slices 15% cheese",
-            "itemCalories": 390,
-            "itemProtein": "24g",
-            "itemFat": "14g",
-            "ingredients": [
-              {
-                "ingredientName": "Spelt bread",
-                "brand": "Lechem Eretz",
-                "upc": "7290002222221",
-                "portionSI": "80 g",
-                "portionUser": "2 slices",
-                "protein": "8g",
-                "fat": "2g",
-                "alternatives": []
-              },
-              {
-                "ingredientName": "Cheese 15%",
-                "brand": "Tnuva",
-                "upc": "7290010001217",
-                "portionSI": "40 g",
-                "portionUser": "2 slices",
-                "protein": "14g",
-                "fat": "10g",
-                "alternatives": []
-              }
-            ]
-          }
-        ]
-      }
-    ],
-    "notes": []
-  },
-  {
-    "mealName": "Lunch",
-    "recommendedTime": "1300",
-    "prepTimeMinutes": 25,
-    "reminder": "Choose one protein and one carb option.",
-    "mealCalories": 600,
-    "mealProtein": "45g",
-    "mealFat": "20g",
-    "items": [
-      {
-        "itemName": "Grilled chicken breast with quinoa",
-        "itemCalories": 600,
-        "itemProtein": "45g",
-        "itemFat": "20g",
-        "ingredients": [
-          {
-            "ingredientName": "Chicken breast",
-            "brand": "Generic",
-            "portionSI": "200g",
-            "portionUser": "1 large breast",
-            "protein": "40g",
-            "fat": "8g",
-            "alternatives": []
-          },
-          {
-            "ingredientName": "Quinoa",
-            "brand": "Generic",
-            "portionSI": "150g",
-            "portionUser": "1 cup cooked",
-            "protein": "5g",
-            "fat": "12g",
-            "alternatives": []
-          }
-        ],
-        "alternatives": [
-          {
-            "itemName": "Grilled fish with sweet potato",
-            "itemCalories": 580,
-            "itemProtein": "42g",
-            "itemFat": "18g",
-            "ingredients": [
-              {
-                "ingredientName": "Salmon fillet",
-                "brand": "Generic",
-                "portionSI": "180g",
-                "portionUser": "1 fillet",
-                "protein": "36g",
-                "fat": "16g",
-                "alternatives": []
-              },
-              {
-                "ingredientName": "Sweet potato",
-                "brand": "Generic",
-                "portionSI": "200g",
-                "portionUser": "1 medium",
-                "protein": "6g",
-                "fat": "2g",
-                "alternatives": []
-              }
-            ]
-          }
-        ]
-      }
-    ],
-    "notes": ["Remember to drink water with your meal", "Add vegetables as desired"]
-  },
-  {
-    "mealName": "Afternoon Snack",
-    "recommendedTime": "1600",
-    "prepTimeMinutes": 2,
-    "reminder": "Light protein-rich snack",
-    "mealCalories": 200,
-    "mealProtein": "15g",
-    "mealFat": "7g",
-    "items": [
-      {
-        "itemName": "Greek yogurt with almonds",
-        "itemCalories": 200,
-        "itemProtein": "15g",
-        "itemFat": "7g",
-        "ingredients": [
-          {
-            "ingredientName": "Greek yogurt 2%",
-            "brand": "Yoplait",
-            "portionSI": "170g",
-            "portionUser": "1 container",
-            "protein": "12g",
-            "fat": "4g",
-            "alternatives": []
-          },
-          {
-            "ingredientName": "Almonds",
-            "brand": "Generic",
-            "portionSI": "15g",
-            "portionUser": "10 pieces",
-            "protein": "3g",
-            "fat": "3g",
-            "alternatives": []
-          }
-        ],
-       "alternatives": [
-  {
-    "itemName": "Yogurt",
-    "itemCalories": 180,
-    "itemProtein": "20g",
-    "itemFat": "5g",
-    "ingredients": [
-      {
-        "ingredientName": "Protein yogurt",
-        "brand": "Danone HiPro",
-        "portionSI": "200g",
-        "portionUser": "1 cup",
-        "protein": "20g",
-        "fat": "5g",
-        "alternatives": []
-      },
-      {
-        "ingredientName": "Granola",
-        "brand": "Generic",
-        "portionSI": "60g",
-        "portionUser": "6 tbsp",
-        "protein": "6g",
-        "fat": "10g",
-        "alternatives": []
-      },
-      {
-        "ingredientName": "Apple",
-        "brand": "Fresh",
-        "portionSI": "150g",
-        "portionUser": "1 medium apple",
-        "protein": "0.5g",
-        "fat": "0.3g",
-        "alternatives": []
-      }
-    ]
-  }
-]
-
-      }
-    ],
-    "notes": []
-  },
-  {
-    "mealName": "Dinner",
-    "recommendedTime": "1900",
-    "prepTimeMinutes": 15,
-    "reminder": "Light dinner with lean protein",
-    "mealCalories": 450,
-    "mealProtein": "35g",
-    "mealFat": "15g",
-    "items": [
-      {
-        "itemName": "Tuna with bread/pita/tortilla",
-        "itemCalories": 450,
-        "itemProtein": "35g",
-        "itemFat": "15g",
-        "ingredients": [
-          {
-            "ingredientName": "Tuna in water",
-            "brand": "Starkist",
-            "portionSI": "140g",
-            "portionUser": "1 can",
-            "protein": "30g",
-            "fat": "1g",
-            "alternatives": []
-          },
-          {
-            "ingredientName": "Whole grain bread",
-            "brand": "Angel",
-            "portionSI": "60g",
-            "portionUser": "2 slices or 1 pita or 1 tortilla",
-            "protein": "5g",
-            "fat": "14g",
-            "alternatives": []
-          }
-        ],
-        "alternatives": [
-          {
-            "itemName": "Stir-fry chicken with vegetables and carbs",
-            "itemCalories": 500,
-            "itemProtein": "40g",
-            "itemFat": "12g",
-            "ingredients": [
-              {
-                "ingredientName": "Chicken fillet or breast",
-                "brand": "Fresh",
-                "portionSI": "200–300g",
-                "portionUser": "2 fillet pieces or 3 breast pieces",
-                "protein": "40g",
-                "fat": "6g",
-                "alternatives": []
-              },
-              {
-                "ingredientName": "Mixed vegetables",
-                "brand": "Generic",
-                "portionSI": "150g",
-                "portionUser": "1.5 cups",
-                "protein": "3g",
-                "fat": "3g",
-                "alternatives": []
-              },
-              {
-                "ingredientName": "Carbohydrates (rice/pasta/couscous)",
-                "brand": "Generic",
-                "portionSI": "120g",
-                "portionUser": "10–12 tbsp",
-                "protein": "6g",
-                "fat": "3g",
-                "alternatives": []
-              }
-            ]
-          }
-        ]
-      }
-    ],
-    "notes": [
-      "Avoid heavy carbs at dinner",
-      "Eat at least 2 hours before bed"
-    ]
-  }
-  
-]
-} 
+}

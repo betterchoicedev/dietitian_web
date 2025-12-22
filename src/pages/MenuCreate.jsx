@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 
-import { ArrowLeft, Loader, Save, Clock, Utensils, CalendarRange, ArrowRight, RefreshCw, Plus, ArrowUp, ArrowDown, X, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
+import { ArrowLeft, Loader, Save, Clock, Utensils, CalendarRange, ArrowRight, RefreshCw, Plus, ArrowUp, ArrowDown, X, ChevronDown, ChevronUp, Sparkles, Lock, Unlock } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
@@ -3196,6 +3196,10 @@ const MenuCreate = () => {
 
       setMealPlanStructure([]);
 
+      // Reset manual alternatives mode - it will be set based on loaded data
+
+      setManualAlternativesMode(false);
+
     }
 
   }, [selectedClient]);
@@ -3561,7 +3565,99 @@ const MenuCreate = () => {
 
   }, [language]);
 
-  
+  // State for manual alternatives mode
+  const [manualAlternativesMode, setManualAlternativesMode] = useState(false);
+
+  // Helper function to parse macro values (handles both "90g" strings and numbers)
+  const parseMacroValue = (value) => {
+    if (value === null || value === undefined) return 0;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+      const cleaned = value.replace(/g/gi, '').trim();
+      return parseFloat(cleaned) || 0;
+    }
+    return 0;
+  };
+
+  // Helper function to calculate macros from percentage of daily targets
+  const calculateMacrosFromPercentage = (caloriesPct) => {
+    if (!userTargets || !caloriesPct || caloriesPct === 0) {
+      return { protein: 0, fat: 0, carbs: 0 };
+    }
+    
+    const targetProtein = parseMacroValue(userTargets?.macros?.protein) || parseMacroValue(userTargets?.protein) || 0;
+    const targetFat = parseMacroValue(userTargets?.macros?.fat) || parseMacroValue(userTargets?.fat) || 0;
+    const targetCarbs = parseMacroValue(userTargets?.macros?.carbs) || parseMacroValue(userTargets?.carbs) || 0;
+    
+    const percentage = caloriesPct / 100;
+    
+    return {
+      protein: Math.round(targetProtein * percentage),
+      fat: Math.round(targetFat * percentage),
+      carbs: Math.round(targetCarbs * percentage)
+    };
+  };
+
+  // Auto-calculate macros from percentages when manual mode is enabled
+  useEffect(() => {
+    if (!manualAlternativesMode || !userTargets || mealPlanStructure.length === 0) return;
+    
+    setMealPlanStructure(prev => {
+      return prev.map(meal => {
+        const updated = { ...meal };
+        
+        // Calculate macros from percentage for main meal
+        if (meal.calories_pct && meal.calories_pct > 0) {
+          const macros = calculateMacrosFromPercentage(meal.calories_pct);
+          
+          if (!updated.main) {
+            updated.main = {};
+          }
+          
+          // Only set if not already manually set (to avoid overwriting user input)
+          if (updated.main.protein === undefined || updated.main.protein === '' || updated.main.protein === 0 || updated.main.protein === null) {
+            updated.main.protein = macros.protein;
+          }
+          if (updated.main.fat === undefined || updated.main.fat === '' || updated.main.fat === 0 || updated.main.fat === null) {
+            updated.main.fat = macros.fat;
+          }
+          if (updated.main.carbs === undefined || updated.main.carbs === '' || updated.main.carbs === 0 || updated.main.carbs === null) {
+            updated.main.carbs = macros.carbs;
+          }
+          
+          // Set calories if not set
+          if (!updated.main.calories && meal.calories) {
+            updated.main.calories = meal.calories;
+          }
+          
+          // Also set alternative macros to same values initially
+          if (!updated.alternative) {
+            updated.alternative = {};
+          }
+          if (updated.alternative.protein === undefined || updated.alternative.protein === '' || updated.alternative.protein === 0 || updated.alternative.protein === null) {
+            updated.alternative.protein = macros.protein;
+          }
+          if (updated.alternative.fat === undefined || updated.alternative.fat === '' || updated.alternative.fat === 0 || updated.alternative.fat === null) {
+            updated.alternative.fat = macros.fat;
+          }
+          if (updated.alternative.carbs === undefined || updated.alternative.carbs === '' || updated.alternative.carbs === 0 || updated.alternative.carbs === null) {
+            updated.alternative.carbs = macros.carbs;
+          }
+          // Alternative calories are managed independently - don't auto-set
+        }
+        
+        // Calculate alternative calories_pct if alternative calories exist but calories_pct doesn't
+        if (updated.alternative?.calories && !updated.alternative.calories_pct) {
+          const totalCalories = userTargets?.calories_per_day || userTargets?.calories || 0;
+          if (totalCalories > 0) {
+            updated.alternative.calories_pct = Math.round((updated.alternative.calories / totalCalories) * 100 * 10) / 10;
+          }
+        }
+        
+        return updated;
+      });
+    });
+  }, [manualAlternativesMode, userTargets?.macros?.protein, userTargets?.macros?.fat, userTargets?.macros?.carbs, userTargets?.calories_per_day]);
 
   // State for minimizing Meal Plan Structure section
 
@@ -6466,19 +6562,112 @@ const MenuCreate = () => {
 
       if (loadedMealPlan && loadedMealPlan.length > 0) {
 
-        // Add locked property to each meal (default to false)
+        // Process loaded meal plan structure to handle both new format (with main/alternative) and old format
+        const mealPlanWithLocks = loadedMealPlan.map(meal => {
+          const processedMeal = {
+            ...meal,
+            key: meal.key || inferMealKey(meal.meal),
+            locked: false
+          };
 
-        const mealPlanWithLocks = loadedMealPlan.map(meal => ({
+          // Get total calories for calculating percentages
+          const totalCalories = userData?.daily_target_total_calories || userData?.base_daily_total_calories || userData?.calories_per_day || userData?.calories || 0;
 
-          ...meal,
+          // Handle new structure: main meal data is in meal.main
+          if (meal.main) {
+            // Extract description and calories from main object and sync to top level
+            processedMeal.description = meal.main.description || meal.description || '';
+            processedMeal.calories = meal.main.calories || meal.calories || 0;
+            
+            // Calculate calories_pct if not present
+            const mainCaloriesPct = meal.main.calories_pct || meal.calories_pct || (totalCalories > 0 && processedMeal.calories ? Math.round((processedMeal.calories / totalCalories) * 100 * 10) / 10 : 0);
+            
+            // Sync calories_pct to top level
+            processedMeal.calories_pct = mainCaloriesPct;
+            
+            // Ensure main object exists with all macro data
+            processedMeal.main = {
+              description: meal.main.description || meal.description || '',
+              calories: meal.main.calories || meal.calories || 0,
+              calories_pct: mainCaloriesPct,
+              protein: meal.main.protein || 0,
+              fat: meal.main.fat || 0,
+              carbs: meal.main.carbs || 0,
+              lockedMacro: meal.main.lockedMacro || null
+            };
+          } else {
+            // Old structure: description and calories at top level
+            // Create main object from top-level data
+            const mainCaloriesPct = meal.calories_pct || (totalCalories > 0 && meal.calories ? Math.round((meal.calories / totalCalories) * 100 * 10) / 10 : 0);
+            
+            processedMeal.main = {
+              description: meal.description || '',
+              calories: meal.calories || 0,
+              calories_pct: mainCaloriesPct,
+              protein: 0,
+              fat: 0,
+              carbs: 0,
+              lockedMacro: null
+            };
+          }
 
-          key: meal.key || inferMealKey(meal.meal),
+          // Handle alternative meal data
+          if (meal.alternative) {
+            const altCalories = meal.alternative.calories || 0;
+            processedMeal.alternative = {
+              description: meal.alternative.description || '',
+              calories: altCalories,
+              calories_pct: meal.alternative.calories_pct || (totalCalories > 0 && altCalories > 0 ? Math.round((altCalories / totalCalories) * 100 * 10) / 10 : 0),
+              protein: meal.alternative.protein || 0,
+              fat: meal.alternative.fat || 0,
+              carbs: meal.alternative.carbs || 0,
+              lockedMacro: meal.alternative.lockedMacro || null
+            };
+          } else {
+            // Initialize empty alternative object
+            processedMeal.alternative = {
+              description: '',
+              calories: 0,
+              calories_pct: 0,
+              protein: 0,
+              fat: 0,
+              carbs: 0,
+              lockedMacro: null
+            };
+          }
 
-          locked: false
-
-        }));
+          return processedMeal;
+        });
 
         setMealPlanStructure(mealPlanWithLocks);
+
+        // Check if this meal plan structure has manual alternatives data
+        // If any meal has main/alternative objects with macro data, enable manual mode
+        const hasManualAlternatives = mealPlanWithLocks.some(meal => {
+          // Check if main has macro data (protein, fat, carbs)
+          const hasMainMacros = meal.main && (
+            (meal.main.protein && meal.main.protein > 0) ||
+            (meal.main.fat && meal.main.fat > 0) ||
+            (meal.main.carbs && meal.main.carbs > 0)
+          );
+          
+          // Check if alternative has any data (description, calories, or macros)
+          const hasAlternativeData = meal.alternative && (
+            (meal.alternative.description && meal.alternative.description.trim() !== '') ||
+            (meal.alternative.calories && meal.alternative.calories > 0) ||
+            (meal.alternative.protein && meal.alternative.protein > 0) ||
+            (meal.alternative.fat && meal.alternative.fat > 0) ||
+            (meal.alternative.carbs && meal.alternative.carbs > 0)
+          );
+          
+          return hasMainMacros || hasAlternativeData;
+        });
+
+        // Enable manual alternatives mode if manual data is detected
+        if (hasManualAlternatives) {
+          console.log('✅ Detected manual alternatives data in meal plan structure - enabling manual mode');
+          setManualAlternativesMode(true);
+        }
 
         // Store the modified structure (with locks) as the saved structure for comparison
 
@@ -6830,6 +7019,491 @@ const MenuCreate = () => {
 
     }));
 
+  };
+
+  // Calculate carbs from calories, protein, fat
+  const calculateCarbsFromMacros = (calories, protein, fat) => {
+    if (!calories || calories === 0) return null;
+    const proteinCals = (protein || 0) * 4;
+    const fatCals = (fat || 0) * 9;
+    const carbCals = calories - proteinCals - fatCals;
+    return Math.max(0, Math.round(carbCals / 4));
+  };
+
+  // Validate macros don't exceed calories: Total calories = (protein × 4) + (fat × 9) + (carbs × 4)
+  const validateMacros = (calories, protein, fat, carbs) => {
+    if (!calories || calories === 0) return { isValid: true, error: null };
+    const proteinCals = (protein || 0) * 4;
+    const fatCals = (fat || 0) * 9;
+    const carbCals = (carbs || 0) * 4;
+    const totalMacroCals = proteinCals + fatCals + carbCals;
+    
+    if (totalMacroCals > calories) {
+      return {
+        isValid: false,
+        error: `Macros exceed calories: ${totalMacroCals} > ${calories}`
+      };
+    }
+    return { isValid: true, error: null };
+  };
+
+  // Calculate total macros for main meals
+  const calculateMainMealTotals = () => {
+    const totals = { calories: 0, protein: 0, fat: 0, carbs: 0 };
+
+    mealPlanStructure.forEach(meal => {
+      if (meal.main) {
+        totals.calories += meal.main.calories || meal.calories || 0;
+        totals.protein += meal.main.protein || 0;
+        totals.fat += meal.main.fat || 0;
+        totals.carbs += meal.main.carbs || 0;
+      } else {
+        totals.calories += meal.calories || 0;
+      }
+    });
+
+    return totals;
+  };
+
+  // Calculate total macros for alternative meals
+  const calculateAlternativeMealTotals = () => {
+    const totals = { calories: 0, protein: 0, fat: 0, carbs: 0 };
+
+    mealPlanStructure.forEach(meal => {
+      if (meal.alternative) {
+        totals.calories += meal.alternative.calories || 0;
+        totals.protein += meal.alternative.protein || 0;
+        totals.fat += meal.alternative.fat || 0;
+        totals.carbs += meal.alternative.carbs || 0;
+      }
+    });
+
+    return totals;
+  };
+
+
+  // Validate total macros must equal (not just ≤) client's daily limits
+  const validateTotalMacros = () => {
+    if (!manualAlternativesMode || !userTargets) {
+      return { isValid: true, errors: [], warnings: [], mainTotals: null, altTotals: null };
+    }
+
+    const mainTotals = calculateMainMealTotals();
+    const altTotals = calculateAlternativeMealTotals();
+    const targetCalories = userTargets?.calories_per_day || userTargets?.calories || 0;
+    
+    // Get macros from macros object (preferred) or individual fields (fallback)
+    // Parse values to handle both "90g" strings and numbers
+    const targetProtein = parseMacroValue(userTargets?.macros?.protein) || parseMacroValue(userTargets?.protein) || 0;
+    const targetFat = parseMacroValue(userTargets?.macros?.fat) || parseMacroValue(userTargets?.fat) || 0;
+    const targetCarbs = parseMacroValue(userTargets?.macros?.carbs) || parseMacroValue(userTargets?.carbs) || 0;
+
+    const errors = [];
+    const warnings = [];
+    const tolerance = 3; // Allow 3g/cal tolerance for rounding
+
+    // Validate main meals - must equal targets exactly
+    const mainCalDiff = Math.abs(mainTotals.calories - targetCalories);
+    const mainProtDiff = Math.abs(mainTotals.protein - targetProtein);
+    const mainFatDiff = Math.abs(mainTotals.fat - targetFat);
+    const mainCarbDiff = targetCarbs > 0 ? Math.abs(mainTotals.carbs - targetCarbs) : 0;
+
+    if (mainCalDiff > tolerance) {
+      if (mainTotals.calories > targetCalories) {
+        errors.push(`Main meals: Total calories (${mainTotals.calories}) exceeds target (${targetCalories}) by ${mainCalDiff}`);
+      } else {
+        errors.push(`Main meals: Total calories (${mainTotals.calories}) is below target (${targetCalories}) by ${mainCalDiff}`);
+      }
+    }
+
+    if (mainProtDiff > tolerance) {
+      if (mainTotals.protein > targetProtein) {
+        errors.push(`Main meals: Total protein (${mainTotals.protein}g) exceeds target (${targetProtein}g) by ${mainProtDiff}g`);
+      } else {
+        errors.push(`Main meals: Total protein (${mainTotals.protein}g) is below target (${targetProtein}g) by ${mainProtDiff}g`);
+      }
+    }
+
+    if (mainFatDiff > tolerance) {
+      if (mainTotals.fat > targetFat) {
+        errors.push(`Main meals: Total fat (${mainTotals.fat}g) exceeds target (${targetFat}g) by ${mainFatDiff}g`);
+      } else {
+        errors.push(`Main meals: Total fat (${mainTotals.fat}g) is below target (${targetFat}g) by ${mainFatDiff}g`);
+      }
+    }
+
+    if (targetCarbs > 0 && mainCarbDiff > tolerance) {
+      if (mainTotals.carbs > targetCarbs) {
+        errors.push(`Main meals: Total carbs (${mainTotals.carbs}g) exceeds target (${targetCarbs}g) by ${mainCarbDiff}g`);
+      } else {
+        errors.push(`Main meals: Total carbs (${mainTotals.carbs}g) is below target (${targetCarbs}g) by ${mainCarbDiff}g`);
+      }
+    }
+
+    // Validate alternative meals - must equal targets exactly
+    const altCalDiff = Math.abs(altTotals.calories - targetCalories);
+    const altProtDiff = Math.abs(altTotals.protein - targetProtein);
+    const altFatDiff = Math.abs(altTotals.fat - targetFat);
+    const altCarbDiff = targetCarbs > 0 ? Math.abs(altTotals.carbs - targetCarbs) : 0;
+
+    if (altCalDiff > tolerance) {
+      if (altTotals.calories > targetCalories) {
+        errors.push(`Alternative meals: Total calories (${altTotals.calories}) exceeds target (${targetCalories}) by ${altCalDiff}`);
+      } else {
+        errors.push(`Alternative meals: Total calories (${altTotals.calories}) is below target (${targetCalories}) by ${altCalDiff}`);
+      }
+    }
+
+    if (altProtDiff > tolerance) {
+      if (altTotals.protein > targetProtein) {
+        errors.push(`Alternative meals: Total protein (${altTotals.protein}g) exceeds target (${targetProtein}g) by ${altProtDiff}g`);
+      } else {
+        errors.push(`Alternative meals: Total protein (${altTotals.protein}g) is below target (${targetProtein}g) by ${altProtDiff}g`);
+      }
+    }
+
+    if (altFatDiff > tolerance) {
+      if (altTotals.fat > targetFat) {
+        errors.push(`Alternative meals: Total fat (${altTotals.fat}g) exceeds target (${targetFat}g) by ${altFatDiff}g`);
+      } else {
+        errors.push(`Alternative meals: Total fat (${altTotals.fat}g) is below target (${targetFat}g) by ${altFatDiff}g`);
+      }
+    }
+
+    if (targetCarbs > 0 && altCarbDiff > tolerance) {
+      if (altTotals.carbs > targetCarbs) {
+        errors.push(`Alternative meals: Total carbs (${altTotals.carbs}g) exceeds target (${targetCarbs}g) by ${altCarbDiff}g`);
+      } else {
+        errors.push(`Alternative meals: Total carbs (${altTotals.carbs}g) is below target (${targetCarbs}g) by ${altCarbDiff}g`);
+      }
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+      warnings,
+      mainTotals,
+      altTotals,
+      targets: { calories: targetCalories, protein: targetProtein, fat: targetFat, carbs: targetCarbs }
+    };
+  };
+
+  // Update main meal macro
+  const updateMealMainMacro = (index, field, value) => {
+    const numValue = value === '' ? '' : parseFloat(value) || 0;
+    
+    setMealPlanStructure(prev => {
+      const updated = [...prev];
+      if (!updated[index].main) {
+        updated[index].main = {};
+      }
+      if (!updated[index].main.lockedMacro) {
+        updated[index].main.lockedMacro = null;
+      }
+      
+      const calories = updated[index].main.calories || updated[index].calories || 0;
+      const currentProtein = updated[index].main.protein || 0;
+      const currentFat = updated[index].main.fat || 0;
+      const currentCarbs = updated[index].main.carbs || 0;
+      const lockedMacro = updated[index].main.lockedMacro;
+      
+      // Update the changed field
+      updated[index].main[field] = numValue;
+      
+      const newProtein = field === 'protein' ? numValue : currentProtein;
+      const newFat = field === 'fat' ? numValue : currentFat;
+      const newCarbs = field === 'carbs' ? numValue : currentCarbs;
+      
+      if (calories > 0) {
+        if (lockedMacro === null) {
+          // No macro locked: adjust the other two proportionally
+          if (field === 'protein') {
+            // Adjust fat and carbs proportionally
+            const remainingCals = calories - (newProtein * 4);
+            const currentFatCals = currentFat * 9;
+            const currentCarbsCals = currentCarbs * 4;
+            const totalOtherCals = currentFatCals + currentCarbsCals;
+            
+            if (totalOtherCals > 0) {
+              const fatRatio = currentFatCals / totalOtherCals;
+              const carbsRatio = currentCarbsCals / totalOtherCals;
+              updated[index].main.fat = Math.max(0, Math.round((remainingCals * fatRatio) / 9));
+              updated[index].main.carbs = Math.max(0, Math.round((remainingCals * carbsRatio) / 4));
+            } else {
+              // Default 50/50 split if both are 0
+              updated[index].main.fat = Math.max(0, Math.round((remainingCals * 0.5) / 9));
+              updated[index].main.carbs = Math.max(0, Math.round((remainingCals * 0.5) / 4));
+            }
+          } else if (field === 'fat') {
+            // Adjust protein and carbs proportionally
+            const remainingCals = calories - (newFat * 9);
+            const currentProteinCals = currentProtein * 4;
+            const currentCarbsCals = currentCarbs * 4;
+            const totalOtherCals = currentProteinCals + currentCarbsCals;
+            
+            if (totalOtherCals > 0) {
+              const proteinRatio = currentProteinCals / totalOtherCals;
+              const carbsRatio = currentCarbsCals / totalOtherCals;
+              updated[index].main.protein = Math.max(0, Math.round((remainingCals * proteinRatio) / 4));
+              updated[index].main.carbs = Math.max(0, Math.round((remainingCals * carbsRatio) / 4));
+            } else {
+              updated[index].main.protein = Math.max(0, Math.round((remainingCals * 0.5) / 4));
+              updated[index].main.carbs = Math.max(0, Math.round((remainingCals * 0.5) / 4));
+            }
+          } else if (field === 'carbs') {
+            // Adjust protein and fat proportionally
+            const remainingCals = calories - (newCarbs * 4);
+            const currentProteinCals = currentProtein * 4;
+            const currentFatCals = currentFat * 9;
+            const totalOtherCals = currentProteinCals + currentFatCals;
+            
+            if (totalOtherCals > 0) {
+              const proteinRatio = currentProteinCals / totalOtherCals;
+              const fatRatio = currentFatCals / totalOtherCals;
+              updated[index].main.protein = Math.max(0, Math.round((remainingCals * proteinRatio) / 4));
+              updated[index].main.fat = Math.max(0, Math.round((remainingCals * fatRatio) / 9));
+            } else {
+              updated[index].main.protein = Math.max(0, Math.round((remainingCals * 0.5) / 4));
+              updated[index].main.fat = Math.max(0, Math.round((remainingCals * 0.5) / 9));
+            }
+          }
+        } else {
+          // One macro is locked: adjust only the unlocked ones
+          if (lockedMacro === 'protein') {
+            // Protein is locked, adjust fat and carbs
+            const remainingCals = calories - (newProtein * 4);
+            if (field === 'fat') {
+              updated[index].main.carbs = Math.max(0, Math.round((remainingCals - (newFat * 9)) / 4));
+            } else if (field === 'carbs') {
+              updated[index].main.fat = Math.max(0, Math.round((remainingCals - (newCarbs * 4)) / 9));
+            }
+          } else if (lockedMacro === 'fat') {
+            // Fat is locked, adjust protein and carbs
+            const remainingCals = calories - (newFat * 9);
+            if (field === 'protein') {
+              updated[index].main.carbs = Math.max(0, Math.round((remainingCals - (newProtein * 4)) / 4));
+            } else if (field === 'carbs') {
+              updated[index].main.protein = Math.max(0, Math.round((remainingCals - (newCarbs * 4)) / 4));
+            }
+          } else if (lockedMacro === 'carbs') {
+            // Carbs is locked, adjust protein and fat
+            const remainingCals = calories - (newCarbs * 4);
+            if (field === 'protein') {
+              updated[index].main.fat = Math.max(0, Math.round((remainingCals - (newProtein * 4)) / 9));
+            } else if (field === 'fat') {
+              updated[index].main.protein = Math.max(0, Math.round((remainingCals - (newFat * 9)) / 4));
+            }
+          }
+        }
+      }
+      
+      setHasUnsavedMealPlanChanges(true);
+      return updated;
+    });
+  };
+
+  // Toggle lock for main meal macro
+  const toggleMainMealMacroLock = (index, macroType) => {
+    setMealPlanStructure(prev => {
+      const updated = [...prev];
+      if (!updated[index].main) {
+        updated[index].main = {};
+      }
+      
+      // If clicking the same macro, unlock it. Otherwise, lock the new one (only one can be locked)
+      if (updated[index].main.lockedMacro === macroType) {
+        updated[index].main.lockedMacro = null;
+      } else {
+        updated[index].main.lockedMacro = macroType;
+        // If locking carbs, store the current calculated value
+        if (macroType === 'carbs') {
+          const calories = updated[index].main.calories || updated[index].calories || 0;
+          const protein = updated[index].main.protein || 0;
+          const fat = updated[index].main.fat || 0;
+          const calculatedCarbs = calculateCarbsFromMacros(calories, protein, fat);
+          if (calculatedCarbs !== null) {
+            updated[index].main.carbs = calculatedCarbs;
+          }
+        }
+      }
+      
+      setHasUnsavedMealPlanChanges(true);
+      return updated;
+    });
+  };
+
+  // Update alternative macro for a meal
+  const updateMealAlternative = (index, field, value) => {
+    // Handle description field separately (non-numeric)
+    if (field === 'description') {
+      setMealPlanStructure(prev => {
+        const updated = [...prev];
+        if (!updated[index].alternative) {
+          updated[index].alternative = {};
+        }
+        updated[index].alternative[field] = value;
+        setHasUnsavedMealPlanChanges(true);
+        return updated;
+      });
+      return;
+    }
+    
+    const numValue = value === '' ? '' : parseFloat(value) || 0;
+    
+    setMealPlanStructure(prev => {
+      const updated = [...prev];
+      if (!updated[index].alternative) {
+        updated[index].alternative = {};
+      }
+      if (!updated[index].alternative.lockedMacro) {
+        updated[index].alternative.lockedMacro = null;
+      }
+      
+      // Get current values (use stored alternative calories, not meal.calories)
+      const currentCalories = updated[index].alternative.calories || 0;
+      const currentProtein = updated[index].alternative.protein || 0;
+      const currentFat = updated[index].alternative.fat || 0;
+      const currentCarbs = updated[index].alternative.carbs || 0;
+      const lockedMacro = updated[index].alternative.lockedMacro;
+      
+      // Update the changed field
+      updated[index].alternative[field] = numValue;
+      
+      // Get new values after update
+      const newCalories = field === 'calories' ? numValue : currentCalories;
+      const newProtein = field === 'protein' ? numValue : currentProtein;
+      const newFat = field === 'fat' ? numValue : currentFat;
+      const newCarbs = field === 'carbs' ? numValue : currentCarbs;
+      
+      // If calories changed, calculate macros and calories_pct based on percentage of daily targets
+      if (field === 'calories' && newCalories > 0) {
+        const totalCalories = userTargets?.calories_per_day || userTargets?.calories || 0;
+        if (totalCalories > 0) {
+          const altPercentage = (newCalories / totalCalories) * 100;
+          const macros = calculateMacrosFromPercentage(altPercentage);
+          
+          // Update alternative macros
+          updated[index].alternative.protein = macros.protein;
+          updated[index].alternative.fat = macros.fat;
+          updated[index].alternative.carbs = macros.carbs;
+          
+          // Calculate and store calories_pct
+          updated[index].alternative.calories_pct = Math.round(altPercentage * 10) / 10;
+        }
+      } else if (newCalories > 0) {
+        // Recalculate calories_pct when calories exist
+        const totalCalories = userTargets?.calories_per_day || userTargets?.calories || 0;
+        if (totalCalories > 0) {
+          updated[index].alternative.calories_pct = Math.round((newCalories / totalCalories) * 100 * 10) / 10;
+        }
+        if (lockedMacro === null) {
+          // No macro locked: adjust the other two proportionally
+          if (field === 'protein') {
+            const remainingCals = newCalories - (newProtein * 4);
+            const currentFatCals = currentFat * 9;
+            const currentCarbsCals = currentCarbs * 4;
+            const totalOtherCals = currentFatCals + currentCarbsCals;
+            
+            if (totalOtherCals > 0) {
+              const fatRatio = currentFatCals / totalOtherCals;
+              const carbsRatio = currentCarbsCals / totalOtherCals;
+              updated[index].alternative.fat = Math.max(0, Math.round((remainingCals * fatRatio) / 9));
+              updated[index].alternative.carbs = Math.max(0, Math.round((remainingCals * carbsRatio) / 4));
+            } else {
+              updated[index].alternative.fat = Math.max(0, Math.round((remainingCals * 0.5) / 9));
+              updated[index].alternative.carbs = Math.max(0, Math.round((remainingCals * 0.5) / 4));
+            }
+          } else if (field === 'fat') {
+            const remainingCals = newCalories - (newFat * 9);
+            const currentProteinCals = currentProtein * 4;
+            const currentCarbsCals = currentCarbs * 4;
+            const totalOtherCals = currentProteinCals + currentCarbsCals;
+            
+            if (totalOtherCals > 0) {
+              const proteinRatio = currentProteinCals / totalOtherCals;
+              const carbsRatio = currentCarbsCals / totalOtherCals;
+              updated[index].alternative.protein = Math.max(0, Math.round((remainingCals * proteinRatio) / 4));
+              updated[index].alternative.carbs = Math.max(0, Math.round((remainingCals * carbsRatio) / 4));
+            } else {
+              updated[index].alternative.protein = Math.max(0, Math.round((remainingCals * 0.5) / 4));
+              updated[index].alternative.carbs = Math.max(0, Math.round((remainingCals * 0.5) / 4));
+            }
+          } else if (field === 'carbs') {
+            const remainingCals = newCalories - (newCarbs * 4);
+            const currentProteinCals = currentProtein * 4;
+            const currentFatCals = currentFat * 9;
+            const totalOtherCals = currentProteinCals + currentFatCals;
+            
+            if (totalOtherCals > 0) {
+              const proteinRatio = currentProteinCals / totalOtherCals;
+              const fatRatio = currentFatCals / totalOtherCals;
+              updated[index].alternative.protein = Math.max(0, Math.round((remainingCals * proteinRatio) / 4));
+              updated[index].alternative.fat = Math.max(0, Math.round((remainingCals * fatRatio) / 9));
+            } else {
+              updated[index].alternative.protein = Math.max(0, Math.round((remainingCals * 0.5) / 4));
+              updated[index].alternative.fat = Math.max(0, Math.round((remainingCals * 0.5) / 9));
+            }
+          }
+        } else {
+          // One macro is locked: adjust only the unlocked ones
+          if (lockedMacro === 'protein') {
+            const remainingCals = newCalories - (newProtein * 4);
+            if (field === 'fat') {
+              updated[index].alternative.carbs = Math.max(0, Math.round((remainingCals - (newFat * 9)) / 4));
+            } else if (field === 'carbs') {
+              updated[index].alternative.fat = Math.max(0, Math.round((remainingCals - (newCarbs * 4)) / 9));
+            }
+          } else if (lockedMacro === 'fat') {
+            const remainingCals = newCalories - (newFat * 9);
+            if (field === 'protein') {
+              updated[index].alternative.carbs = Math.max(0, Math.round((remainingCals - (newProtein * 4)) / 4));
+            } else if (field === 'carbs') {
+              updated[index].alternative.protein = Math.max(0, Math.round((remainingCals - (newCarbs * 4)) / 4));
+            }
+          } else if (lockedMacro === 'carbs') {
+            const remainingCals = newCalories - (newCarbs * 4);
+            if (field === 'protein') {
+              updated[index].alternative.fat = Math.max(0, Math.round((remainingCals - (newProtein * 4)) / 9));
+            } else if (field === 'fat') {
+              updated[index].alternative.protein = Math.max(0, Math.round((remainingCals - (newFat * 9)) / 4));
+            }
+          }
+        }
+      }
+      
+      setHasUnsavedMealPlanChanges(true);
+      return updated;
+    });
+  };
+
+  // Toggle lock for alternative meal macro
+  const toggleAlternativeMealMacroLock = (index, macroType) => {
+    setMealPlanStructure(prev => {
+      const updated = [...prev];
+      if (!updated[index].alternative) {
+        updated[index].alternative = {};
+      }
+      
+      // If clicking the same macro, unlock it. Otherwise, lock the new one (only one can be locked)
+      if (updated[index].alternative.lockedMacro === macroType) {
+        updated[index].alternative.lockedMacro = null;
+      } else {
+        updated[index].alternative.lockedMacro = macroType;
+        // If locking carbs, store the current calculated value
+        if (macroType === 'carbs') {
+          const calories = updated[index].alternative.calories || 0;
+          const protein = updated[index].alternative.protein || 0;
+          const fat = updated[index].alternative.fat || 0;
+          const calculatedCarbs = calculateCarbsFromMacros(calories, protein, fat);
+          if (calculatedCarbs !== null) {
+            updated[index].alternative.carbs = calculatedCarbs;
+          }
+        }
+      }
+      
+      setHasUnsavedMealPlanChanges(true);
+      return updated;
+    });
   };
 
 
@@ -7217,10 +7891,91 @@ const MenuCreate = () => {
       const totalCalories = userTargets?.calories_per_day || userTargets?.calories || 0;
 
       updatedStructure[index].calories = parseInt(value) || 0;
+      const caloriesValue = parseInt(value) || 0;
+
+      // Also update meal.main.calories when in manual alternatives mode
+      // (Alternative calories are managed independently)
+      if (manualAlternativesMode) {
+        if (!updatedStructure[index].main) {
+          updatedStructure[index].main = {};
+        }
+        updatedStructure[index].main.calories = caloriesValue;
+      }
 
       const recalculatedStructure = recalculatePercentages(updatedStructure, totalCalories, index);
 
-      setMealPlanStructure(recalculatedStructure);
+      // After recalculation, update macros for all meals in manual alternatives mode
+      if (manualAlternativesMode && totalCalories > 0) {
+        const structureWithUpdatedMacros = recalculatedStructure.map(meal => {
+          const updatedMeal = { ...meal };
+          
+          // Update main.calories to match meal.calories
+          if (!updatedMeal.main) {
+            updatedMeal.main = {};
+          }
+          updatedMeal.main.calories = meal.calories || 0;
+          
+          // Calculate macros for main meal based on the meal's calories_pct
+          if (meal.calories_pct && meal.calories_pct > 0) {
+            const macros = calculateMacrosFromPercentage(meal.calories_pct);
+            
+            // Update main meal macros
+            updatedMeal.main.protein = macros.protein;
+            updatedMeal.main.fat = macros.fat;
+            updatedMeal.main.carbs = macros.carbs;
+          }
+          
+          // Alternative calories are managed independently - don't sync or auto-calculate
+          
+          return updatedMeal;
+        });
+        
+        setMealPlanStructure(structureWithUpdatedMacros);
+      } else {
+        setMealPlanStructure(recalculatedStructure);
+      }
+
+    } else if (field === 'calories_pct' && manualAlternativesMode) {
+
+      // Auto-calculate macros from percentage when in manual mode
+
+      const caloriesPct = parseFloat(value) || 0;
+
+      if (caloriesPct > 0 && userTargets) {
+
+        const macros = calculateMacrosFromPercentage(caloriesPct);
+
+        // Set main meal macros
+
+        if (!updatedStructure[index].main) {
+
+          updatedStructure[index].main = {};
+
+        }
+
+        updatedStructure[index].main.protein = macros.protein;
+
+        updatedStructure[index].main.fat = macros.fat;
+
+        updatedStructure[index].main.carbs = macros.carbs;
+
+        // Set alternative meal macros to same values
+
+        if (!updatedStructure[index].alternative) {
+
+          updatedStructure[index].alternative = {};
+
+        }
+
+        updatedStructure[index].alternative.protein = macros.protein;
+
+        updatedStructure[index].alternative.fat = macros.fat;
+
+        updatedStructure[index].alternative.carbs = macros.carbs;
+
+      }
+
+      setMealPlanStructure(updatedStructure);
 
     } else {
 
@@ -8043,17 +8798,72 @@ const MenuCreate = () => {
 
       // Remove locked property before saving (as per Users.jsx pattern)
 
-      const mealPlanToSave = mealPlanStructure.map(meal => ({
+      const mealPlanToSave = mealPlanStructure.map(meal => {
+
+        const base = {
 
         meal: meal.meal,
 
-        description: meal.description,
-
-        calories: meal.calories,
-
         calories_pct: meal.calories_pct
 
-      }));
+        };
+
+        // Include main meal data if manualAlternativesMode is enabled
+        // Main meal description and calories go inside the main object
+
+        if (manualAlternativesMode && meal.main) {
+
+          base.main = {
+
+            description: meal.description || null,
+
+            calories: meal.main.calories || meal.calories || null,
+
+            calories_pct: meal.calories_pct || null,
+
+            protein: meal.main.protein || null,
+
+            fat: meal.main.fat || null,
+
+            carbs: meal.main.carbs || null
+
+          };
+
+        } else {
+
+          // If not in manual mode, keep the old structure for backward compatibility
+
+          base.description = meal.description;
+
+          base.calories = meal.calories;
+
+        }
+
+        // Include alternative macros if manualAlternativesMode is enabled
+
+        if (manualAlternativesMode && meal.alternative) {
+
+          base.alternative = {
+
+            description: meal.alternative.description || null,
+
+            calories: meal.alternative.calories || null,
+
+            calories_pct: meal.alternative.calories_pct || null,
+
+            protein: meal.alternative.protein || null,
+
+            fat: meal.alternative.fat || null,
+
+            carbs: meal.alternative.carbs || null
+
+          };
+
+        }
+
+        return base;
+
+      });
 
 
 
@@ -8813,13 +9623,82 @@ const MenuCreate = () => {
 
       setProgress(5);
 
-      setProgressStep('🎯 Analyzing client preferences...');
+      setProgressStep('🎯 Preparing meal template...');
+
+      let template;
+
+      if (manualAlternativesMode) {
+
+        // Build template directly from meal_plan_structure
+
+        console.log('📋 Building template from manual meal plan structure');
+
+        
+
+        const totalCalories = userTargets?.calories_per_day || userTargets?.calories || 0;
+
+        const targetProtein = parseMacroValue(userTargets?.macros?.protein) || parseMacroValue(userTargets?.protein) || 0;
+
+        const targetFat = parseMacroValue(userTargets?.macros?.fat) || parseMacroValue(userTargets?.fat) || 0;
+
+          const targetCarbs = parseMacroValue(userTargets?.macros?.carbs) || parseMacroValue(userTargets?.carbs) || 0;
+
+        
+
+        template = mealPlanStructure.map(meal => {
+
+          // Get main meal macros from manual input - use exact values from meal.main
+          const mainCalories = meal.main?.calories || meal.calories || Math.round((meal.calories_pct / 100) * totalCalories);
+          const mainProtein = meal.main?.protein || Math.round((meal.calories_pct / 100) * targetProtein);
+          const mainFat = meal.main?.fat || Math.round((meal.calories_pct / 100) * targetFat);
+          const mainCarbs = meal.main?.carbs || Math.round((mainCalories - (mainProtein * 4) - (mainFat * 9)) / 4);
+
+          // Get alternative macros from manual input - use exact values from meal.alternative
+          const altCalories = meal.alternative?.calories || 0;
+          const altProtein = meal.alternative?.protein || 0;
+          const altFat = meal.alternative?.fat || 0;
+          const altCarbs = meal.alternative?.carbs || Math.round((altCalories - (altProtein * 4) - (altFat * 9)) / 4);
+
+          // Build template in exact structure matching the API expectation
+          return {
+            meal: meal.meal,
+            main: {
+              fat: mainFat,
+              name: meal.description || "",
+              carbs: mainCarbs,
+              protein: mainProtein,
+              calories: mainCalories,
+              main_protein_source: ""
+            },
+            alternative: {
+              fat: altFat,
+              name: meal.alternative?.description || "",
+              carbs: altCarbs,
+              protein: altProtein,
+              calories: altCalories,
+              main_protein_source: ""
+            }
+          };
+
+        });
+
+        
+
+        console.log('✅ Template built from manual structure:', template);
+
+        
+
+      } else {
+
+        // Normal flow: call /api/template
+
+        setProgressStep('🎯 Analyzing client preferences...');
 
 
 
-      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+        const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
 
-      // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+        // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
 
         method: "POST",
 
@@ -8899,7 +9778,9 @@ const MenuCreate = () => {
 
       
 
-      const template = templateData.template;
+        template = templateData.template;
+
+      }
 
 
 
@@ -8999,15 +9880,28 @@ const MenuCreate = () => {
 
 
 
-      const normalizedTemplate = template.map(m => ({
+      // Normalize template to ensure exact structure matching API expectation
+      const normalizedTemplate = template.map(m => {
+        // Ensure carbs exist and maintain exact property order
+        const normalizeMealOption = (opt) => {
+          if (!opt) return null;
+          const carbs = opt.carbs ?? Math.round((opt.calories - (opt.protein * 4) - (opt.fat * 9)) / 4);
+          return {
+            fat: opt.fat || 0,
+            name: opt.name || "",
+            carbs: carbs,
+            protein: opt.protein || 0,
+            calories: opt.calories || 0,
+            main_protein_source: opt.main_protein_source || ""
+          };
+        };
 
-        meal: m.meal,
-
-        main: ensureCarbs(m.main),
-
-        alternative: ensureCarbs(m.alternative)
-
-      }));
+        return {
+          meal: m.meal,
+          main: normalizeMealOption(m.main),
+          alternative: normalizeMealOption(m.alternative)
+        };
+      });
 
 
 
@@ -9543,7 +10437,99 @@ const MenuCreate = () => {
 
       setProgress(5);
 
-      setProgressStep('🎯 Analyzing client preferences...');
+      setProgressStep('🎯 Preparing meal template...');
+
+      let template;
+
+      if (manualAlternativesMode) {
+
+        // Build template directly from meal_plan_structure
+
+        console.log('📋 Building template from manual meal plan structure');
+
+        
+
+        const totalCalories = userTargets?.calories_per_day || userTargets?.calories || 0;
+
+        const totalProtein = userTargets?.protein || 0;
+
+        const totalFat = userTargets?.fat || 0;
+
+        
+
+        template = mealPlanStructure.map(meal => {
+
+          // Get main meal macros from manual input or calculate from calories_pct
+
+          const mainCalories = meal.main?.calories || meal.calories || Math.round((meal.calories_pct / 100) * totalCalories);
+
+          const mainProtein = meal.main?.protein || Math.round((meal.calories_pct / 100) * totalProtein);
+
+          const mainFat = meal.main?.fat || Math.round((meal.calories_pct / 100) * totalFat);
+
+          const mainCarbs = meal.main?.carbs || Math.round((mainCalories - (mainProtein * 4) - (mainFat * 9)) / 4);
+
+          
+
+          // Get alternative macros from manual input - use exact values from meal.alternative
+          const altCalories = meal.alternative?.calories || 0;
+          const altProtein = meal.alternative?.protein || 0;
+          const altFat = meal.alternative?.fat || 0;
+          const altCarbs = meal.alternative?.carbs || Math.round((altCalories - (altProtein * 4) - (altFat * 9)) / 4);
+
+          
+
+          return {
+
+            meal: meal.meal,
+
+            main: {
+
+              fat: mainFat,
+
+              name: meal.description || "", // Use main meal description
+
+              carbs: mainCarbs,
+
+              protein: mainProtein,
+
+              calories: mainCalories,
+
+              main_protein_source: "" // Will be determined by DSPy
+
+            },
+
+            alternative: {
+
+              fat: altFat,
+
+              name: meal.alternative?.description || "", // Use alternative description
+
+              carbs: altCarbs,
+
+              protein: altProtein,
+
+              calories: altCalories,
+
+              main_protein_source: "" // Will be determined by DSPy
+
+            }
+
+          };
+
+        });
+
+        
+
+        console.log('✅ Template built from manual structure:', template);
+
+        
+
+      } else {
+
+        // Normal flow: call /api/template
+
+        setProgressStep('🎯 Analyzing client preferences...');
 
 
 
@@ -9629,7 +10615,9 @@ const MenuCreate = () => {
 
       
 
-      const template = templateData.template;
+        template = templateData.template;
+
+      }
 
 
 
@@ -9693,15 +10681,28 @@ const MenuCreate = () => {
 
 
 
-      const normalizedTemplate = (template || []).map(m => ({
+      // Normalize template to ensure exact structure matching API expectation
+      const normalizedTemplate = (template || []).map(m => {
+        // Ensure carbs exist and maintain exact property order
+        const normalizeMealOption = (opt) => {
+          if (!opt) return null;
+          const carbs = opt.carbs ?? Math.round((opt.calories - (opt.protein * 4) - (opt.fat * 9)) / 4);
+          return {
+            fat: opt.fat || 0,
+            name: opt.name || "",
+            carbs: carbs,
+            protein: opt.protein || 0,
+            calories: opt.calories || 0,
+            main_protein_source: opt.main_protein_source || ""
+          };
+        };
 
-        ...m,
-
-        main: ensureCarbs(m.main),
-
-        alternative: ensureCarbs(m.alternative)
-
-      }));
+        return {
+          meal: m.meal,
+          main: normalizeMealOption(m.main),
+          alternative: normalizeMealOption(m.alternative)
+        };
+      });
 
 
 
@@ -10311,7 +11312,7 @@ const MenuCreate = () => {
 
             alternative: {
 
-              name: meal.alternative?.meal_title || meal.alternative?.name,
+              description: meal.alternative?.meal_title || meal.alternative?.description || "",
 
               calories: meal.alternative?.nutrition?.calories || 0,
 
@@ -12421,6 +13422,17 @@ const MenuCreate = () => {
           </CardHeader>
           {!isDailyTargetsMinimized && (
             <CardContent>
+            {!selectedClient?.daily_target_total_calories && (
+              <Alert className="mb-4 border-red-200 bg-red-50">
+                <AlertTitle className="text-red-800 flex items-center gap-2">
+                  <span>⚠️</span>
+                  {translations.missingCaloriesWarning || 'Missing Client Profile Information'}
+                </AlertTitle>
+                <AlertDescription className="text-red-700">
+                  {translations.missingCaloriesEditMessage || `The client "${selectedClient?.full_name || 'selected client'}" does not have a daily target calories value set. Please complete the client profile information in the "Clients" page before editing these settings.`}
+                </AlertDescription>
+              </Alert>
+            )}
             <div className="space-y-6">
               {/* Daily Target Calories */}
               <div className="space-y-2">
@@ -12439,7 +13451,8 @@ const MenuCreate = () => {
                         calories_per_day: newValue
                       }));
                     }}
-                    className="border-gray-300 focus:border-green-500 focus:ring-green-200"
+                    disabled={!selectedClient?.daily_target_total_calories}
+                    className="border-gray-300 focus:border-green-500 focus:ring-green-200 disabled:bg-gray-100 disabled:cursor-not-allowed"
                     placeholder="2000"
                   />
                   {/* Show original DB value if different from current */}
@@ -12486,7 +13499,8 @@ const MenuCreate = () => {
                           fat: true
                         });
                       }}
-                      className="text-orange-600 border-orange-300 hover:bg-orange-50 text-xs"
+                      disabled={!selectedClient?.daily_target_total_calories}
+                      className="text-orange-600 border-orange-300 hover:bg-orange-50 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                       title={translations.lockAllMacrosTooltip || 'Lock all macros'}
                     >
                       🔒 {translations.lockAll || 'Lock All'}
@@ -12502,7 +13516,8 @@ const MenuCreate = () => {
                           fat: false
                         });
                       }}
-                      className="text-green-600 border-green-300 hover:bg-green-50 text-xs"
+                      disabled={!selectedClient?.daily_target_total_calories}
+                      className="text-green-600 border-green-300 hover:bg-green-50 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                       title={translations.unlockAllMacrosTooltip || 'Unlock all macros'}
                     >
                       🔓 {translations.unlockAll || 'Unlock All'}
@@ -12540,8 +13555,8 @@ const MenuCreate = () => {
                           });
                         }
                       }}
-                      className="text-blue-600 border-blue-300 hover:bg-blue-50 text-xs"
-                      disabled={!userTargets?.calories_per_day}
+                      className="text-blue-600 border-blue-300 hover:bg-blue-50 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={!userTargets?.calories_per_day || !selectedClient?.daily_target_total_calories}
                     >
                       🔄 {translations.resetToDefault || 'Reset to Default (30/40/30)'}
                     </Button>
@@ -12581,7 +13596,8 @@ const MenuCreate = () => {
                               variant="ghost"
                               size="sm"
                               onClick={() => toggleMacroLock(macro.key)}
-                              className={`p-1 h-6 w-6 transition-colors ${
+                              disabled={!selectedClient?.daily_target_total_calories}
+                              className={`p-1 h-6 w-6 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                                 lockedMacros[macro.key] 
                                   ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-100' 
                                   : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
@@ -12603,7 +13619,7 @@ const MenuCreate = () => {
                               type="number"
                               value={macroInputs[macro.key].percentage}
                               onChange={(e) => calculateMacrosFromInputs('percentage', parseFloat(e.target.value) || 0, macro.key)}
-                              className={`text-xs h-8 ${
+                              className={`text-xs h-8 disabled:bg-gray-100 disabled:cursor-not-allowed ${
                                 macroInputs[macro.key].percentage < 0 || macroInputs[macro.key].percentage > 100
                                   ? 'border-red-300 bg-red-50' 
                                   : lockedMacros[macro.key]
@@ -12614,7 +13630,7 @@ const MenuCreate = () => {
                               max="100"
                               step="0.001"
                               placeholder="0"
-                              disabled={lockedMacros[macro.key]}
+                              disabled={lockedMacros[macro.key] || !selectedClient?.daily_target_total_calories}
                             />
                           </div>
                           
@@ -12625,9 +13641,10 @@ const MenuCreate = () => {
                               type="number"
                               value={macroInputs[macro.key].grams}
                               onChange={(e) => calculateMacrosFromInputs('grams', parseFloat(e.target.value) || 0, macro.key)}
-                              className="text-xs h-8 border-gray-300 focus:border-blue-500 focus:ring-blue-200"
+                              className="text-xs h-8 border-gray-300 focus:border-blue-500 focus:ring-blue-200 disabled:bg-gray-100 disabled:cursor-not-allowed"
                               min="0"
                               max={macro.maxGrams}
+                              disabled={!selectedClient?.daily_target_total_calories}
                             />
                           </div>
                           
@@ -12638,9 +13655,10 @@ const MenuCreate = () => {
                               type="number"
                               value={macroInputs[macro.key].gramsPerKg}
                               onChange={(e) => calculateMacrosFromInputs('gramsPerKg', parseFloat(e.target.value) || 0, macro.key)}
-                              className="text-xs h-8 border-gray-300 focus:border-blue-500 focus:ring-blue-200"
+                              className="text-xs h-8 border-gray-300 focus:border-blue-500 focus:ring-blue-200 disabled:bg-gray-100 disabled:cursor-not-allowed"
                               min="0"
                               step="0.001"
+                              disabled={!selectedClient?.daily_target_total_calories}
                             />
                           </div>
                           
@@ -12652,7 +13670,8 @@ const MenuCreate = () => {
                               step={1}
                               value={[macroInputs[macro.key].grams]}
                               onValueChange={([val]) => calculateMacrosFromInputs('grams', val, macro.key)}
-                              className={`[&>span]:bg-${macro.color}-500`}
+                              disabled={!selectedClient?.daily_target_total_calories}
+                              className={`[&>span]:bg-${macro.color}-500 disabled:opacity-50`}
                             />
                             <div className="text-xs text-gray-500 text-center">
                               0 - {macro.maxGrams}g
@@ -12848,8 +13867,8 @@ const MenuCreate = () => {
                       setSaving(false);
                     }
                   }}
-                  disabled={saving || !selectedClient}
-                  className="bg-green-600 hover:bg-green-700 text-white"
+                  disabled={saving || !selectedClient || !selectedClient?.daily_target_total_calories}
+                  className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {saving ? (
                     <>
@@ -12922,6 +13941,18 @@ const MenuCreate = () => {
 
             <CardContent className="animate-in slide-in-from-top-2 duration-300">
 
+              {!selectedClient?.daily_target_total_calories && (
+                <Alert className="mb-4 border-red-200 bg-red-50">
+                  <AlertTitle className="text-red-800 flex items-center gap-2">
+                    <span>⚠️</span>
+                    {translations.missingCaloriesWarning || 'Missing Client Profile Information'}
+                  </AlertTitle>
+                  <AlertDescription className="text-red-700">
+                    {translations.missingCaloriesEditMessage || `The client "${selectedClient?.full_name || 'selected client'}" does not have a daily target calories value set. Please complete the client profile information in the "Clients" page before editing these settings.`}
+                  </AlertDescription>
+                </Alert>
+              )}
+
               <div className="space-y-3">
 
                 <div className="flex items-center justify-between">
@@ -12944,9 +13975,9 @@ const MenuCreate = () => {
 
                       onClick={updateMealPlanDescriptionsWithAI}
 
-                      disabled={updatingMealDescriptions}
+                      disabled={updatingMealDescriptions || !selectedClient?.daily_target_total_calories}
 
-                      className="text-purple-600 border-purple-600 hover:bg-purple-50 disabled:opacity-50"
+                      className="text-purple-600 border-purple-600 hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed"
 
                       title="Use AI to update meal descriptions based on client's eating habits"
 
@@ -12976,7 +14007,9 @@ const MenuCreate = () => {
 
                       onClick={saveMealPlanStructure}
 
-                      className="text-blue-600 border-blue-600 hover:bg-blue-50"
+                      disabled={!selectedClient?.daily_target_total_calories}
+
+                      className="text-blue-600 border-blue-600 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
 
                       title="Save meal plan structure to database"
 
@@ -12988,43 +14021,45 @@ const MenuCreate = () => {
 
                     </Button>
 
-                    <Button
+                    {process.env.NODE_ENV === 'development' && !manualAlternativesMode && (
+                      <Button
 
-                      type="button"
+                        type="button"
 
-                      variant="outline"
+                        variant="outline"
 
-                      size="sm"
+                        size="sm"
 
-                      onClick={saveAsTemplate}
+                        onClick={saveAsTemplate}
 
-                      className="text-purple-600 border-purple-600 hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="text-purple-600 border-purple-600 hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed"
 
-                      title={
+                        title={
 
-                        mealPlanStructure.some(meal => !meal.description || meal.description.trim() === '')
+                          mealPlanStructure.some(meal => !meal.description || meal.description.trim() === '')
 
-                          ? translations.fillAllMealsFirst || 'Fill all meal descriptions first'
+                            ? translations.fillAllMealsFirst || 'Fill all meal descriptions first'
 
-                          : translations.saveCurrentAsReusableTemplate || 'Save current meal plan as a reusable template'
+                            : translations.saveCurrentAsReusableTemplate || 'Save current meal plan as a reusable template'
 
-                      }
+                        }
 
-                      disabled={
+                        disabled={
 
-                        mealPlanStructure.length === 0 || 
+                          mealPlanStructure.length === 0 || 
 
-                        mealPlanStructure.some(meal => !meal.description || meal.description.trim() === '')
+                          mealPlanStructure.some(meal => !meal.description || meal.description.trim() === '')
 
-                      }
+                        }
 
-                    >
+                      >
 
-                      <Save className={`h-4 w-4 ${dir === 'rtl' ? 'ml-1' : 'mr-1'}`} />
+                        <Save className={`h-4 w-4 ${dir === 'rtl' ? 'ml-1' : 'mr-1'}`} />
 
-                      {translations.saveAsTemplate || 'Save as Template'}
+                        {translations.saveAsTemplate || 'Save as Template'}
 
-                    </Button>
+                      </Button>
+                    )}
 
                     <Button
 
@@ -13036,7 +14071,9 @@ const MenuCreate = () => {
 
                       onClick={addMealToPlan}
 
-                      className="text-green-600 border-green-600 hover:bg-green-50"
+                      disabled={!selectedClient?.daily_target_total_calories}
+
+                      className="text-green-600 border-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed"
 
                     >
 
@@ -13111,16 +14148,18 @@ const MenuCreate = () => {
                         </SelectContent>
                       </Select>
                     </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowTemplateManager(true)}
-                      className="text-purple-600 border-purple-300 hover:bg-purple-50 whitespace-nowrap"
-                      title={translations.manageTemplates || 'Manage Templates'}
-                    >
-                      <span className={dir === 'rtl' ? 'ml-1' : 'mr-1'}>⚙️</span> {translations.manage || 'Manage'}
-                    </Button>
+                    {!manualAlternativesMode && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowTemplateManager(true)}
+                        className="text-purple-600 border-purple-300 hover:bg-purple-50 whitespace-nowrap"
+                        title={translations.manageTemplates || 'Manage Templates'}
+                      >
+                        <span className={dir === 'rtl' ? 'ml-1' : 'mr-1'}>⚙️</span> {translations.manage || 'Manage'}
+                      </Button>
+                    )}
                     {selectedTemplate && (
                       <Button
                         type="button"
@@ -13204,6 +14243,122 @@ const MenuCreate = () => {
                   })()}
                 </div>
 
+                {/* Manual Alternatives Mode Toggle */}
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <Button
+                      type="button"
+                      variant={manualAlternativesMode ? "default" : "outline"}
+                      onClick={() => setManualAlternativesMode(!manualAlternativesMode)}
+                      disabled={!selectedClient?.daily_target_total_calories}
+                    >
+                      {manualAlternativesMode ? "✓ " : ""}
+                      {translations.chooseYourOwnAlternatives || "Choose Your Own Alternatives"}
+                    </Button>
+                    {manualAlternativesMode && (
+                      <p className="text-xs text-gray-600">
+                        {translations.manualAlternativesHint || "Fill in macros (C, P, F) for both main and alternative meals. Carbs will be calculated automatically. Macros must not exceed meal calories."}
+                      </p>
+                    )}
+                  </div>
+                  {/* Total Macros Validation */}
+                  {manualAlternativesMode && userTargets && (() => {
+                    const validation = validateTotalMacros();
+                    const mainTotals = validation.mainTotals;
+                    const altTotals = validation.altTotals;
+                    const targets = validation.targets;
+                    
+                    // Helper to check if value matches target (within tolerance of 3)
+                    const tolerance = 3;
+                    const matchesTarget = (value, target) => Math.abs(value - target) <= tolerance;
+                    const getStatusColor = (value, target) => {
+                      const diff = Math.abs(value - target);
+                      if (diff <= tolerance) return 'text-green-700';
+                      return 'text-red-700 font-bold'; // Red and bold when not matching within tolerance
+                    };
+                    const getStatusIcon = (value, target) => {
+                      const diff = Math.abs(value - target);
+                      if (diff <= tolerance) return '✓';
+                      if (value > target) return '↑';
+                      return '↓';
+                    };
+                    
+                    return (
+                      <div className="mt-2 space-y-2">
+                        {/* Summary */}
+                        <div className={`border rounded-md p-3 ${validation.isValid ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+                          <div className="grid grid-cols-12 gap-4 text-xs">
+                            {/* Explanation Section - Left */}
+                            <div className="col-span-4 pr-4 border-r border-gray-300">
+                              <p className="font-semibold text-gray-800 mb-2">
+                                {translations.howToBuildMealPlan || "How to Build with This Structure:"}
+                              </p>
+                              <div className="space-y-2 text-xs text-gray-700">
+                                {language === 'he' ? (
+                                  <p className="text-xs leading-relaxed" dir="rtl">
+                                    {translations.mealPlanStructureExplanationHe || "מבנה תכנית הארוחות הזה מאפשר לך ליצור ארוחות עיקריות וארוחות חלופיות. לכל ארוחה יכולים להיות מאקרו-נוטריינטים משלה (קלוריות, חלבון, שומן, פחמימות). הארוחות העיקריות מייצגות את תכנית הארוחות הראשית, בעוד שהארוחות החלופיות מספקות אפשרויות החלפה. שתיהן חייבות להיות שוות ליעדים היומיים המוצגים מימין."}
+                                  </p>
+                                ) : (
+                                  <p className="text-xs leading-relaxed">
+                                    {translations.mealPlanStructureExplanationEn || "This meal plan structure allows you to create main meals and alternative meals. Each meal can have its own macros (calories, protein, fat, carbs). The main meals represent the primary meal plan, while alternative meals provide substitution options. Both must equal the daily targets shown on the right."}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                            
+                            {/* Main and Alternative Meals - Right */}
+                            <div className="col-span-8">
+                              <div className="text-xs font-semibold text-gray-800 mb-2">
+                                {translations.totalMacrosSummary || "Total Macros Summary (must equal daily targets)"}
+                              </div>
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <p className="font-semibold text-gray-800 mb-1">Main Meals:</p>
+                                  <div className="pl-2 space-y-0.5">
+                                    <div className={getStatusColor(mainTotals.calories, targets.calories)}>
+                                      <span className="font-medium">{getStatusIcon(mainTotals.calories, targets.calories)}</span> Calories: {mainTotals.calories} / {targets.calories} {mainTotals.calories !== targets.calories && `(${mainTotals.calories > targets.calories ? '+' : ''}${mainTotals.calories - targets.calories})`}
+                                    </div>
+                                    <div className={getStatusColor(mainTotals.protein, targets.protein)}>
+                                      <span className="font-medium">{getStatusIcon(mainTotals.protein, targets.protein)}</span> Protein: {mainTotals.protein}g / {targets.protein}g {mainTotals.protein !== targets.protein && `(${mainTotals.protein > targets.protein ? '+' : ''}${mainTotals.protein - targets.protein}g)`}
+                                    </div>
+                                    <div className={getStatusColor(mainTotals.fat, targets.fat)}>
+                                      <span className="font-medium">{getStatusIcon(mainTotals.fat, targets.fat)}</span> Fat: {mainTotals.fat}g / {targets.fat}g {mainTotals.fat !== targets.fat && `(${mainTotals.fat > targets.fat ? '+' : ''}${mainTotals.fat - targets.fat}g)`}
+                                    </div>
+                                    {targets.carbs > 0 && (
+                                      <div className={getStatusColor(mainTotals.carbs, targets.carbs)}>
+                                        <span className="font-medium">{getStatusIcon(mainTotals.carbs, targets.carbs)}</span> Carbs: {mainTotals.carbs}g / {targets.carbs}g {mainTotals.carbs !== targets.carbs && `(${mainTotals.carbs > targets.carbs ? '+' : ''}${mainTotals.carbs - targets.carbs}g)`}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-gray-800 mb-1">Alternative Meals:</p>
+                                  <div className="pl-2 space-y-0.5">
+                                    <div className={getStatusColor(altTotals.calories, targets.calories)}>
+                                      <span className="font-medium">{getStatusIcon(altTotals.calories, targets.calories)}</span> Calories: {altTotals.calories} / {targets.calories} {altTotals.calories !== targets.calories && `(${altTotals.calories > targets.calories ? '+' : ''}${altTotals.calories - targets.calories})`}
+                                    </div>
+                                    <div className={getStatusColor(altTotals.protein, targets.protein)}>
+                                      <span className="font-medium">{getStatusIcon(altTotals.protein, targets.protein)}</span> Protein: {altTotals.protein}g / {targets.protein}g {altTotals.protein !== targets.protein && `(${altTotals.protein > targets.protein ? '+' : ''}${altTotals.protein - targets.protein}g)`}
+                                    </div>
+                                    <div className={getStatusColor(altTotals.fat, targets.fat)}>
+                                      <span className="font-medium">{getStatusIcon(altTotals.fat, targets.fat)}</span> Fat: {altTotals.fat}g / {targets.fat}g {altTotals.fat !== targets.fat && `(${altTotals.fat > targets.fat ? '+' : ''}${altTotals.fat - targets.fat}g)`}
+                                    </div>
+                                    {targets.carbs > 0 && (
+                                      <div className={getStatusColor(altTotals.carbs, targets.carbs)}>
+                                        <span className="font-medium">{getStatusIcon(altTotals.carbs, targets.carbs)}</span> Carbs: {altTotals.carbs}g / {targets.carbs}g {altTotals.carbs !== targets.carbs && `(${altTotals.carbs > targets.carbs ? '+' : ''}${altTotals.carbs - targets.carbs}g)`}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
                 <div className="border rounded-lg overflow-hidden">
 
                   <div className="bg-gray-50 px-4 py-2 border-b">
@@ -13229,8 +14384,8 @@ const MenuCreate = () => {
                   
 
                   {mealPlanStructure.map((meal, index) => (
-
-                    <div key={index} className="px-4 py-3 border-b last:border-b-0 bg-white">
+                    <React.Fragment key={`meal-${index}`}>
+                    <div className="px-4 py-3 border-b last:border-b-0 bg-white">
 
                       <div className="grid grid-cols-12 gap-2 items-start">
 
@@ -13244,7 +14399,9 @@ const MenuCreate = () => {
 
                             onChange={(e) => updateMealInPlan(index, 'meal', e.target.value)}
 
-                            className="text-sm"
+                            disabled={!selectedClient?.daily_target_total_calories}
+
+                            className="text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
 
                             placeholder={translations.mealName || 'Meal name'}
 
@@ -13287,7 +14444,9 @@ const MenuCreate = () => {
                                   }, 150);
                                 }}
 
-                                className={`text-sm resize-none flex-1 w-full transition-all duration-200 min-h-[100px] max-h-[300px] ${!selectedTemplate && (!meal.description || meal.description.trim() === '') ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200' : ''}`}
+                                disabled={!selectedClient?.daily_target_total_calories}
+
+                                className={`text-sm resize-none flex-1 w-full transition-all duration-200 min-h-[100px] max-h-[300px] disabled:bg-gray-100 disabled:cursor-not-allowed ${!selectedTemplate && (!meal.description || meal.description.trim() === '') ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200' : ''}`}
 
                                 placeholder={!selectedTemplate ? (translations.required || 'Required') : (translations.mealDescriptionShort || translations.descriptionPlaceholder || 'Optional description')}
 
@@ -13302,6 +14461,10 @@ const MenuCreate = () => {
                                 value={meal.description}
 
                                 onMouseDown={(e) => {
+                                  if (!selectedClient?.daily_target_total_calories) {
+                                    e.preventDefault();
+                                    return;
+                                  }
                                   // Clear any pending blur timeout from previous field
                                   if (blurTimeoutRef.current) {
                                     clearTimeout(blurTimeoutRef.current);
@@ -13315,7 +14478,9 @@ const MenuCreate = () => {
 
                                 readOnly
 
-                                className={`text-sm cursor-pointer truncate ${!selectedTemplate && (!meal.description || meal.description.trim() === '') ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200' : ''}`}
+                                disabled={!selectedClient?.daily_target_total_calories}
+
+                                className={`text-sm cursor-pointer truncate disabled:bg-gray-100 disabled:cursor-not-allowed ${!selectedTemplate && (!meal.description || meal.description.trim() === '') ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200' : ''}`}
 
                                 placeholder={!selectedTemplate ? (translations.required || 'Required') : (translations.mealDescriptionShort || translations.descriptionPlaceholder || 'Optional description')}
 
@@ -13384,7 +14549,9 @@ const MenuCreate = () => {
 
                               }}
 
-                              className={`text-sm ${calorieInputErrors[index] ? 'border-red-500' : ''}`}
+                              disabled={!selectedClient?.daily_target_total_calories}
+
+                              className={`text-sm disabled:bg-gray-100 disabled:cursor-not-allowed ${calorieInputErrors[index] ? 'border-red-500' : ''}`}
 
                               placeholder="0"
 
@@ -13434,7 +14601,9 @@ const MenuCreate = () => {
 
                             onClick={() => updateMealInPlan(index, 'locked', !meal.locked)}
 
-                            className={`w-full ${meal.locked ? 'bg-blue-600 hover:bg-blue-700' : 'text-blue-600 border-blue-600 hover:bg-blue-50'}`}
+                            disabled={!selectedClient?.daily_target_total_calories}
+
+                            className={`w-full disabled:opacity-50 disabled:cursor-not-allowed ${meal.locked ? 'bg-blue-600 hover:bg-blue-700' : 'text-blue-600 border-blue-600 hover:bg-blue-50'}`}
 
                             title={meal.locked ? "Unlock meal" : "Lock meal"}
 
@@ -13464,9 +14633,9 @@ const MenuCreate = () => {
 
                               onClick={() => moveMealInPlan(index, 'up')}
 
-                              disabled={index === 0}
+                              disabled={index === 0 || !selectedClient?.daily_target_total_calories}
 
-                              className="text-gray-600 hover:bg-gray-50"
+                              className="text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
 
                               title="Move up"
 
@@ -13486,9 +14655,9 @@ const MenuCreate = () => {
 
                               onClick={() => moveMealInPlan(index, 'down')}
 
-                              disabled={index === mealPlanStructure.length - 1}
+                              disabled={index === mealPlanStructure.length - 1 || !selectedClient?.daily_target_total_calories}
 
-                              className="text-gray-600 hover:bg-gray-50"
+                              className="text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
 
                               title="Move down"
 
@@ -13508,9 +14677,9 @@ const MenuCreate = () => {
 
                               onClick={() => removeMealFromPlan(index)}
 
-                              disabled={mealPlanStructure.length <= 1}
+                              disabled={mealPlanStructure.length <= 1 || !selectedClient?.daily_target_total_calories}
 
-                              className="text-red-600 border-red-600 hover:bg-red-50"
+                              className="text-red-600 border-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
 
                               title="Remove meal"
 
@@ -13528,6 +14697,339 @@ const MenuCreate = () => {
 
                     </div>
 
+                    {/* Main Meal Macros Row */}
+                    {manualAlternativesMode && (
+                      <div className="px-4 py-3 bg-green-50 border-t border-green-200">
+                        <div className="grid grid-cols-12 gap-2 items-center">
+                          <div className="col-span-3 text-xs font-medium text-green-700">
+                            {translations.mainMealMacros || 'Main Meal Macros'} - {meal.meal}
+                          </div>
+                          <div className="col-span-2">
+                            <div className="text-xs text-green-600 mb-1 flex items-center gap-1">
+                              {translations.protein || 'Protein'} (P)
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => toggleMainMealMacroLock(index, 'protein')}
+                                disabled={!selectedClient?.daily_target_total_calories}
+                                className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                  meal.main?.lockedMacro === 'protein'
+                                    ? 'text-blue-600 hover:text-blue-700'
+                                    : 'text-gray-400 hover:text-gray-600'
+                                }`}
+                                title={meal.main?.lockedMacro === 'protein' ? 'Unlock protein' : 'Lock protein'}
+                              >
+                                {meal.main?.lockedMacro === 'protein' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+                              </Button>
+                            </div>
+                            <Input
+                              type="number"
+                              value={meal.main?.protein || ''}
+                              onChange={(e) => updateMealMainMacro(index, 'protein', e.target.value)}
+                              placeholder="Protein (g)"
+                              className={`text-sm ${(() => {
+                                const validation = validateMacros(
+                                  meal.main?.calories || meal.calories || 0,
+                                  meal.main?.protein || 0,
+                                  meal.main?.fat || 0,
+                                  meal.main?.carbs || 0
+                                );
+                                return !validation.isValid ? 'border-red-500' : '';
+                              })()}`}
+                              disabled={!selectedClient?.daily_target_total_calories || meal.main?.lockedMacro === 'protein'}
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <div className="text-xs text-green-600 mb-1 flex items-center gap-1">
+                              {translations.fat || 'Fat'} (F)
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => toggleMainMealMacroLock(index, 'fat')}
+                                disabled={!selectedClient?.daily_target_total_calories}
+                                className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                  meal.main?.lockedMacro === 'fat'
+                                    ? 'text-blue-600 hover:text-blue-700'
+                                    : 'text-gray-400 hover:text-gray-600'
+                                }`}
+                                title={meal.main?.lockedMacro === 'fat' ? 'Unlock fat' : 'Lock fat'}
+                              >
+                                {meal.main?.lockedMacro === 'fat' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+                              </Button>
+                            </div>
+                            <Input
+                              type="number"
+                              value={meal.main?.fat || ''}
+                              onChange={(e) => updateMealMainMacro(index, 'fat', e.target.value)}
+                              placeholder="Fat (g)"
+                              className={`text-sm ${(() => {
+                                const validation = validateMacros(
+                                  meal.main?.calories || meal.calories || 0,
+                                  meal.main?.protein || 0,
+                                  meal.main?.fat || 0,
+                                  meal.main?.carbs || 0
+                                );
+                                return !validation.isValid ? 'border-red-500' : '';
+                              })()}`}
+                              disabled={!selectedClient?.daily_target_total_calories || meal.main?.lockedMacro === 'fat'}
+                            />
+                          </div>
+                          <div className="col-span-3">
+                            <div className="text-xs text-green-600 mb-1 flex items-center gap-1">
+                              {translations.carbs || 'Carbs'} (C)
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => toggleMainMealMacroLock(index, 'carbs')}
+                                disabled={!selectedClient?.daily_target_total_calories}
+                                className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                  meal.main?.lockedMacro === 'carbs'
+                                    ? 'text-blue-600 hover:text-blue-700'
+                                    : 'text-gray-400 hover:text-gray-600'
+                                }`}
+                                title={meal.main?.lockedMacro === 'carbs' ? 'Unlock carbs' : 'Lock carbs'}
+                              >
+                                {meal.main?.lockedMacro === 'carbs' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+                              </Button>
+                            </div>
+                            <div className="relative">
+                              <Input
+                                type="number"
+                                value={(() => {
+                                  if (meal.main?.lockedMacro === 'carbs') {
+                                    return meal.main?.carbs || '';
+                                  }
+                                  // Show calculated value, but allow editing
+                                  const calculated = calculateCarbsFromMacros(
+                                    meal.main?.calories || meal.calories,
+                                    meal.main?.protein,
+                                    meal.main?.fat
+                                  );
+                                  // If we have a stored carbs value, use it; otherwise use calculated
+                                  return meal.main?.carbs !== undefined ? (meal.main.carbs || '') : (calculated || '');
+                                })()}
+                                onChange={(e) => updateMealMainMacro(index, 'carbs', e.target.value)}
+                                placeholder="Carbs (g)"
+                                className={`text-sm ${(() => {
+                                  const validation = validateMacros(
+                                    meal.main?.calories || meal.calories || 0,
+                                    meal.main?.protein || 0,
+                                    meal.main?.fat || 0,
+                                    meal.main?.carbs || 0
+                                  );
+                                  return !validation.isValid ? 'border-red-500' : '';
+                                })()}`}
+                                disabled={!selectedClient?.daily_target_total_calories || meal.main?.lockedMacro === 'carbs'}
+                              />
+                              {(() => {
+                                const validation = validateMacros(
+                                  meal.main?.calories || meal.calories || 0,
+                                  meal.main?.protein || 0,
+                                  meal.main?.fat || 0,
+                                  meal.main?.carbs || 0
+                                );
+                                return !validation.isValid ? (
+                                  <div className="absolute -bottom-5 left-0 text-xs text-red-600">
+                                    ⚠️ {validation.error}
+                                  </div>
+                                ) : null;
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Alternative Meal Input Row */}
+                    {manualAlternativesMode && (
+                      <div className="px-4 py-3 bg-blue-50 border-t border-blue-200">
+                        <div className="grid grid-cols-12 gap-2 items-center">
+                          <div className="col-span-2">
+                            <div className="text-xs font-medium text-blue-700 mb-1">
+                              {translations.alternativeFor || 'Alternative for'} {meal.meal}
+                            </div>
+                            <div className="relative flex-1 w-full">
+                              <Textarea
+                                value={meal.alternative?.description || ''}
+                                onChange={(e) => updateMealAlternative(index, 'description', e.target.value)}
+                                disabled={!selectedClient?.daily_target_total_calories}
+                                className={`text-sm resize-none flex-1 w-full min-h-[60px] max-h-[150px] disabled:bg-gray-100 disabled:cursor-not-allowed ${!meal.alternative?.description || meal.alternative.description.trim() === '' ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200' : ''}`}
+                                placeholder={translations.alternativeMealDescription || translations.mealDescriptionShort || 'What\'s in the alternative meal'}
+                                rows={3}
+                              />
+                            </div>
+                          </div>
+                          <div className="col-span-1">
+                            <div className="text-[10px] text-blue-600 mb-1 leading-tight">
+                              {translations.caloriesLabel || 'Calories'} (C)
+                              {meal.alternative?.calories_pct !== undefined && (
+                                <span className="ml-1 text-gray-500 block">
+                                  ({meal.alternative.calories_pct.toFixed(1)}%)
+                                </span>
+                              )}
+                            </div>
+                            <Input
+                              type="number"
+                              value={meal.alternative?.calories || ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                updateMealAlternative(index, 'calories', val);
+                              }}
+                              placeholder="Calories"
+                              className={`text-xs ${(() => {
+                                const validation = validateMacros(
+                                  meal.alternative?.calories || 0,
+                                  meal.alternative?.protein || 0,
+                                  meal.alternative?.fat || 0,
+                                  meal.alternative?.carbs || 0
+                                );
+                                return !validation.isValid ? 'border-red-500' : '';
+                              })()}`}
+                              disabled={!selectedClient?.daily_target_total_calories}
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <div className="text-xs text-blue-600 mb-1 flex items-center gap-1">
+                              {translations.protein || 'Protein'} (P)
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => toggleAlternativeMealMacroLock(index, 'protein')}
+                                disabled={!selectedClient?.daily_target_total_calories}
+                                className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                  meal.alternative?.lockedMacro === 'protein'
+                                    ? 'text-blue-600 hover:text-blue-700'
+                                    : 'text-gray-400 hover:text-gray-600'
+                                }`}
+                                title={meal.alternative?.lockedMacro === 'protein' ? 'Unlock protein' : 'Lock protein'}
+                              >
+                                {meal.alternative?.lockedMacro === 'protein' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+                              </Button>
+                            </div>
+                            <Input
+                              type="number"
+                              value={meal.alternative?.protein || ''}
+                              onChange={(e) => updateMealAlternative(index, 'protein', e.target.value)}
+                              placeholder="Protein (g)"
+                              className={`text-sm ${(() => {
+                                const validation = validateMacros(
+                                  meal.alternative?.calories || 0,
+                                  meal.alternative?.protein || 0,
+                                  meal.alternative?.fat || 0,
+                                  meal.alternative?.carbs || 0
+                                );
+                                return !validation.isValid ? 'border-red-500' : '';
+                              })()}`}
+                              disabled={!selectedClient?.daily_target_total_calories || meal.alternative?.lockedMacro === 'protein'}
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <div className="text-xs text-blue-600 mb-1 flex items-center gap-1">
+                              {translations.fat || 'Fat'} (F)
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => toggleAlternativeMealMacroLock(index, 'fat')}
+                                disabled={!selectedClient?.daily_target_total_calories}
+                                className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                  meal.alternative?.lockedMacro === 'fat'
+                                    ? 'text-blue-600 hover:text-blue-700'
+                                    : 'text-gray-400 hover:text-gray-600'
+                                }`}
+                                title={meal.alternative?.lockedMacro === 'fat' ? 'Unlock fat' : 'Lock fat'}
+                              >
+                                {meal.alternative?.lockedMacro === 'fat' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+                              </Button>
+                            </div>
+                            <Input
+                              type="number"
+                              value={meal.alternative?.fat || ''}
+                              onChange={(e) => updateMealAlternative(index, 'fat', e.target.value)}
+                              placeholder="Fat (g)"
+                              className={`text-sm ${(() => {
+                                const validation = validateMacros(
+                                  meal.alternative?.calories || 0,
+                                  meal.alternative?.protein || 0,
+                                  meal.alternative?.fat || 0,
+                                  meal.alternative?.carbs || 0
+                                );
+                                return !validation.isValid ? 'border-red-500' : '';
+                              })()}`}
+                              disabled={!selectedClient?.daily_target_total_calories || meal.alternative?.lockedMacro === 'fat'}
+                            />
+                          </div>
+                          <div className="col-span-3">
+                            <div className="text-xs text-blue-600 mb-1 flex items-center gap-1">
+                              {translations.carbs || 'Carbs'} (C)
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => toggleAlternativeMealMacroLock(index, 'carbs')}
+                                disabled={!selectedClient?.daily_target_total_calories}
+                                className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                  meal.alternative?.lockedMacro === 'carbs'
+                                    ? 'text-blue-600 hover:text-blue-700'
+                                    : 'text-gray-400 hover:text-gray-600'
+                                }`}
+                                title={meal.alternative?.lockedMacro === 'carbs' ? 'Unlock carbs' : 'Lock carbs'}
+                              >
+                                {meal.alternative?.lockedMacro === 'carbs' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+                              </Button>
+                            </div>
+                            <div className="relative">
+                              <Input
+                                type="number"
+                                value={(() => {
+                                  if (meal.alternative?.lockedMacro === 'carbs') {
+                                    return meal.alternative?.carbs || '';
+                                  }
+                                  // Show calculated value, but allow editing
+                                  const calculated = calculateCarbsFromMacros(
+                                    meal.alternative?.calories,
+                                    meal.alternative?.protein,
+                                    meal.alternative?.fat
+                                  );
+                                  // If we have a stored carbs value, use it; otherwise use calculated
+                                  return meal.alternative?.carbs !== undefined ? (meal.alternative.carbs || '') : (calculated || '');
+                                })()}
+                                onChange={(e) => updateMealAlternative(index, 'carbs', e.target.value)}
+                                placeholder="Carbs (g)"
+                                className={`text-sm ${(() => {
+                                  const validation = validateMacros(
+                                    meal.alternative?.calories || 0,
+                                    meal.alternative?.protein || 0,
+                                    meal.alternative?.fat || 0,
+                                    meal.alternative?.carbs || 0
+                                  );
+                                  return !validation.isValid ? 'border-red-500' : '';
+                                })()}`}
+                                disabled={!selectedClient?.daily_target_total_calories || meal.alternative?.lockedMacro === 'carbs'}
+                              />
+                              {(() => {
+                                const validation = validateMacros(
+                                  meal.alternative?.calories || 0,
+                                  meal.alternative?.protein || 0,
+                                  meal.alternative?.fat || 0,
+                                  meal.alternative?.carbs || 0
+                                );
+                                return !validation.isValid ? (
+                                  <div className="absolute -bottom-5 left-0 text-xs text-red-600">
+                                    ⚠️ {validation.error}
+                                  </div>
+                                ) : null;
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    </React.Fragment>
                   ))}
 
                 </div>
