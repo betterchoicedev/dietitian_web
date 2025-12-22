@@ -2303,14 +2303,9 @@ Return **ONLY** the corrected JSON for `"meal"`—no markdown, no comments, no e
 
 def _correct_meal_nutrition(meal_data: dict, macro_targets: dict, max_attempts: int = 1):
     """
-    Use Anthropic Claude to fix unrealistic nutrition values and ensure meal matches macro targets.
+    Use Azure OpenAI (OBI2) to fix unrealistic nutrition values and ensure meal matches macro targets.
     Returns (corrected_meal_data, success_flag) tuple.
     """
-    # Skip if Anthropic is not configured
-    if not anthropic_client:
-        logger.info("ℹ️ Anthropic not configured, skipping correction")
-        return (meal_data, False)
-    
     try:
         # Prepare the payload (remove any calculated totals from meal_data to avoid confusion)
         clean_meal_data = {k: v for k, v in meal_data.items() if k != "totals"}
@@ -2325,35 +2320,30 @@ def _correct_meal_nutrition(meal_data: dict, macro_targets: dict, max_attempts: 
         
         for attempt in range(1, max_attempts + 1):
             try:
-                logger.info(f"🔧 Correcting nutrition values with Claude (attempt {attempt}/{max_attempts})...")
-                logger.info(f"🔧 Sending to Claude - Meal: {meal_data.get('meal_title', 'N/A')}, Targets: {macro_targets}")
+                logger.info(f"🔧 Correcting nutrition values with OBI2 (attempt {attempt}/{max_attempts})...")
+                logger.info(f"🔧 Sending to OBI2 - Meal: {meal_data.get('meal_title', 'N/A')}, Targets: {macro_targets}")
                 
                 # Build the full content to send
                 full_content = f"{NUTRITION_CORRECTION_PROMPT}\n\nInput:\n{json.dumps(payload, ensure_ascii=False)}"
                 
-                # Call Anthropic Claude
-                message = anthropic_client.messages.create(
-                    model=anthropic_deployment,
+                # Call Azure OpenAI (OBI2)
+                response = client.chat.completions.create(
+                    model=deployment,
                     messages=[
-                        {
-                            "role": "user",
-                            "content": full_content
-                        }
+                        {"role": "system", "content": NUTRITION_CORRECTION_PROMPT},
+                        {"role": "user", "content": f"Input:\n{json.dumps(payload, ensure_ascii=False)}"}
                     ],
                     max_tokens=2048,
                     temperature=0.3
                 )
                 
                 # Extract text from response
-                raw_text = ""
-                for content_block in message.content:
-                    if hasattr(content_block, 'text'):
-                        raw_text += content_block.text
+                raw_text = response.choices[0].message.content
                 
-                logger.info(f"🔍 Claude raw response: {raw_text[:8000]}...")  # Log first 500 chars
+                logger.info(f"🔍 OBI2 raw response: {raw_text[:8000]}...")  # Log first 500 chars
                 
                 if not raw_text:
-                    logger.warning(f"❌ Empty response from Claude (attempt {attempt})")
+                    logger.warning(f"❌ Empty response from OBI2 (attempt {attempt})")
                     if attempt < max_attempts:
                         continue
                     logger.info(f"ℹ️ Correction failed, using original meal from first AI")
@@ -2372,9 +2362,9 @@ def _correct_meal_nutrition(meal_data: dict, macro_targets: dict, max_attempts: 
                     logger.info(f"ℹ️ Correction failed, using original meal from first AI")
                     return (meal_data, False)
                 
-                # Check if response has "meal" wrapper (Claude sometimes adds this)
+                # Check if response has "meal" wrapper (sometimes adds this)
                 if isinstance(corrected_meal, dict) and "meal" in corrected_meal and "ingredients" not in corrected_meal:
-                    logger.info("🔧 Unwrapping 'meal' object from Claude response")
+                    logger.info("🔧 Unwrapping 'meal' object from OBI2 response")
                     corrected_meal = corrected_meal["meal"]
                 
                 # Validate the corrected meal has required fields
@@ -2386,11 +2376,11 @@ def _correct_meal_nutrition(meal_data: dict, macro_targets: dict, max_attempts: 
                     logger.info(f"ℹ️ Correction failed, using original meal from first AI")
                     return (meal_data, False)
                 
-                logger.info(f"✅ Nutrition correction with Claude successful!")
+                logger.info(f"✅ Nutrition correction with OBI2 successful!")
                 return (corrected_meal, True)
                 
             except Exception as e:
-                logger.error(f"❌ Exception during Claude correction (attempt {attempt}): {e}")
+                logger.error(f"❌ Exception during OBI2 correction (attempt {attempt}): {e}")
                 if attempt < max_attempts:
                     continue
                 # If all attempts fail, return original meal as fallback
@@ -2402,7 +2392,7 @@ def _correct_meal_nutrition(meal_data: dict, macro_targets: dict, max_attempts: 
         return (meal_data, False)
         
     except Exception as e:
-        logger.error(f"❌ Failed to correct meal nutrition with Claude: {e}")
+        logger.error(f"❌ Failed to correct meal nutrition with OBI2: {e}")
         # Return original meal as fallback
         logger.info(f"ℹ️ Correction failed, using original meal from first AI")
         return (meal_data, False)
@@ -3414,86 +3404,25 @@ Your previous meal attempt failed validation. Review the failed meal and issues 
             user_message_content = user_payload  # Already a formatted string
 
         # Use OBI2 for first attempt, Claude for validation corrections
-        try:
-            if i == 0:
-                # First attempt: Use OBI2 (Azure OpenAI)
-                response = client.chat.completions.create(
-                    model=deployment,
-                    messages=[
-                        {"role": "system", "content": prompt},
-                        {"role": "user", "content": user_message_content}
-                    ]
-                )
-            else:
-                # Retry attempts: Use Claude for validation corrections
-                if not anthropic_client:
-                    logger.warning("⚠️ Anthropic not configured, falling back to OBI2 for corrections")
-                    response = client.chat.completions.create(
-                        model=deployment,
-                        messages=[
-                            {"role": "system", "content": prompt},
-                            {"role": "user", "content": user_message_content}
-                        ]
-                    )
-                else:
-                    logger.info(f"🔧 Using Claude for validation correction (attempt {i+1})")
-                    # Combine prompt and user message for Claude
-                    full_content = f"{prompt}\n\n{user_message_content}"
-                    
-                    message = anthropic_client.messages.create(
-                        model=anthropic_deployment,
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": full_content
-                            }
-                        ],
-                        max_tokens=2048,
-                        temperature=0.3
-                    )
-                    
-                    # Extract text from Claude response
-                    raw_text = ""
-                    for content_block in message.content:
-                        if hasattr(content_block, 'text'):
-                            raw_text += content_block.text
-                    
-                    # Create a mock response object to maintain compatibility with existing code
-                    class MockResponse:
-                        def __init__(self, content):
-                            self.choices = [type('obj', (object,), {'message': type('obj', (object,), {'content': content})()})]
-                    
-                    response = MockResponse(raw_text)
-        except Exception as api_error:
-            # Extract detailed error information from OpenAI API exceptions
-            error_details = str(api_error)
-            error_type = type(api_error).__name__
-            
-            # Try to extract more detailed error information if available
-            if hasattr(api_error, 'response') and api_error.response is not None:
-                try:
-                    error_body = api_error.response.json() if hasattr(api_error.response, 'json') else {}
-                    error_details = json.dumps(error_body, ensure_ascii=False)
-                    logger.error(f"❌ OpenAI API error details: {error_details}")
-                except:
-                    pass
-            
-            # Check for specific error types
-            error_msg = f"OpenAI API error ({error_type}): {error_details}"
-            
-            # Provide helpful error messages for common issues
-            if "organization has been disabled" in error_details.lower():
-                error_msg = f"Azure OpenAI organization has been disabled. Please check your Azure OpenAI account status and billing. Error details: {error_details}"
-            elif "invalid_api_key" in error_details.lower() or "authentication" in error_details.lower():
-                error_msg = f"Azure OpenAI authentication failed. Please verify your API key and endpoint configuration. Error details: {error_details}"
-            elif "quota" in error_details.lower() or "rate limit" in error_details.lower():
-                error_msg = f"Azure OpenAI rate limit or quota exceeded. Please check your usage limits. Error details: {error_details}"
-            
-            logger.error(f"❌ {error_msg} for {option_type} '{meal_name}' (attempt {i+1})")
-            
-            # Raise an exception with the error message so it gets properly propagated
-            # Don't retry API configuration errors - these are unlikely to be fixed by retrying
-            raise Exception(f"Error code: 400 - {error_details}")
+        if i == 0:
+            # First attempt: Use OBI2 (Azure OpenAI)
+            response = client.chat.completions.create(
+                model=deployment,
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": user_message_content}
+                ]
+            )
+        else:
+            # Retry attempts: Use OBI2 for validation corrections
+            logger.info(f"🔧 Using OBI2 for validation correction (attempt {i+1})")
+            response = client.chat.completions.create(
+                model=deployment,
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": user_message_content}
+                ]
+            )
 
         raw = _strip_markdown_fences(response.choices[0].message.content)
 
