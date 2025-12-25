@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Shield, Users as UsersIcon, Building2, RefreshCw, Loader2, UserCheck, UserPlus, Ban, Copy } from 'lucide-react';
+import { Shield, Users as UsersIcon, Building2, RefreshCw, Loader2, UserCheck, UserPlus, Ban, Copy, ExternalLink } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -374,6 +374,40 @@ export default function UserManagement() {
     }
   };
 
+  const generateClientReferralLink = () => {
+    if (!me?.id) return '';
+    // Encode the dietitian ID in base64 and use hash fragment to hide it from URL when copying
+    // The signup page needs to read window.location.hash to get the ID
+    const encodedId = btoa(me.id);
+    return `https://betterchoice.one/signup#d=${encodedId}`;
+  };
+
+  const handleCopyReferralLink = async () => {
+    const link = generateClientReferralLink();
+    if (!link) {
+      toast({
+        title: translations?.error || 'Error',
+        description: translations?.unableToGenerateLink || 'Unable to generate referral link.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(link);
+      toast({
+        title: translations?.copied || 'Copied',
+        description: translations?.referralLinkCopied || 'Client referral link copied to clipboard.',
+      });
+    } catch (err) {
+      console.error('❌ Failed to copy referral link:', err);
+      toast({
+        title: translations?.error || 'Error',
+        description: translations?.copyFailed || 'Unable to copy the referral link.',
+        variant: 'destructive',
+      });
+    }
+  };
+
   const handleCreateCompany = async (e) => {
     e.preventDefault();
     const trimmedName = newCompanyName.trim();
@@ -678,6 +712,43 @@ export default function UserManagement() {
           </CardHeader>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ExternalLink className="h-5 w-5 text-primary" />
+            {translations?.clientReferralLink || 'Client Referral Link'}
+          </CardTitle>
+          <CardDescription>
+            {translations?.clientReferralLinkSubtitle ||
+              'Generate a link to share with clients. When they sign up using this link, they will automatically be assigned to you.'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex-1">
+              <Input
+                value={generateClientReferralLink()}
+                readOnly
+                className="font-mono text-sm"
+                onClick={(e) => e.target.select()}
+              />
+              <p className="mt-2 text-xs text-muted-foreground">
+                {translations?.referralLinkHint ||
+                  'Click to select and copy, or use the copy button. Clients who sign up using this link will be automatically assigned to you.'}
+              </p>
+            </div>
+            <Button
+              onClick={handleCopyReferralLink}
+              className="gap-2 md:ml-4"
+              disabled={!me?.id}
+            >
+              <Copy className="h-4 w-4" />
+              {translations?.copyLink || 'Copy Link'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {shouldShowInvites && (
         <Card>

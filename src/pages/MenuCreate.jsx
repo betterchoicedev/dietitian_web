@@ -9696,9 +9696,9 @@ const MenuCreate = () => {
 
 
 
-        // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+        const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
 
-        const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+        // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
 
         method: "POST",
 
@@ -9905,9 +9905,9 @@ const MenuCreate = () => {
 
 
 
-      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
 
-      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
 
         method: "POST",
 
@@ -10533,9 +10533,9 @@ const MenuCreate = () => {
 
 
 
-      // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
 
-      const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+      // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
 
         method: "POST",
 
@@ -10706,9 +10706,9 @@ const MenuCreate = () => {
 
 
 
-      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
 
-      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
 
         method: "POST",
 

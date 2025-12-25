@@ -7221,6 +7221,256 @@ Return ALL meals from the input - do not omit any."""
 
 
 
+@app.route("/api/create-client-website", methods=["POST"])
+
+def api_create_client_website():
+
+    """
+
+    Create a new client account from the website signup (betterchoice.one).
+
+    Receives: user_code, full_name, email, phone_number, provider_id (from referral link), and optional fields.
+
+    The provider_id field (dietitian UUID) is automatically assigned when provided.
+
+    """
+
+    try:
+
+        data = request.get_json()
+
+        
+
+        # Extract required fields
+
+        user_code = data.get("user_code")
+
+        full_name = data.get("full_name")
+
+        email = data.get("email")
+
+        
+
+        # Extract optional fields
+
+        phone_number = data.get("phone_number")
+
+        age = data.get("age")
+
+        date_of_birth = data.get("date_of_birth")
+
+        gender = data.get("gender")
+
+        language = data.get("language")
+
+        city = data.get("city")
+
+        timezone = data.get("timezone")
+
+        user_language = data.get("user_language")
+
+        activity_level = data.get("Activity_level")
+
+        goal = data.get("goal")
+
+        region = data.get("region")
+
+        provider_id = data.get("provider_id")  # Dietitian ID from referral link
+
+        
+
+        # Validate required fields
+
+        if not user_code or not full_name or not email:
+
+            return jsonify({"error": "user_code, full_name, and email are required fields"}), 400
+
+        
+
+        # Validate email format
+
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+
+        if not re.match(email_pattern, email):
+
+            return jsonify({"error": "Invalid email format"}), 400
+
+        
+
+        # Validate age if provided
+
+        if age is not None:
+
+            try:
+
+                age = int(age)
+
+                if age < 0 or age > 150:
+
+                    return jsonify({"error": "Age must be between 0 and 150"}), 400
+
+            except (ValueError, TypeError):
+
+                return jsonify({"error": "Age must be a valid number"}), 400
+
+        
+
+        # Validate date_of_birth if provided
+
+        if date_of_birth:
+
+            try:
+
+                datetime.datetime.fromisoformat(date_of_birth)
+
+            except ValueError:
+
+                return jsonify({"error": "Invalid date format. Use YYYY-MM-DD format"}), 400
+
+        
+
+        # Validate gender if provided
+
+        valid_genders = ["male", "female", "other", "prefer_not_to_say"]
+
+        if gender and gender.lower() not in valid_genders:
+
+            return jsonify({"error": f"Gender must be one of: {', '.join(valid_genders)}"}), 400
+
+        
+
+        try:
+
+            # Check if user already exists
+
+            existing_user = supabase.table('chat_users').select('id').eq('user_code', user_code).execute()
+
+            if existing_user.data:
+
+                return jsonify({"error": f"User with user_code '{user_code}' already exists"}), 400
+
+            
+
+            # Check for duplicate email
+
+            if email:
+
+                email_check = supabase.table('chat_users').select('id').eq('email', email).execute()
+
+                if email_check.data:
+
+                    return jsonify({"error": f"Email '{email}' is already in use by another user"}), 400
+
+            
+
+            # Check for duplicate phone number
+
+            if phone_number:
+
+                phone_check = supabase.table('chat_users').select('id').eq('phone_number', phone_number).execute()
+
+                if phone_check.data:
+
+                    return jsonify({"error": f"Phone number '{phone_number}' is already in use by another user"}), 400
+
+            
+
+            # Prepare insert data
+
+            insert_data = {
+
+                "user_code": user_code,
+
+                "full_name": full_name,
+
+                "email": email,
+
+                "phone_number": phone_number,
+
+                "age": age,
+
+                "date_of_birth": date_of_birth,
+
+                "gender": gender.lower() if gender else None,
+
+                "platform": "client_web",
+
+                "verification_code": user_code,
+
+                "whatsapp_number": phone_number,
+
+                "language": language,
+
+                "city": city,
+
+                "timezone": timezone,
+
+                "user_language": user_language,
+
+                "Activity_level": activity_level,
+
+                "goal": goal,
+
+                "region": region,
+
+                "provider_id": provider_id,  # Assign client to dietitian if provided
+
+            }
+
+            
+
+            # Remove None values
+
+            insert_data = {k: v for k, v in insert_data.items() if v is not None}
+
+            
+
+            # Insert new client
+
+            response = supabase.table('chat_users').insert(insert_data).execute()
+
+            
+
+            if response.data:
+
+                logger.info(f"✅ Created new client from website with user_code: {user_code}, provider_id: {provider_id}")
+
+                return jsonify({
+
+                    "message": "Client created successfully",
+
+                    "user_code": user_code,
+
+                    "provider_id": provider_id,
+
+                    "success": True
+
+                }), 201
+
+            else:
+
+                return jsonify({"error": "Failed to create client"}), 500
+
+                
+
+        except Exception as e:
+
+            logger.error(f"❌ Database operation failed: {str(e)}")
+
+            return jsonify({"error": f"Database operation failed: {str(e)}"}), 500
+
+            
+
+    except Exception as e:
+
+        logger.error(f"❌ Exception in /api/create-client-website: {str(e)}")
+
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
+
 @app.route("/api/update-user-profile", methods=["POST"])
 
 def api_update_user_profile():
@@ -7229,7 +7479,9 @@ def api_update_user_profile():
 
     Update user profile information in the chat_users table.
 
-    Receives: user_code, full_name, email, phone_number, age, date_of_birth, gender
+    Receives: user_code, full_name, email, phone_number, age, date_of_birth, gender, provider_id
+
+    If user doesn't exist, creates a new user. If provider_id is provided, assigns the client to that dietitian.
 
     """
 
@@ -7272,6 +7524,8 @@ def api_update_user_profile():
         goal = data.get("goal")
 
         region = data.get("region")
+
+        provider_id = data.get("provider_id")  # Dietitian ID from referral link
 
         
 
@@ -7530,6 +7784,8 @@ def api_update_user_profile():
                     "goal": goal,
 
                     "region": region,
+
+                    "provider_id": provider_id,  # Assign client to dietitian if provided
 
                 }
 
