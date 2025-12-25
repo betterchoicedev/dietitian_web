@@ -1,6 +1,17 @@
 """
 DSPy-based meal builder pipeline.
 Orchestrates multi-stage meal generation with specialized predictors.
+
+Pipeline stages:
+1. Generate regional ingredient list for template-provided dish name
+2. Look up nutrition data per 100g (Gemini → Claude fallback)
+3. Calculate portions iteratively to hit macro targets
+4. Assemble and validate final JSON with auto-correction
+
+Key features:
+- Uses template dish names (no generation needed)
+- Prioritizes popular, regional ingredients based on client location
+- Multi-stage validation and correction for accuracy
 """
 
 import dspy
@@ -31,46 +42,55 @@ except ImportError:
 # ============================================================================
 
 class MealNaming(dspy.Signature):
-    """Generate meal name + ingredient list (max 7 items).
+    """Generate ingredient list (max 7 items) for a given dish.
     
-    ⚠️ CRITICAL: ONLY USE REAL, EXISTING INGREDIENTS THAT CAN BE FOUND IN STORES/DATABASES.
+    ⚠️ CRITICAL: ONLY USE REAL, EXISTING, POPULAR INGREDIENTS FROM THE CLIENT'S REGION.
     
-    0. REAL INGREDIENTS ONLY - VERIFY EVERYTHING:
-       • Before suggesting ANY ingredient, verify it's a REAL, COMMONLY AVAILABLE food item
+    0. REGIONAL & POPULAR INGREDIENTS PRIORITY:
+       • Focus on ingredients that are COMMONLY AVAILABLE and POPULAR in the client's region
+       • Use brands and products that locals would actually recognize and buy
+       • For Israel: Tnuva dairy, Angel bread, Achla hummus, Osem products, etc.
+       • For USA: Common US brands (Kraft, Dannon, etc.) and generic produce
+       • ONLY use exotic/rare ingredients if the dish name specifically requires them
+       • When in doubt, choose the most mainstream, accessible option
+    
+    1. REAL INGREDIENTS ONLY - VERIFY EVERYTHING:
+       • Before suggesting ANY ingredient, verify it's a REAL, COMMONLY AVAILABLE food item in that region
        • Use web search if unsure about ingredient existence or availability - search online to confirm each ingredient is real
     
-    1. Client requests are mandatory. Read client_preference FIRST and include every food they explicitly mentioned (even if bilingual).
-    2. Allergies/limitations override everything. If a client request conflicts → ignore the request and stay safe.
-    3. Dish name = promise. Before finalizing ingredients ask:
-       • What dish am I naming?
+    2. Client requests are mandatory. Read client_preference FIRST and include every food they explicitly mentioned (even if bilingual).
+    3. Allergies/limitations override everything. If a client request conflicts → ignore the request and stay safe.
+    4. Dish name = promise. Before finalizing ingredients ask:
+       • What dish am I building?
        • What core ingredients define it?
-       • Are those ingredients REAL and available? Search online if needed to verify.
-       • Are those ingredients in my list? If not, add them or rename the dish. (Shakshuka needs tomato base, Carbonara needs pasta/egg/cheese, etc.)
-       • If a core ingredient is banned (allergy/limitation) → pick a different dish name or clearly create an adapted version with REAL substitutes.
-    4. Ingredient naming conventions:
+       • Are those ingredients REAL and available in the client's region? Search online if needed to verify.
+       • Are those ingredients in my list? If not, add them. (Shakshuka needs tomato base, Carbonara needs pasta/egg/cheese, etc.)
+       • If a core ingredient is banned (allergy/limitation) → use clearly adapted version with REAL substitutes.
+    5. Ingredient naming conventions:
        • For GENERIC items (no brand needed): Use simple names like "Eggs", "Olive oil", "Cherry tomatoes", "Avocado", "Whole wheat bread", "Salmon", "Chicken breast"
-       • For BRANDED/PROCESSED items (typically sold with brands): Include brand + product specification:
-         - Dairy products: "Tnuva Cottage Cheese 5%", "Tnuva Greek Yogurt 5%", "Tnuva Milk 1%", "Yoplait Greek Yogurt"
-         - Packaged foods: "Hummus Achla", "Angel Whole Wheat Bread", "Osem Pasta"
-       • Format: "[Brand] [Product Name] [Variant if needed]" - e.g., "Tnuva Cottage Cheese 5%", "Achla Hummus"
-    5. After core items, add complementary ingredients to hit macros using whole foods and real English brand names (Tnuva, Angel, Achla).
-       • Always verify each complementary ingredient is REAL and commonly available before including it
-    6. Output EVERYTHING in English only (dish_name + ingredients).
+       • For BRANDED/PROCESSED items (typically sold with brands): Include REGIONAL brand + product specification:
+         - ⚠️ IF region='israel': ONLY use Israeli brands: "Tnuva Cottage Cheese 5%", "Strauss Yogurt", "Yotvata Milk", "Hummus Achla", "Angel Whole Wheat Bread", "Osem Pasta"
+         - ⚠️ IF region='usa': ONLY use USA brands: "Dannon Yogurt", "Kraft Cheese", "Land O'Lakes Butter", "Cheerios", "Quaker Oats"
+         - ⚠️ NEVER mix regions: Don't use Tnuva in USA meals or Dannon in Israeli meals
+       • Format: "[Regional Brand] [Product Name] [Variant if needed]" - e.g., "Tnuva Cottage Cheese 5%" (Israel), "Kraft Cheese" (USA)
+    6. After core items, add complementary ingredients to hit macros using whole foods and REGIONAL brand names popular in that area.
+       • Always verify each complementary ingredient is REAL, POPULAR and commonly available in the region before including it
+    7. Output EVERYTHING in English only (ingredients list).
     
-    SEARCH THE WEB: If you're uncertain whether an ingredient exists or is commonly available, search the internet to verify before including it in the output.
+    SEARCH THE WEB: If you're uncertain whether an ingredient exists, is popular, or is commonly available in the region, search the internet to verify before including it in the output.
     """
     
     meal_type = dspy.InputField(desc="Type of meal")
+    dish_name = dspy.InputField(desc="Name of dish to build (provided by template)")
     macro_targets = dspy.InputField(desc="Target macros: {calories, protein, fat, carbs}")
     required_protein_source = dspy.InputField(desc="Required protein source")
-    region = dspy.InputField(desc="Regional cuisine")
+    region = dspy.InputField(desc="Client's region (e.g., 'israel', 'usa'). Use brands and ingredients POPULAR in this region.")
     allergies = dspy.InputField(desc="Allergies to avoid")
     limitations = dspy.InputField(desc="Dietary limitations")
     avoid_ingredients = dspy.InputField(desc="Ingredients to avoid for variety")
     client_preference = dspy.InputField(desc="Client's meal description (may be Hebrew/English). Parse and include ALL foods mentioned.")
     
-    dish_name = dspy.OutputField(desc="Dish name in English (NEVER Hebrew)")
-    ingredients = dspy.OutputField(desc='JSON array of REAL, EXISTING ingredient names (max 7). CRITICAL: Only include ingredients that actually exist and can be found in stores/databases. For GENERIC items (eggs, vegetables, meat): use simple names like "Eggs", "Olive oil", "Cherry tomatoes", "Avocado", "Salmon". For BRANDED/PROCESSED items (dairy, packaged foods): include brand + product like "Tnuva Cottage Cheese 5%", "Hummus Achla", "Tnuva Greek Yogurt 5%", "Angel Whole Wheat Bread". Format: "[Brand] [Product] [Variant]" for branded items. Use real brands only (Tnuva not תנובה, Achla not אחלה). VERIFY each ingredient is real - search online if unsure. NO fictional or made-up ingredients. Include ALL client-requested foods + complementary items.')
+    ingredients = dspy.OutputField(desc='JSON array of REAL, POPULAR, REGIONAL ingredient names (max 7). CRITICAL: Match brands to region EXACTLY - Israel=Tnuva/Strauss/Angel/Achla/Osem, USA=Dannon/Kraft/Land O\'Lakes/Cheerios. NEVER use Israeli brands for USA clients or vice versa. Only include ingredients that actually exist, are POPULAR, and can be found in stores in the client\'s region. Prioritize mainstream/common ingredients unless dish requires specific items. For GENERIC items (eggs, vegetables, meat): use simple names like "Eggs", "Olive oil", "Cherry tomatoes", "Avocado", "Salmon". For BRANDED/PROCESSED items (dairy, packaged foods): include REGIONAL brand + product like "Tnuva Cottage Cheese 5%" (Israel ONLY), "Dannon Yogurt" (USA ONLY), "Angel Whole Wheat Bread" (Israel ONLY). Use real, POPULAR brands from the client\'s region only. VERIFY each ingredient is real and popular in that region - search online if unsure. NO fictional, rare, or made-up ingredients. Include ALL client-requested foods + complementary items.')
 
 
 class PortionCalculation(dspy.Signature):
@@ -505,10 +525,10 @@ class MealBuilderChain(dspy.Module):
     
     """
     Full meal building pipeline:
-    1. Generate meal name and ingredients (Claude)
-    2. Calculate portions and household measures (Claude)
-    3. Look up nutrition data per ingredient (Gemini)
-    4. Assemble and validate final JSON (Claude with CoT)
+    1. Generate regional ingredient list for template dish (Claude)
+    2. Look up nutrition data per 100g for each ingredient (Gemini → Claude fallback)
+    3. Calculate portions and household measures (Claude iterative)
+    4. Assemble and validate final JSON (Claude with CoT + auto-correction)
     """
     
     def __init__(self):
@@ -665,15 +685,38 @@ The data must be for "{ingredient_query}" specifically, not a similar or substit
             meal_type: Type of meal (Breakfast, Lunch, etc.)
             macro_targets: Dict with calories, protein, fat, carbs
             required_protein_source: Required protein for this meal
-            preferences: User preferences (allergies, region, etc.)
+            preferences: User preferences dict containing:
+                - allergies: List of allergens to avoid
+                - limitations: Dietary restrictions
+                - region: Client's region (e.g., 'israel', 'usa') for regional ingredients
+                - template_meal_title: Dish name from template (REQUIRED)
+                - client_preference: Client's meal description (MAIN only)
             option_type: "MAIN" or "ALTERNATIVE" - MAIN uses client preferences, ALTERNATIVE ignores them
         
         Returns:
             Complete meal dict with ingredients and nutrition
+        
+        Note:
+            - Dish name comes from template (preferences['template_meal_title'])
+            - Ingredients are selected based on client's region with popular/common items prioritized
+            - Stage 1 generates ingredient list (not dish name)
         """
         
         # Extract preferences
         region = preferences.get("region", "israel")
+        
+        # Debug logging for region
+        logger.info(f"🌍 Region from preferences: '{region}' (type: {type(region)})")
+        if not region or region.strip().lower() == "israel":
+            logger.warning(f"⚠️ Using default region 'israel' - check if user's region is set correctly in database")
+        
+        # Normalize region (handle case sensitivity, whitespace)
+        if region:
+            region = region.strip().lower()
+        else:
+            region = "israel"
+            logger.warning(f"⚠️ Region was empty/None, defaulting to 'israel'")
+        
         raw_allergies = preferences.get("allergies", []) or []
         raw_limitations = preferences.get("limitations", []) or []
         allergies_list = [a.strip() for a in raw_allergies if isinstance(a, str) and a.strip()]
@@ -721,10 +764,20 @@ The data must be for "{ingredient_query}" specifically, not a similar or substit
             logger.info(f"🔀 ALTERNATIVE meal - ignoring client preferences for variety (template title may still be enforced)")
         
         # ======================================================================
-        # STAGE 1: Generate meal name and ingredient list (Claude)
+        # STAGE 1: Generate ingredient list for the dish (Claude)
         # ======================================================================
-        logger.info(f"🧠 Stage 1: Generating meal name and ingredients for {meal_type} [{option_type.upper()}]")
+        
+        # Use template dish name directly if provided, otherwise generate error
+        if isinstance(template_meal_title, str) and template_meal_title.strip():
+            dish_name = template_meal_title.strip()
+            logger.info(f"🧠 Stage 1: Building ingredients for '{dish_name}' ({meal_type}) [{option_type.upper()}]")
+        else:
+            # Template should always provide dish name
+            raise ValueError(f"No template_meal_title provided for {meal_type}. Template must specify dish name.")
+        
         logger.info(f"🎯 Macro targets: {macro_targets}")
+        logger.info(f"🌍 Region for ingredient selection: '{region}' (will prioritize popular ingredients from this region)")
+        logger.warning(f"⚠️ IMPORTANT: Using region='{region}' - verify this matches user's actual location in database")
         
         # Log client preferences
         if client_preference and client_preference.strip():
@@ -752,28 +805,32 @@ The data must be for "{ingredient_query}" specifically, not a similar or substit
         if target_protein >= 25:
             macro_guidance += f"Protein is {target_protein}g - ensure substantial protein source. "
         
-        # If template provides an explicit intended dish title, enforce it.
-        # This is critical to make the built menu match the generated template structure.
-        template_title_instruction = ""
-        if isinstance(template_meal_title, str) and template_meal_title.strip():
-            template_title_instruction = (
-                f'TEMPLATE MEAL TITLE (MANDATORY): "{template_meal_title.strip()}". '
-                "You MUST create this dish (or a clearly faithful version) and keep the dish name aligned with this title. "
-            )
-
-        # Prepend guidance so Claude sees it first
-        enhanced_client_pref = template_title_instruction + macro_guidance + (client_preference if client_preference else "")
-        
         logger.info(f"📐 Macro guidance being sent: {macro_guidance}")
+        
+        # Build regional guidance with specific brand examples
+        regional_guidance = f"🌍 REGIONAL INGREDIENTS (CRITICAL): Client is in '{region.upper()}'. You MUST use ingredients and brands from {region.upper()} ONLY. "
+        
+        if region.lower() == "usa":
+            regional_guidance += "USE USA BRANDS: Dannon, Kraft, Land O'Lakes, Cheerios, Quaker, etc. "
+            regional_guidance += "DO NOT USE Israeli brands like Tnuva, Strauss, Angel, Achla, Osem. "
+        elif region.lower() == "israel":
+            regional_guidance += "USE ISRAELI BRANDS: Tnuva, Strauss, Angel, Achla, Osem, Yotvata, etc. "
+            regional_guidance += "DO NOT USE American brands unless they're also common in Israel. "
+        else:
+            regional_guidance += f"Use brands and products commonly found in {region} stores. "
+        
+        regional_guidance += "Prioritize POPULAR, MAINSTREAM ingredients that locals would actually buy. "
+        regional_guidance += "ONLY use exotic/rare ingredients if the dish specifically requires them. "
         
         safety_guidance = f"ALLERGIES FIRST: ABSOLUTELY FORBIDDEN ingredients = {allergies_display}. " \
                           f"Dietary limitations: {limitations_display}. If a requested ingredient conflicts with these, " \
                           f"IGNORE the request. Allergies and limitations ALWAYS override preferences."
         
-        enhanced_client_pref = safety_guidance + " " + template_title_instruction + macro_guidance + (client_preference if client_preference else "")
+        enhanced_client_pref = safety_guidance + " " + regional_guidance + macro_guidance + (client_preference if client_preference else "")
         
         naming_result = self.name_ingredients(
             meal_type=meal_type,
+            dish_name=dish_name,
             macro_targets=json.dumps(macro_targets),
             required_protein_source=required_protein_source,
             region=region,
@@ -782,8 +839,6 @@ The data must be for "{ingredient_query}" specifically, not a similar or substit
             avoid_ingredients=json.dumps(avoid_ingredients),
             client_preference=enhanced_client_pref
         )
-        
-        dish_name = naming_result.dish_name
         
         # Parse ingredients JSON with better error handling
         try:
@@ -799,8 +854,22 @@ The data must be for "{ingredient_query}" specifically, not a similar or substit
                 logger.error(f"   Raw ingredients field: {naming_result.ingredients[:500]}")
                 raise
         
-        logger.info(f"✅ Stage 1 complete: {dish_name} with {len(ingredients_list)} ingredients")
-        logger.info(f"   Generated ingredients: {ingredients_list}")
+        logger.info(f"✅ Stage 1 complete: '{dish_name}' with {len(ingredients_list)} regional ingredients")
+        logger.info(f"   Generated ingredients (from {region.upper()}): {ingredients_list}")
+        
+        # Verify regional brands
+        ingredients_str = " ".join(ingredients_list).lower()
+        if region.lower() == "usa":
+            israeli_brands = ["tnuva", "strauss", "angel", "achla", "osem", "yotvata"]
+            found_israeli = [brand for brand in israeli_brands if brand in ingredients_str]
+            if found_israeli:
+                logger.error(f"❌ ERROR: Found Israeli brands in USA meal: {found_israeli}")
+                logger.error(f"   This is a bug - user is in USA but got Israeli ingredients!")
+        elif region.lower() == "israel":
+            usa_brands = ["dannon", "kraft", "land o'lakes", "cheerios", "quaker"]
+            found_usa = [brand for brand in usa_brands if brand in ingredients_str]
+            if found_usa:
+                logger.warning(f"⚠️ Found USA brands in Israeli meal: {found_usa} (may be OK if common in Israel)")
         
         # Check if client preferences for this meal were followed
         if client_preference and client_preference.strip():
@@ -1479,8 +1548,16 @@ Keep portions culinary reasonable, but accuracy is more important than perfect p
 def configure_dspy_backends():
     """
     Configure DSPy LM backend (only once, thread-safe).
-    For now, uses Azure OpenAI which is proven to work.
-    Gemini is used separately for nutrition lookup only.
+    
+    ⚠️ MODEL CONFIGURATION NOTE:
+    - Uses AZURE_OPENAI_DEPLOYMENT env var (default: "obi2")
+    - This controls ALL DSPy stages in meal building:
+      * Stage 1: Meal Naming & Ingredients
+      * Stage 3: Portion Calculation  
+      * Stage 4: Meal Assembly
+    - Stage 2 (Nutrition Lookup) uses Gemini (disabled) → falls back to Claude/OBI2
+    - To change model for all DSPy stages, set AZURE_OPENAI_DEPLOYMENT env var
+    - Gemini is used separately for nutrition lookup only (currently disabled)
     """
     global _dspy_configured
     
@@ -1505,7 +1582,12 @@ def configure_dspy_backends():
 
 
 def _configure_azure_openai():
-    """Configure DSPy to use Azure OpenAI (internal use only)."""
+    """
+    Configure DSPy to use Azure OpenAI (internal use only).
+    
+    Uses AZURE_OPENAI_DEPLOYMENT env var (default: "obi2").
+    This model is used for all DSPy stages in the meal building pipeline.
+    """
     deployment = os.getenv('AZURE_OPENAI_DEPLOYMENT', 'obi2')
     api_base = os.getenv("AZURE_OPENAI_API_BASE")
     api_key = os.getenv("AZURE_OPENAI_API_KEY")

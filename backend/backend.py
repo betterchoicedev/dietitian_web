@@ -2227,26 +2227,13 @@ client = AzureOpenAI(
 
 deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "obi2")
 
-# Anthropic Claude config (Correction AI for nutrition validation)
-from anthropic import AnthropicFoundry
-
-anthropic_endpoint = os.getenv("ANTHROPIC_ENDPOINT")
-anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-anthropic_deployment = os.getenv("ANTHROPIC_DEPLOYMENT", "claude-haiku-4-5")
-anthropic_version = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
-
-logger.info(f"🔍 Anthropic config check: endpoint={anthropic_endpoint}, deployment={anthropic_deployment}, key={'SET' if anthropic_api_key else 'NOT SET'}")
-
-if anthropic_endpoint and anthropic_api_key:
-    # Anthropic is configured for correction
-    anthropic_client = AnthropicFoundry(
-        api_key=anthropic_api_key,
-        base_url=anthropic_endpoint
-    )
-    logger.info(f"✅ Using Anthropic Claude ({anthropic_deployment}) for nutrition correction")
-else:
-    anthropic_client = None
-    logger.info("⚠️ Anthropic credentials not set, correction will be skipped")
+# ⚠️ IMPORTANT: MODEL USAGE CONFIGURATION
+# - OBI2 (default) is used for ALL operations EXCEPT template generation
+# - Template generator (/api/template) uses the same 'deployment' variable above
+#   If you want template generator to use a different model, change 'deployment' 
+#   or set a separate variable for template generation
+# - All other operations (meal building, nutrition correction, validation retries) use OBI2
+# - Anthropic Claude has been removed - all operations now use Azure OpenAI
 
 
 
@@ -2303,7 +2290,7 @@ Return **ONLY** the corrected JSON for `"meal"`—no markdown, no comments, no e
 
 def _correct_meal_nutrition(meal_data: dict, macro_targets: dict, max_attempts: int = 1):
     """
-    Use Azure OpenAI (OBI2) to fix unrealistic nutrition values and ensure meal matches macro targets.
+    Use OBI2 (Azure OpenAI) to fix unrealistic nutrition values and ensure meal matches macro targets.
     Returns (corrected_meal_data, success_flag) tuple.
     """
     try:
@@ -2326,12 +2313,12 @@ def _correct_meal_nutrition(meal_data: dict, macro_targets: dict, max_attempts: 
                 # Build the full content to send
                 full_content = f"{NUTRITION_CORRECTION_PROMPT}\n\nInput:\n{json.dumps(payload, ensure_ascii=False)}"
                 
-                # Call Azure OpenAI (OBI2)
+                # Call OBI2 (Azure OpenAI)
                 response = client.chat.completions.create(
                     model=deployment,
                     messages=[
                         {"role": "system", "content": NUTRITION_CORRECTION_PROMPT},
-                        {"role": "user", "content": f"Input:\n{json.dumps(payload, ensure_ascii=False)}"}
+                        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}
                     ],
                     max_tokens=2048,
                     temperature=0.3
@@ -2340,7 +2327,7 @@ def _correct_meal_nutrition(meal_data: dict, macro_targets: dict, max_attempts: 
                 # Extract text from response
                 raw_text = response.choices[0].message.content
                 
-                logger.info(f"🔍 OBI2 raw response: {raw_text[:8000]}...")  # Log first 500 chars
+                logger.info(f"🔍 OBI2 raw response: {raw_text[:8000]}...")  # Log first 8000 chars
                 
                 if not raw_text:
                     logger.warning(f"❌ Empty response from OBI2 (attempt {attempt})")
@@ -2362,7 +2349,7 @@ def _correct_meal_nutrition(meal_data: dict, macro_targets: dict, max_attempts: 
                     logger.info(f"ℹ️ Correction failed, using original meal from first AI")
                     return (meal_data, False)
                 
-                # Check if response has "meal" wrapper (sometimes adds this)
+                # Check if response has "meal" wrapper (sometimes added)
                 if isinstance(corrected_meal, dict) and "meal" in corrected_meal and "ingredients" not in corrected_meal:
                     logger.info("🔧 Unwrapping 'meal' object from OBI2 response")
                     corrected_meal = corrected_meal["meal"]
@@ -2417,7 +2404,75 @@ def require_api_key(f):
 @app.route("/api/template", methods=["POST"])
 
 def api_template():
+    
+    try:
+        data = request.get_json()
+        user_code = data.get("user_code") if data else None
+        
+        # Check if meal_plan_structure is provided with main + alternative already defined
+        meal_structure = data.get("meal_structure") or data.get("meal_plan_structure")
+        
+        # If not provided in request, load from preferences
+        if not meal_structure:
+            preferences = load_user_preferences(user_code)
+            meal_structure = preferences.get("meal_plan_structure", [])
+        
+        # TYPE 1: If structure already has main + alternative, just format and return
+        if meal_structure and len(meal_structure) > 0:
+            first_meal = meal_structure[0]
+            if "main" in first_meal and "alternative" in first_meal:
+                logger.info("📋 Type 1: Main and alternative already provided in meal_plan_structure, formatting...")
+                
+                template = []
+                for meal_data in meal_structure:
+                    meal_name = meal_data.get("meal", "Unnamed Meal")
+                    main = meal_data.get("main", {})
+                    alternative = meal_data.get("alternative", {})
+                    
+                    # Extract protein source from description
+                    def extract_protein(desc):
+                        desc_lower = desc.lower() if desc else ""
+                        proteins = ["chicken", "beef", "steak", "turkey", "fish", "salmon", "tuna", 
+                                   "eggs", "egg", "tofu", "cottage cheese", "cheese", "yogurt"]
+                        for protein in proteins:
+                            if protein in desc_lower:
+                                return protein
+                        return "protein"
+                    
+                    # Build main option
+                    main_option = {
+                        "name": main.get("description", f"{meal_name} Main"),
+                        "calories": main.get("calories", 0),
+                        "protein": main.get("protein", 0),
+                        "fat": main.get("fat", 0),
+                        "carbs": main.get("carbs", 0),
+                        "main_protein_source": extract_protein(main.get("description", ""))
+                    }
+                    
+                    # Build alternative option
+                    alt_option = {
+                        "name": alternative.get("description", f"{meal_name} Alternative"),
+                        "calories": alternative.get("calories", 0),
+                        "protein": alternative.get("protein", 0),
+                        "fat": alternative.get("fat", 0),
+                        "carbs": alternative.get("carbs", 0),
+                        "main_protein_source": extract_protein(alternative.get("description", ""))
+                    }
+                    
+                    template.append({
+                        "meal": meal_name,
+                        "main": main_option,
+                        "alternative": alt_option
+                    })
+                
+                logger.info(f"✅ Type 1 template formatted with {len(template)} meals")
+                return jsonify({"template": template})
+    
+    except Exception as e:
+        logger.error(f"❌ Exception checking Type 1 format: {e}")
+        # If Type 1 check fails, fall through to normal generation
 
+    # TYPE 2: Normal template generation with AI
     max_retries = 4  # Build 4 templates before giving up
 
     previous_issues = []  # Track issues from previous attempts
@@ -2734,8 +2789,9 @@ Generate meal options that are practical, delicious, and respect all dietary res
 
             # logger.info("🧠 Sending to OpenAI (/template):\nSystem: %s\nUser: %s", system_prompt, user_prompt["content"])
 
-
-
+            # NOTE: Template generator uses 'deployment' variable (default: "obi2")
+            # If you want to use a different model for template generation only,
+            # you can override 'deployment' here or use a separate variable
             response = client.chat.completions.create(
                 model=deployment,
                 messages=[{"role": "system", "content": system_prompt}, user_prompt]
@@ -3403,26 +3459,15 @@ Your previous meal attempt failed validation. Review the failed meal and issues 
         else:
             user_message_content = user_payload  # Already a formatted string
 
-        # Use OBI2 for first attempt, Claude for validation corrections
-        if i == 0:
-            # First attempt: Use OBI2 (Azure OpenAI)
-            response = client.chat.completions.create(
-                model=deployment,
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": user_message_content}
-                ]
-            )
-        else:
-            # Retry attempts: Use OBI2 for validation corrections
-            logger.info(f"🔧 Using OBI2 for validation correction (attempt {i+1})")
-            response = client.chat.completions.create(
-                model=deployment,
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": user_message_content}
-                ]
-            )
+        # Use OBI2 for all attempts (first attempt and retries)
+        logger.info(f"🔧 Using OBI2 for meal building (attempt {i+1})")
+        response = client.chat.completions.create(
+            model=deployment,
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": user_message_content}
+            ]
+        )
 
         raw = _strip_markdown_fences(response.choices[0].message.content)
 
@@ -3647,6 +3692,18 @@ def api_build_menu():
 
 
             preferences = load_user_preferences(user_code) or {}
+            
+            # Debug log region from preferences
+            loaded_region = preferences.get("region", "NOT_SET")
+            logger.info(f"🌍 Loaded region from preferences: '{loaded_region}' for user_code: {user_code}")
+            if not loaded_region or loaded_region == "NOT_SET":
+                logger.error(f"❌ Region is not set in preferences! Check database for user_code: {user_code}")
+            elif loaded_region.lower() == "israel":
+                logger.info(f"   Using Israeli brands and ingredients")
+            elif loaded_region.lower() == "usa":
+                logger.info(f"   Using USA brands and ingredients")
+            else:
+                logger.warning(f"   Unknown region '{loaded_region}' - may have limited brand support")
 
             region_instruction = _region_instruction_from_prefs(preferences)
 
