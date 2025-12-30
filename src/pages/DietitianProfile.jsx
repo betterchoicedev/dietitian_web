@@ -6,6 +6,7 @@ import { useClient } from '@/contexts/ClientContext';
 import { EventBus } from '@/utils/EventBus';
 import { useNavigate } from 'react-router-dom';
 import { entities } from '@/api/client';
+import { getMyProfile, getCompanyProfileIds } from '@/utils/auth';
 import { 
   Search,
   AlertCircle,
@@ -188,19 +189,127 @@ export default function DietitianProfile() {
     try {
       setIsLoading(true);
       
-      // Get current user ID
+      // Get current user ID and profile
       const { data: { user } } = await supabase.auth.getUser();
-      
-      // Fetch all messages that are either broadcast OR directed to current user
-      // For management view, we could show all, but for user view, filter by directed_to
-      const { data, error } = await supabase
+      if (!user) {
+        setMessages([]);
+        return;
+      }
+
+      // Get current user's profile (role and company_id)
+      const myProfile = await getMyProfile();
+      console.log('👤 Current user profile:', { id: myProfile.id, role: myProfile.role, company_id: myProfile.company_id });
+
+      // If sys_admin, show all messages
+      if (myProfile.role === 'sys_admin') {
+        const { data, error } = await supabase
+          .from('system_messages')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        setMessages(data || []);
+        return;
+      }
+
+      // For non-sys_admin users, fetch all messages and filter based on company rules
+      const { data: allMessages, error } = await supabase
         .from('system_messages')
         .select('*')
-        .or(user ? `directed_to.is.null,directed_to.eq.${user.id}` : 'directed_to.is.null')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setMessages(data || []);
+
+      // Get all profiles to determine roles and company relationships
+      const { data: allProfiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, role, company_id');
+
+      if (profilesError) {
+        console.warn('⚠️ Could not fetch profiles, falling back to basic filtering:', profilesError);
+        // Fallback to basic filtering if profiles table is not available
+        const { data: basicMessages, error: basicError } = await supabase
+          .from('system_messages')
+          .select('*')
+          .or(`directed_to.is.null,directed_to.eq.${user.id}`)
+          .order('created_at', { ascending: false });
+        
+        if (basicError) throw basicError;
+        setMessages(basicMessages || []);
+        return;
+      }
+
+      // Create maps for quick lookup
+      const profileMap = {};
+      const companyManagersMap = {}; // company_id -> [manager_ids]
+      const employeeToManagerMap = {}; // employee_id -> manager_id
+
+      allProfiles?.forEach(profile => {
+        profileMap[profile.id] = profile;
+        
+        if (profile.role === 'company_manager' && profile.company_id) {
+          if (!companyManagersMap[profile.company_id]) {
+            companyManagersMap[profile.company_id] = [];
+          }
+          companyManagersMap[profile.company_id].push(profile.id);
+        }
+      });
+
+      // Build employee to manager mapping
+      allProfiles?.forEach(profile => {
+        if (profile.role === 'employee' && profile.company_id) {
+          const managers = companyManagersMap[profile.company_id] || [];
+          if (managers.length > 0) {
+            employeeToManagerMap[profile.id] = managers[0]; // Use first manager
+          }
+        }
+      });
+
+      // Filter messages based on visibility rules
+      const visibleMessages = (allMessages || []).filter(message => {
+        // Check if this is a personalized meal plan request by title
+        const isMealPlanRequest = message.title === 'בקשה לתוכנית תזונה מותאמת' || 
+                                   message.title === 'Request for Personalized Meal Plan';
+        
+        // For non-meal-plan-request messages, use simple filtering
+        if (!isMealPlanRequest) {
+          // Broadcast messages: visible to everyone
+          if (!message.directed_to) {
+            return true;
+          }
+          // Message directed to current user: always visible
+          return message.directed_to === myProfile.id;
+        }
+
+        // For meal plan request messages, apply company-based visibility rules
+        // Message directed to current user: always visible
+        if (message.directed_to === myProfile.id) {
+          return true;
+        }
+
+        // If no directed_to, don't show (meal plan requests should always be directed)
+        if (!message.directed_to) {
+          return false;
+        }
+
+        // Get the target profile
+        const targetProfile = profileMap[message.directed_to];
+        if (!targetProfile) {
+          return false;
+        }
+
+        // Show to company managers in the same company as the target
+        if (myProfile.role === 'company_manager' && 
+            targetProfile.company_id && 
+            myProfile.company_id === targetProfile.company_id) {
+          return true;
+        }
+
+        return false;
+      });
+
+      console.log('📨 Filtered messages:', visibleMessages.length, 'of', allMessages?.length || 0);
+      setMessages(visibleMessages);
     } catch (error) {
       console.error('Error loading messages:', error);
       alert(translations.failedToLoadMessages || 'Failed to load messages');

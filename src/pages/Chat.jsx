@@ -412,95 +412,55 @@ export default function Chat() {
     setCurrentImageUrl(null);
   };
 
-  // Function to add message to the new user_message_queue table
+  // Function to send message via external API instead of message queue
   const addToUserMessageQueue = async (queueData) => {
     try {
-      // Determine message type based on role and whether it's from dietitian or AI
-      let messageType;
-      if (queueData.role === 'user') {
-        messageType = 'user_message';
-      } else if (queueData.role === 'assistant') {
-        // Check if it's a system reminder or dietitian message
-        if (queueData.isSystemReminder) {
-          messageType = 'system_reminder';
-        } else if (queueData.dietitian_id) {
-          messageType = 'dietitian_message';
-        } else {
-          messageType = 'ai_response';
-        }
-      } else {
-        messageType = 'unknown';
-      }
-
-      // Determine scheduled_for timestamp
-      let scheduledFor;
-      let triggerType;
-      
-      if (queueData.scheduled_for) {
-        // Use provided scheduled time
-        scheduledFor = queueData.scheduled_for;
-        triggerType = 'scheduled';
-      } else {
-        // Immediate delivery
-        scheduledFor = new Date().toISOString();
-        triggerType = 'immediate';
-      }
-
-      const { data, error } = await supabase
-        .from('user_message_queue')
-        .insert({
-          user_id: queueData.client_id,
-          user_code: queueData.user_code,
-          message_type: messageType,
-          message_content: queueData.content,
-          message_priority: queueData.priority || 5,
-          scheduled_for: scheduledFor,
-          timezone: queueData.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-          optimal_delivery_window: queueData.optimal_delivery_window || { start_hour: 8, end_hour: 20 },
-          trigger_type: triggerType,
-          context_data: {
-            conversation_id: queueData.conversation_id,
-            dietitian_id: queueData.dietitian_id,
-            role: queueData.role,
-            attachments: queueData.attachments || null
-          },
-          status: 'pending'
-        })
-        .select()
+      // Get phone number from chat_users table
+      const { data: clientData, error: clientError } = await supabase
+        .from('chat_users')
+        .select('phone_number')
+        .eq('user_code', queueData.user_code)
         .single();
 
-      if (error) {
-        console.error('Error adding to user_message_queue:', error);
-        throw error;
+      if (clientError || !clientData?.phone_number) {
+        console.error('Error fetching phone number from chat_users:', clientError);
+        throw new Error(`Failed to get phone number for user ${queueData.user_code}`);
       }
 
-      console.log('✅ Message added to user_message_queue:', data);
-      return data;
+      const phoneNumber = clientData.phone_number;
+
+      // Prepare the API request body
+      const requestBody = {
+        phone_number: phoneNumber,
+        message: queueData.content
+      };
+
+      // Add media_url if there's an attachment
+      if (queueData.attachments?.file_url) {
+        requestBody.media_url = queueData.attachments.file_url;
+      }
+
+      // Send message via external API
+      const response = await fetch('https://api-gw.eu-prod.betterchoice.one/whapi/send-external-message', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error sending message via API:', response.status, errorText);
+        throw new Error(`API error: ${response.status} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('✅ Message sent via external API:', result);
+      return result;
     } catch (error) {
-      console.error('Failed to add to user_message_queue:', error);
+      console.error('Failed to send message via API:', error);
       throw error;
-    }
-  };
-
-  // Function to get pending messages from the new user_message_queue table
-  const getPendingMessagesFromQueue = async (userCode) => {
-    try {
-      const { data, error } = await supabase
-        .from('user_message_queue')
-        .select('*')
-        .eq('user_code', userCode)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Error getting pending messages from queue:', error);
-        throw error;
-      }
-
-      return data || [];
-    } catch (error) {
-      console.error('Failed to get pending messages from queue:', error);
-      return [];
     }
   };
 
@@ -581,30 +541,6 @@ export default function Chat() {
       }
     } catch (error) {
       console.error('Test auto-refresh failed:', error);
-    }
-  };
-
-  // Function to view message queue (for testing) - updated for new table
-  const viewMessageQueue = async () => {
-    if (!selectedClient?.user_code) return;
-    
-    try {
-      console.log('📬 Viewing message queue for user:', selectedClient.user_code);
-      const pendingMessages = await getPendingMessagesFromQueue(selectedClient.user_code);
-      
-      if (pendingMessages.length === 0) {
-        alert('No pending messages in queue for this user.');
-        return;
-      }
-      
-      const queueInfo = pendingMessages.map(msg => 
-        `ID: ${msg.id}\nType: ${msg.message_type}\nStatus: ${msg.status}\nContent: ${msg.message_content.substring(0, 100)}...\nScheduled: ${new Date(msg.scheduled_for).toLocaleString()}\nCreated: ${new Date(msg.created_at).toLocaleString()}\n---`
-      ).join('\n');
-      
-      alert(`Message Queue for ${selectedClient.full_name}:\n\n${queueInfo}`);
-    } catch (error) {
-      console.error('Error viewing message queue:', error);
-      setError('Failed to view message queue');
     }
   };
 
@@ -1060,10 +996,9 @@ export default function Chat() {
           };
         }
         
-        // Add message to queue only - don't store in chat_messages
-        // The message will be stored in chat_messages when it's processed and sent from the queue
+        // Send message via external API - don't store in message queue or chat_messages
         await addToUserMessageQueue(queueData);
-        console.log(`✅ ${messageType === 'system_reminder' ? 'System reminder' : 'Dietitian'} message added to new queue`);
+        console.log(`✅ ${messageType === 'system_reminder' ? 'System reminder' : 'Dietitian'} message sent via external API`);
         
         // Only update local state if message is immediate (not scheduled)
         if (!isScheduled) {
@@ -1436,8 +1371,8 @@ Your task is to respond to the user's message below, taking into account their s
         }
       }
 
-      // Add AI response to new user_message_queue table
-      console.log('📬 Adding AI response to new user_message_queue...');
+      // Send AI response via external API
+      console.log('📬 Sending AI response via external API...');
       const queueData = {
         conversation_id: conversationId,
         client_id: clientId, // Add client ID from chat_users table
@@ -1456,7 +1391,7 @@ Your task is to respond to the user's message below, taking into account their s
       }
       
       await addToUserMessageQueue(queueData);
-      console.log('✅ AI response added to new queue');
+      console.log('✅ AI response sent via external API');
 
       // Create a temporary message object for local display (not stored in database)
       const tempAiMessage = {

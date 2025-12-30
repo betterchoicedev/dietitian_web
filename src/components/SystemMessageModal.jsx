@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { EventBus } from '@/utils/EventBus';
+import { getMyProfile } from '@/utils/auth';
 
 const MESSAGE_TYPE_CONFIG = {
   info: {
@@ -93,7 +94,7 @@ export default function SystemMessageModal() {
       setLoading(true);
       const now = new Date().toISOString();
 
-      // Get current user ID
+      // Get current user ID and profile
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         console.log('No authenticated user');
@@ -101,19 +102,115 @@ export default function SystemMessageModal() {
         return;
       }
 
-      // Fetch ONLY urgent active messages for popup - either broadcast or directed to current user
-      const { data, error } = await supabase
-        .from('system_messages')
-        .select('*')
-        .eq('is_active', true)
-        .eq('priority', 'urgent')
-        .or(`directed_to.is.null,directed_to.eq.${user.id}`)
-        .order('created_at', { ascending: false });
+      // Get current user's profile (role and company_id)
+      const myProfile = await getMyProfile();
+      console.log('👤 Current user profile:', { id: myProfile.id, role: myProfile.role, company_id: myProfile.company_id });
 
-      if (error) throw error;
+      let allUrgentMessages = [];
+
+      // If sys_admin, show all urgent messages
+      if (myProfile.role === 'sys_admin') {
+        const { data, error } = await supabase
+          .from('system_messages')
+          .select('*')
+          .eq('is_active', true)
+          .eq('priority', 'urgent')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        allUrgentMessages = data || [];
+      } else {
+        // For non-sys_admin users, fetch all urgent messages and filter based on company rules
+        const { data, error } = await supabase
+          .from('system_messages')
+          .select('*')
+          .eq('is_active', true)
+          .eq('priority', 'urgent')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        // Get all profiles to determine roles and company relationships
+        const { data: allProfiles, error: profilesError } = await supabase
+          .from('profiles')
+          .select('id, role, company_id');
+
+        if (profilesError) {
+          console.warn('⚠️ Could not fetch profiles, falling back to basic filtering:', profilesError);
+          // Fallback to basic filtering if profiles table is not available
+          const { data: basicMessages, error: basicError } = await supabase
+            .from('system_messages')
+            .select('*')
+            .eq('is_active', true)
+            .eq('priority', 'urgent')
+            .or(`directed_to.is.null,directed_to.eq.${user.id}`)
+            .order('created_at', { ascending: false });
+          
+          if (basicError) throw basicError;
+          allUrgentMessages = basicMessages || [];
+        } else {
+          // Create maps for quick lookup
+          const profileMap = {};
+          const companyManagersMap = {}; // company_id -> [manager_ids]
+
+          allProfiles?.forEach(profile => {
+            profileMap[profile.id] = profile;
+            
+            if (profile.role === 'company_manager' && profile.company_id) {
+              if (!companyManagersMap[profile.company_id]) {
+                companyManagersMap[profile.company_id] = [];
+              }
+              companyManagersMap[profile.company_id].push(profile.id);
+            }
+          });
+
+          // Filter messages based on visibility rules
+          allUrgentMessages = (data || []).filter(message => {
+            // Check if this is a personalized meal plan request by title
+            const isMealPlanRequest = message.title === 'בקשה לתוכנית תזונה מותאמת' || 
+                                       message.title === 'Request for Personalized Meal Plan';
+            
+            // For non-meal-plan-request messages, use simple filtering
+            if (!isMealPlanRequest) {
+              // Broadcast messages: visible to everyone
+              if (!message.directed_to) {
+                return true;
+              }
+              // Message directed to current user: always visible
+              return message.directed_to === myProfile.id;
+            }
+
+            // For meal plan request messages, apply company-based visibility rules
+            // Message directed to current user: always visible
+            if (message.directed_to === myProfile.id) {
+              return true;
+            }
+
+            // If no directed_to, don't show (meal plan requests should always be directed)
+            if (!message.directed_to) {
+              return false;
+            }
+
+            // Get the target profile
+            const targetProfile = profileMap[message.directed_to];
+            if (!targetProfile) {
+              return false;
+            }
+
+            // Show to company managers in the same company as the target
+            if (myProfile.role === 'company_manager' && 
+                targetProfile.company_id && 
+                myProfile.company_id === targetProfile.company_id) {
+              return true;
+            }
+
+            return false;
+          });
+        }
+      }
 
       // Filter by date range in JavaScript (more reliable than complex SQL)
-      const activeUrgentMessages = (data || []).filter(msg => {
+      const activeUrgentMessages = allUrgentMessages.filter(msg => {
         const startDate = msg.start_date;
         const endDate = msg.end_date;
         
