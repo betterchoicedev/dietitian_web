@@ -20,8 +20,6 @@ import os
 from typing import List, Dict, Any, Optional
 import logging
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, validator
-from enum import Enum
 
 # Load environment variables
 load_dotenv()
@@ -37,70 +35,6 @@ try:
     _dspy_lock = threading.Lock()
 except ImportError:
     _dspy_lock = None
-
-
-# ============================================================================
-# Pydantic Models for Strict Schema Validation
-# ============================================================================
-
-class CulinaryRole(str, Enum):
-    """Culinary role classification for ingredients."""
-    PROTEIN_ANCHOR = "protein_anchor"  # Main protein source
-    CARB_ANCHOR = "carb_anchor"        # Main carb source
-    FAT_SOURCE = "fat_source"          # Primary fat contributor
-    BASE = "base"                       # Low-calorie volume (vegetables)
-    FLAVOR = "flavor"                   # Herbs, spices, small additions
-
-
-class IngredientWithRole(BaseModel):
-    """Ingredient with nutrition data and culinary role."""
-    name: str = Field(..., description="Ingredient name with brand")
-    role: CulinaryRole = Field(..., description="Culinary role in the dish")
-    calories_per_100g: float = Field(..., ge=0)
-    protein_per_100g: float = Field(..., ge=0)
-    fat_per_100g: float = Field(..., ge=0)
-    carbs_per_100g: float = Field(..., ge=0)
-    brand: str = Field(default="", description="Brand name if applicable")
-
-
-class PortionedIngredient(BaseModel):
-    """Ingredient with calculated portion."""
-    item: str = Field(..., description="Ingredient name")
-    portionSI_gram: float = Field(..., alias="portionSI(gram)", ge=0)
-    household_measure: str = Field(..., description="Human-readable measure")
-    calories: float = Field(..., ge=0)
-    protein: float = Field(..., ge=0)
-    fat: float = Field(..., ge=0)
-    carbs: float = Field(..., ge=0)
-    brand_of_product: str = Field(default="", alias="brand of pruduct")
-    
-    class Config:
-        populate_by_name = True
-        validate_by_name = True  # Pydantic v2 renamed allow_population_by_field_name
-
-
-class ValidatedMeal(BaseModel):
-    """Complete meal with validation."""
-    meal_name: str
-    meal_title: str
-    ingredients: List[PortionedIngredient]
-    
-    @validator('ingredients')
-    def validate_ingredient_count(cls, v):
-        if len(v) > 7:
-            raise ValueError(f"Too many ingredients: {len(v)} (max 7)")
-        if len(v) == 0:
-            raise ValueError("No ingredients provided")
-        return v
-    
-    def calculate_totals(self) -> Dict[str, float]:
-        """Calculate nutrition totals."""
-        return {
-            "calories": sum(i.calories for i in self.ingredients),
-            "protein": sum(i.protein for i in self.ingredients),
-            "fat": sum(i.fat for i in self.ingredients),
-            "carbs": sum(i.carbs for i in self.ingredients)
-        }
 
 
 # ============================================================================
@@ -160,41 +94,38 @@ class MealNaming(dspy.Signature):
 
 
 class PortionCalculation(dspy.Signature):
-    """Calculate ingredient weights in grams to hit macro targets using culinary role hierarchy.
+    """Calculate portion sizes for ALL ingredients to hit macro targets.
     
-    ANCHOR-BASED CALCULATION STRATEGY:
-    1. PROTEIN ANCHOR: Start by calculating portion for protein_anchor to meet protein target
-       - Typical ranges: 100-200g meat/fish, 100-150g eggs (2-3 units), 150-250g dairy
-    2. CARB ANCHOR: Calculate portion for carb_anchor to meet carbs target
-       - Typical ranges: 80-200g grains/pasta/bread, 150-300g potatoes/rice
-    3. FAT SOURCES: Use fat_source ingredients to reach calorie target
-       - Keep fats reasonable: 5-20g oils, 10-30g nuts/seeds, 15-40g cheese
-       - Fat calories should not exceed 35% of total calories unless dish requires it
-    4. BASE & FLAVOR: Add minimal portions for vegetables and seasonings
-       - Base (vegetables): 50-150g
-       - Flavor (herbs/spices): 1-10g
+    CULINARY LOGIC - Identify ingredient roles:
+    1. Analyze the dish_name to identify what defines the dish
+    2. Assign each ingredient a ROLE and appropriate portion range:
+       - MAIN/BASE ingredients: 100-200g (the core component that defines the dish)
+       - PROTEIN ingredients: 100-200g for meat/fish, 2-3 units for eggs, 150-250g for dairy
+       - SUPPORTING ingredients: 30-100g (vegetables, grains, legumes)
+       - TOPPINGS: 5-30g (garnishes, nuts, seeds)
+       - SAUCES/OILS: 5-20g (dressings, cooking oils)
     
-    CULINARY PLAUSIBILITY CHECKS:
-    • Total meal weight should be 200-800g (realistic for one meal)
-    • Protein anchor should be the largest single ingredient by weight (unless it's a carb-heavy dish)
-    • Oil/fat portions should not exceed protein portions (unless it's a fat-based dish like salad with dressing)
-    • Ratios must make culinary sense for the dish type
+    PRACTICAL PORTIONS - Make it cookable:
+    • DISCRETE items (eggs, slices, containers, units): Use WHOLE numbers only
+    • FLEXIBLE items (vegetables, sauces, grains, oils, spreads): Can use any weight
+    • STRATEGY: Set discrete items to whole numbers first, then adjust flexible items to hit macro targets
     
-    PRACTICAL PORTIONS:
-    • DISCRETE items (eggs, slices): Use WHOLE numbers
-    • FLEXIBLE items (vegetables, oils, grains): Can use decimals
-    • Set discrete items first, then adjust flexible items to hit targets
+    VERIFICATION:
+    • Check proportions are realistic for the dish type
+    • Ensure accompaniments are proportional to main components
+    • Confirm the dish remains recognizable and balanced
+    
+    Calculate total macros → adjust flexible ingredients iteratively to hit targets (keep discrete items whole).
     
     ⚠️ CRITICAL: ALL OUTPUT MUST BE IN ENGLISH (ingredient names, brands, household measures)
     """
     
     dish_name = dspy.InputField(desc="Name of the dish")
-    ingredients_with_roles = dspy.InputField(desc="JSON list of ingredients with: name, role (protein_anchor/carb_anchor/fat_source/base/flavor), calories_per_100g, protein_per_100g, fat_per_100g, carbs_per_100g, brand")
-    macro_targets = dspy.InputField(desc="Target macros for ENTIRE MEAL: {calories, protein, fat, carbs}")
-    required_protein_source = dspy.InputField(desc="Main protein source (must match protein_anchor)")
+    ingredients = dspy.InputField(desc="List of ingredients with nutrition per 100g")
+    macro_targets = dspy.InputField(desc="Target macros for ENTIRE MEAL")
+    required_protein_source = dspy.InputField(desc="Main protein source")
     
-    calculated_portions = dspy.OutputField(desc="JSON in ENGLISH: {ingredient: {portionSI(gram): <number>, household_measure: '<text>', brand of pruduct: '<brand>'}}")
-    culinary_reasoning = dspy.OutputField(desc="Brief explanation of portion logic: which anchors were used first, how ratios maintain dish integrity")
+    portions = dspy.OutputField(desc="JSON in ENGLISH ONLY (no Hebrew/Arabic): {ingredient: {portionSI(gram): <number>, household_measure: '<text in English>', brand of pruduct: '<brand in English, e.g. Tnuva not תנובה>'}}")
 
 
 class NutritionLookup(dspy.Signature):
@@ -204,36 +135,6 @@ class NutritionLookup(dspy.Signature):
     portion_grams = dspy.InputField(desc="Portion size in grams")
     
     nutrition_data = dspy.OutputField(desc="JSON with calories, protein_g, fat_g, carbohydrates_g for this portion")
-
-
-class MealValidation(dspy.Signature):
-    """Validate if the meal is culinary sound and meets macro targets.
-    
-    VALIDATION CHECKS:
-    1. MACRO ACCURACY: Are totals within acceptable ranges?
-       - Use dynamic margins based on target values (higher tolerance for low values)
-    2. CULINARY PLAUSIBILITY: Do portion sizes make sense?
-       - Is total meal weight realistic (200-800g)?
-       - Are ingredient ratios appropriate for the dish?
-       - Is the protein anchor the main component (unless it's a carb-focused dish)?
-    3. FAT LOGIC: Are fat portions reasonable?
-       - Fat calories should typically be 20-35% of total
-       - Oil/butter portions should not exceed protein portions (unless intentional)
-    4. INGREDIENT COUNT: Are we within 7 ingredients max?
-    
-    If invalid, provide SPECIFIC, ACTIONABLE feedback:
-    - "Reduce olive oil by 5g to lower fat from X to Y"
-    - "Increase chicken by 20g to reach protein target"
-    - "Total meal weight is 950g (too high), reduce rice by 50g"
-    """
-    
-    dish_name = dspy.InputField(desc="Name of the dish")
-    meal_plan = dspy.InputField(desc="Complete meal with ingredients and portions")
-    macro_targets = dspy.InputField(desc="Target macros: {calories, protein, fat, carbs}")
-    allowed_margins = dspy.InputField(desc="Allowed deviation margins for each macro")
-    
-    is_valid = dspy.OutputField(desc="Boolean: true if meal passes all checks, false otherwise")
-    feedback = dspy.OutputField(desc="If invalid: Specific instructions on what to adjust. If valid: Brief confirmation. Format: 'ISSUE: description | FIX: specific adjustment with numbers'")
 
 
 class MealAssembly(dspy.Signature):
@@ -505,94 +406,6 @@ class MealBuilderChain(dspy.Module):
         cleaned = "".join(cleaned_chars)
         return " ".join(cleaned.split())
     
-    def _classify_culinary_role(
-        self, 
-        ingredient_name: str, 
-        required_protein_source: str,
-        nutrition_per_100g: Dict[str, float]
-    ) -> CulinaryRole:
-        """
-        Classify ingredient by its culinary role in the dish.
-        
-        Uses heuristics based on:
-        1. Ingredient name and required protein source
-        2. Macro ratios (protein%, fat%, carb%)
-        3. Common culinary patterns
-        """
-        name_lower = ingredient_name.lower()
-        protein = nutrition_per_100g.get("protein_per_100g", 0)
-        fat = nutrition_per_100g.get("fat_per_100g", 0)
-        carbs = nutrition_per_100g.get("carbs_per_100g", 0)
-        calories = nutrition_per_100g.get("calories_per_100g", 1)  # Avoid div by zero
-        
-        # Calculate macro percentages (as % of calories)
-        protein_pct = (protein * 4) / calories if calories > 0 else 0
-        fat_pct = (fat * 9) / calories if calories > 0 else 0
-        carbs_pct = (carbs * 4) / calories if calories > 0 else 0
-        
-        # PROTEIN ANCHOR: High protein foods that match required protein source
-        protein_keywords = [
-            "chicken", "beef", "turkey", "fish", "salmon", "tuna", "cod", "tilapia",
-            "egg", "tofu", "tempeh", "seitan", "protein powder", "cottage cheese",
-            "greek yogurt", "quark", "shrimp", "prawns", "lamb", "pork", "duck"
-        ]
-        required_protein_lower = required_protein_source.lower()
-        
-        # Check if this is the required protein source
-        is_protein_match = any(keyword in name_lower for keyword in protein_keywords)
-        is_required_protein = any(word in name_lower for word in required_protein_lower.split())
-        
-        if (is_protein_match or is_required_protein) and protein_pct > 0.25:
-            return CulinaryRole.PROTEIN_ANCHOR
-        
-        # CARB ANCHOR: High carb foods
-        carb_keywords = [
-            "rice", "pasta", "bread", "pita", "bagel", "tortilla", "noodle",
-            "potato", "sweet potato", "quinoa", "oats", "oatmeal", "couscous",
-            "bulgur", "barley", "corn", "polenta", "crackers", "cereal"
-        ]
-        if any(keyword in name_lower for keyword in carb_keywords) and carbs_pct > 0.40:
-            return CulinaryRole.CARB_ANCHOR
-        
-        # FAT SOURCE: High fat foods
-        fat_keywords = [
-            "oil", "olive oil", "butter", "ghee", "tahini", "mayo", "mayonnaise",
-            "avocado", "nuts", "almond", "walnut", "cashew", "peanut", "seeds",
-            "chia", "flax", "sesame", "hummus", "cheese", "cream cheese"
-        ]
-        if any(keyword in name_lower for keyword in fat_keywords) and (fat_pct > 0.40 or fat > 15):
-            return CulinaryRole.FAT_SOURCE
-        
-        # BASE: Low-calorie vegetables
-        base_keywords = [
-            "lettuce", "spinach", "kale", "arugula", "cucumber", "tomato",
-            "pepper", "bell pepper", "zucchini", "eggplant", "broccoli", "cauliflower",
-            "cabbage", "celery", "mushroom", "onion", "garlic", "carrot", "beet"
-        ]
-        if any(keyword in name_lower for keyword in base_keywords) and calories < 50:
-            return CulinaryRole.BASE
-        
-        # FLAVOR: Herbs, spices, condiments
-        flavor_keywords = [
-            "spice", "herb", "salt", "pepper", "cumin", "paprika", "oregano",
-            "basil", "parsley", "cilantro", "dill", "thyme", "rosemary", "garlic powder",
-            "onion powder", "cinnamon", "vanilla", "lemon juice", "lime juice", "vinegar"
-        ]
-        if any(keyword in name_lower for keyword in flavor_keywords):
-            return CulinaryRole.FLAVOR
-        
-        # Default fallback logic based on macro dominance
-        if protein_pct > 0.30:
-            return CulinaryRole.PROTEIN_ANCHOR
-        elif carbs_pct > 0.50:
-            return CulinaryRole.CARB_ANCHOR
-        elif fat_pct > 0.50:
-            return CulinaryRole.FAT_SOURCE
-        elif calories < 40:
-            return CulinaryRole.BASE
-        else:
-            return CulinaryRole.BASE  # Default to base for unclassified items
-    
     def _extract_brand_from_ingredient(self, ingredient: str) -> tuple[str, str]:
         """
         Extract brand and product name from ingredient string.
@@ -724,7 +537,6 @@ class MealBuilderChain(dspy.Module):
         # Stage predictors
         self.name_ingredients = dspy.ChainOfThought(MealNaming)
         self.calculate_portions = dspy.ChainOfThought(PortionCalculation)
-        self.validate_meal = dspy.ChainOfThought(MealValidation)
         self.assemble_meal = dspy.ChainOfThought(MealAssembly)
         
         # Custom Gemini lookup
@@ -1253,101 +1065,85 @@ Examples:
         logger.info(f"✅ Stage 2 complete: Nutrition data per 100g retrieved for all {len(nutrition_per_100g)} ingredients")
         
         # ======================================================================
-        # STAGE 2.5: Classify culinary roles for each ingredient
+        # STAGE 3: Calculate portions using nutrition data (iterative with Claude)
         # ======================================================================
-        logger.info(f"🧠 Stage 2.5: Classifying culinary roles for ingredients")
-        
-        ingredients_with_roles = []
-        for ingredient, nutrition_data in nutrition_per_100g.items():
-            role = self._classify_culinary_role(
-                ingredient_name=ingredient,
-                required_protein_source=required_protein_source,
-                nutrition_per_100g=nutrition_data
-            )
-            
-            ingredient_with_role = {
-                "name": ingredient,
-                "role": role.value,
-                "calories_per_100g": nutrition_data["calories_per_100g"],
-                "protein_per_100g": nutrition_data["protein_per_100g"],
-                "fat_per_100g": nutrition_data["fat_per_100g"],
-                "carbs_per_100g": nutrition_data["carbs_per_100g"],
-                "brand": nutrition_data.get("brand", "")
-            }
-            ingredients_with_roles.append(ingredient_with_role)
-            
-            logger.info(f"   • {ingredient}: {role.value}")
-        
-        # Validate role distribution
-        role_counts = {}
-        for ing in ingredients_with_roles:
-            role = ing["role"]
-            role_counts[role] = role_counts.get(role, 0) + 1
-        
-        logger.info(f"   Role distribution: {role_counts}")
-        
-        # Ensure we have at least one protein anchor (critical)
-        if role_counts.get(CulinaryRole.PROTEIN_ANCHOR.value, 0) == 0:
-            logger.warning(f"⚠️ No protein anchor detected! Adjusting classification...")
-            # Find the ingredient with highest protein and make it protein anchor
-            max_protein_ing = max(ingredients_with_roles, key=lambda x: x["protein_per_100g"])
-            max_protein_ing["role"] = CulinaryRole.PROTEIN_ANCHOR.value
-            logger.info(f"   Promoted '{max_protein_ing['name']}' to protein_anchor")
-        
-        logger.info(f"✅ Stage 2.5 complete: All ingredients classified by culinary role")
-        
-        # ======================================================================
-        # STAGE 3: Calculate portions using role-based strategy
-        # ======================================================================
-        max_refinement_attempts = 3  # Use validation feedback loop instead of many refinements
+        max_refinement_attempts = 5  # Increased from 3 to give more chances to hit targets
         portions_dict = None
-        culinary_reasoning = ""
         feedback_for_portions = None
         
         for refinement_attempt in range(max_refinement_attempts):
             # ==================================================================
-            # STAGE 3: Calculate portions using role-based strategy (Claude)
+            # STAGE 3: Calculate portions with nutrition data (Claude)
             # ==================================================================
             if refinement_attempt == 0:
-                logger.info(f"🧠 Stage 3: Calculating portions for {dish_name} using role-based strategy")
+                logger.info(f"🧠 Stage 3: Calculating portions for {dish_name} (WITH nutrition data)")
             else:
-                logger.info(f"🔄 Stage 3 (retry {refinement_attempt + 1}): Adjusting based on validation feedback")
+                logger.info(f"🔄 Stage 3 (attempt {refinement_attempt + 1}): Refining portions based on feedback")
             
-            # Build input with roles and optional feedback
-            stage3_input = {
-                "ingredients_with_roles": ingredients_with_roles,
-                "macro_targets": macro_targets
+            # Build prompt with nutrition data AND feedback
+            instruction_text = f"""Calculate portions to hit target macros for the COMPLETE MEAL.
+
+DISH NAME: {dish_name}
+TARGET MACROS FOR ENTIRE MEAL: {json.dumps(macro_targets)}
+NUTRITION DATA PER 100g FOR EACH INGREDIENT: {json.dumps(nutrition_per_100g, indent=2)}
+
+CULINARY LOGIC - Analyze ingredient roles:
+1. Identify what defines "{dish_name}" and determine each ingredient's role
+2. Assign portions by ROLE:
+   - MAIN/BASE: 100-200g (the core component that defines the dish)
+   - PROTEIN ({required_protein_source}): 100-200g meat/fish, 2-3 units eggs (100-150g), 150-250g dairy
+   - SUPPORTING: 30-100g (vegetables, grains, legumes)
+   - TOPPINGS: 5-30g (garnishes, nuts, seeds)
+   - OILS/SAUCES: 5-20g (dressings, cooking oils)
+
+PRACTICAL PORTIONS (humans must be able to measure):
+• DISCRETE items = WHOLE numbers only: eggs, slices, containers, units
+• FLEXIBLE items = any weight: vegetables, sauces, grains, oils, spreads
+• STRATEGY: Set discrete items to whole numbers first, then adjust flexible items to hit macros
+
+VERIFICATION:
+• Check portions create a balanced, recognizable version of "{dish_name}"
+• Ensure accompaniments are proportional to main components
+• Confirm all ingredient roles work together logically
+
+CALCULATE & ADJUST:
+1. Sum macros from logical portions
+2. Adjust FLEXIBLE ingredients iteratively (not discrete) to hit targets
+3. Return JSON: {{"ingredient": {{"portionSI(gram)": X, "household_measure": "text", "brand of pruduct": "brand"}}}}"""
+            
+            portion_prompt_data = {
+                "dish_name": dish_name,
+                "ingredients": ingredients_list,
+                "nutrition_per_100g": nutrition_per_100g,
+                "target_macros": macro_targets,
+                "instruction": instruction_text
             }
             
             if feedback_for_portions:
-                stage3_input["feedback_from_validation"] = feedback_for_portions
-                logger.info(f"   📋 Applying feedback: {feedback_for_portions[:200]}...")
+                portion_prompt_data["feedback"] = feedback_for_portions
             
             portion_result = self.calculate_portions(
                 dish_name=dish_name,
-                ingredients_with_roles=json.dumps(ingredients_with_roles, indent=2),
+                ingredients=json.dumps(portion_prompt_data),
                 macro_targets=json.dumps(macro_targets),
                 required_protein_source=required_protein_source
             )
             
-            culinary_reasoning = portion_result.culinary_reasoning
-            logger.info(f"   🤔 Culinary reasoning: {culinary_reasoning}")
-            
             # Parse portions JSON with better error handling
             try:
-                portions_dict = json.loads(portion_result.calculated_portions)
+                portions_dict = json.loads(portion_result.portions)
             except json.JSONDecodeError as e:
                 # Fallback: try parsing as Python dict literal
                 try:
                     import ast
-                    portions_dict = ast.literal_eval(portion_result.calculated_portions)
+                    portions_dict = ast.literal_eval(portion_result.portions)
                     logger.warning(f"⚠️ Portions were in Python format, converted to dict. Please check prompt.")
                 except Exception as e2:
                     logger.error(f"❌ Failed to parse portions JSON at Stage 3: {e}")
-                    logger.error(f"   Raw portions field: {portion_result.calculated_portions[:500]}")
+                    logger.error(f"   Raw portions field: {portion_result.portions[:500]}")
                     raise
             
-            logger.info(f"   ✅ Portions calculated for {len(portions_dict)} ingredients")
+            logger.info(f"✅ Stage 3 complete: Portions calculated for '{dish_name}' ({meal_type}) [{option_type.upper()}]")
             
             # ==================================================================
             # Calculate actual nutrition based on portions
@@ -1358,23 +1154,23 @@ Examples:
                 # Try correct field name first, fallback to old name
                 portion_grams = portion_info.get("portionSI(gram)", portion_info.get("portion_grams", 0))
                 
-                # Get the per-100g data from ingredients_with_roles
-                per_100g = None
-                for ing_role in ingredients_with_roles:
-                    if ing_role["name"] == ingredient:
-                        per_100g = ing_role
-                        break
+                # Get the per-100g data
+                per_100g = nutrition_per_100g.get(ingredient, {})
                 
-                if not per_100g:
-                    # Fallback to old nutrition_per_100g dict
-                    per_100g = nutrition_per_100g.get(ingredient, {})
-                
-                # Ensure brand is included
+                # Ensure brand is included - extract from ingredient name if missing from portion_info
                 brand_in_portion = portion_info.get("brand of pruduct", "").strip()
                 if not brand_in_portion:
-                    brand_from_stage2 = per_100g.get("brand", "")
+                    # Try to get brand from nutrition_per_100g (extracted in Stage 2)
+                    brand_from_stage2 = per_100g.get("brand", "").strip()
                     if brand_from_stage2:
                         portion_info["brand of pruduct"] = brand_from_stage2
+                        logger.info(f"   ✅ Added brand '{brand_from_stage2}' to portion info for '{ingredient}'")
+                    else:
+                        # Extract brand from ingredient name directly as fallback
+                        _, extracted_brand = self._extract_brand_from_ingredient(ingredient)
+                        if extracted_brand:
+                            portion_info["brand of pruduct"] = extracted_brand
+                            logger.info(f"   ✅ Extracted and added brand '{extracted_brand}' to portion info for '{ingredient}'")
                 
                 # Calculate scaled nutrition
                 scale_factor = portion_grams / 100.0
@@ -1388,127 +1184,93 @@ Examples:
                 }
             
             # ==================================================================
-            # STAGE 3.5: Validate meal with DSPy assertions
+            # Calculate totals and check if they match targets
             # ==================================================================
-            logger.info(f"🔍 Stage 3.5: Validating meal structure and macros")
+            total_calories = sum(ing.get("calories", 0) for ing in nutrition_data.values())
+            total_protein = sum(ing.get("protein", 0) for ing in nutrition_data.values())
+            total_fat = sum(ing.get("fat", 0) for ing in nutrition_data.values())
+            total_carbs = sum(ing.get("carbs", 0) for ing in nutrition_data.values())
             
-            # Build meal structure for validation
-            temp_meal = {
-                "meal_name": meal_type,
-                "meal_title": dish_name,
-                "ingredients": [
-                    {
-                        "item": ing_name,
-                        **ing_data
-                    }
-                    for ing_name, ing_data in nutrition_data.items()
-                ]
-            }
-            
-            # Calculate totals
-            total_calories = sum(ing.get("calories", 0) for ing in temp_meal["ingredients"])
-            total_protein = sum(ing.get("protein", 0) for ing in temp_meal["ingredients"])
-            total_fat = sum(ing.get("fat", 0) for ing in temp_meal["ingredients"])
-            total_carbs = sum(ing.get("carbs", 0) for ing in temp_meal["ingredients"])
-            total_weight = sum(ing.get("portionSI(gram)", ing.get("portion_grams", 0)) for ing in temp_meal["ingredients"])
-            
-            # Calculate allowed margins
             target_cals = macro_targets.get("calories", 0)
             target_protein = macro_targets.get("protein", 0)
             target_fat = macro_targets.get("fat", 0)
             target_carbs = macro_targets.get("carbs", 0)
             
-            allowed_margins = {
-                "calories": self._get_allowed_margin(target_cals),
-                "protein": self._get_allowed_margin(target_protein),
-                "fat": self._get_allowed_margin(target_fat),
-                "carbs": self._get_allowed_margin(target_carbs)
-            }
+            # Check if within acceptable range using dynamic margins
+            # Lower values get higher tolerance (e.g., 10g protein → 60%, 50g protein → 30%)
+            cals_ok = abs(total_calories - target_cals) / target_cals <= self._get_allowed_margin(target_cals) if target_cals > 0 else True
+            protein_ok = abs(total_protein - target_protein) / target_protein <= self._get_allowed_margin(target_protein) if target_protein > 0 else True
+            fat_ok = abs(total_fat - target_fat) / target_fat <= self._get_allowed_margin(target_fat) if target_fat > 0 else True
+            carbs_ok = abs(total_carbs - target_carbs) / target_carbs <= self._get_allowed_margin(target_carbs) if target_carbs > 0 else True
             
-            # DSPy Suggestions for culinary logic
-            try:
-                # Check 1: Total meal weight plausibility
-                dspy.Suggest(
-                    200 <= total_weight <= 800,
-                    f"Total meal weight ({total_weight:.0f}g) should be between 200-800g for realistic portion. "
-                    f"Consider adjusting portions proportionally."
-                )
-                
-                # Check 2: Fat ratio plausibility
-                fat_calories = total_fat * 9
-                fat_ratio = fat_calories / total_calories if total_calories > 0 else 0
-                dspy.Suggest(
-                    fat_ratio <= 0.45,
-                    f"Fat provides {fat_ratio*100:.0f}% of calories (should be <45%). "
-                    f"Reduce fat sources to maintain culinary balance."
-                )
-                
-                # Check 3: Protein anchor should be substantial
-                protein_anchor_portions = [
-                    ing["portionSI(gram)"] if "portionSI(gram)" in ing else ing.get("portion_grams", 0)
-                    for ing in temp_meal["ingredients"]
-                    for role_ing in ingredients_with_roles
-                    if role_ing["name"] == ing["item"] and role_ing["role"] == CulinaryRole.PROTEIN_ANCHOR.value
-                ]
-                if protein_anchor_portions:
-                    max_protein_portion = max(protein_anchor_portions)
-                    dspy.Suggest(
-                        max_protein_portion >= 80,
-                        f"Protein anchor portion ({max_protein_portion:.0f}g) seems small. "
-                        f"Consider increasing to at least 80-100g for a proper meal."
-                    )
-                
-            except Exception as assertion_error:
-                # DSPy suggestions failed - log but continue
-                logger.warning(f"⚠️ DSPy suggestion triggered: {assertion_error}")
-                # Don't break - let validation stage provide feedback
-            
-            # Call validation stage
-            validation_result = self.validate_meal(
-                dish_name=dish_name,
-                meal_plan=json.dumps(temp_meal, indent=2),
-                macro_targets=json.dumps(macro_targets),
-                allowed_margins=json.dumps(allowed_margins)
-            )
-            
-            # Parse validation result
-            try:
-                is_valid = validation_result.is_valid.strip().lower() in ["true", "yes", "valid"]
-            except:
-                is_valid = False
-            
-            validation_feedback = validation_result.feedback
-            
-            logger.info(f"   Validation: {'✅ VALID' if is_valid else '❌ INVALID'}")
-            logger.info(f"   Feedback: {validation_feedback}")
-            
-            if is_valid:
-                logger.info(f"✅ Stage 3 complete: Meal validated successfully!")
-                logger.info(f"   Totals: {total_calories:.0f}cal, {total_protein:.0f}g protein, {total_fat:.0f}g fat, {total_carbs:.0f}g carbs")
-                logger.info(f"   Targets: {target_cals}cal, {target_protein}g protein, {target_fat}g fat, {target_carbs}g carbs")
+            if cals_ok and protein_ok and fat_ok and carbs_ok:
+                logger.info(f"✅ Macro targets achieved for '{dish_name}' ({meal_type}) [{option_type.upper()}]: Calories: {total_calories:.1f}/{target_cals}, Protein: {total_protein:.1f}/{target_protein}g, Fat: {total_fat:.1f}/{target_fat}g, Carbs: {total_carbs:.1f}/{target_carbs}g")
                 break
             else:
-                # Validation failed - use feedback for next iteration
+                # If this is the last attempt, let Claude (Stage 4) handle the adjustment
                 if refinement_attempt == max_refinement_attempts - 1:
-                    logger.warning(f"⚠️ '{dish_name}' ({meal_type}) [{option_type.upper()}]: Validation failed after {refinement_attempt + 1} attempts.")
-                    logger.warning(f"   Proceeding to Stage 4 for final assembly and programmatic correction.")
-                    break
+                    logger.warning(f"⚠️ '{dish_name}' ({meal_type}) [{option_type.upper()}]: Portions still off after {refinement_attempt + 1} attempts. Letting Claude macro agent adjust portions directly.")
+                    break  # Let Stage 4 fix it
                 
-                # Prepare feedback for next portion calculation attempt
-                feedback_for_portions = f"""VALIDATION FAILED - ADJUST PORTIONS:
-
-{validation_feedback}
-
-CURRENT TOTALS:
-- Calories: {total_calories:.0f} (target: {target_cals})
-- Protein: {total_protein:.0f}g (target: {target_protein}g)
-- Fat: {total_fat:.0f}g (target: {target_fat}g)
-- Carbs: {total_carbs:.0f}g (target: {target_carbs}g)
-- Total weight: {total_weight:.0f}g
-
-Use the feedback above to recalculate portions."""
+                # Build detailed feedback for next iteration with FULL meal context
+                feedback_parts = []
+                if not cals_ok:
+                    diff = total_calories - target_cals
+                    feedback_parts.append(f"Calories: {total_calories:.1f} vs target {target_cals} ({diff:+.1f})")
+                if not protein_ok:
+                    diff = total_protein - target_protein
+                    feedback_parts.append(f"Protein: {total_protein:.1f}g vs target {target_protein}g ({diff:+.1f}g)")
+                if not fat_ok:
+                    diff = total_fat - target_fat
+                    feedback_parts.append(f"Fat: {total_fat:.1f}g vs target {target_fat}g ({diff:+.1f}g)")
+                if not carbs_ok:
+                    diff = total_carbs - target_carbs
+                    feedback_parts.append(f"Carbs: {total_carbs:.1f}g vs target {target_carbs}g ({diff:+.1f}g)")
                 
-                logger.warning(f"⚠️ Retry {refinement_attempt + 2}: Adjusting portions based on validation feedback")
+                # Build complete meal breakdown showing CURRENT STATE
+                current_meal_breakdown = []
+                current_meal_breakdown.append("CURRENT MEAL STATE:")
+                for ing_name, ing_data in nutrition_data.items():
+                    portion = ing_data.get("portionSI(gram)", ing_data.get("portion_grams", 0))
+                    cals = ing_data.get("calories", 0)
+                    prot = ing_data.get("protein", 0)
+                    fat_val = ing_data.get("fat", 0)
+                    carbs_val = ing_data.get("carbs", 0)
+                    current_meal_breakdown.append(
+                        f"  • {ing_name}: {portion}g → {cals:.1f}cal, {prot:.1f}g protein, {fat_val:.1f}g fat, {carbs_val:.1f}g carbs"
+                    )
+                
+                current_meal_breakdown.append(f"\nTOTALS: {total_calories:.1f}cal, {total_protein:.1f}g protein, {total_fat:.1f}g fat, {total_carbs:.1f}g carbs")
+                current_meal_breakdown.append(f"TARGETS: {target_cals}cal, {target_protein}g protein, {target_fat}g fat, {target_carbs}g carbs")
+                current_meal_breakdown.append("\nPROBLEMS:")
+                current_meal_breakdown.extend([f"  • {part}" for part in feedback_parts])
+                
+                # Add specific guidance on which ingredients to adjust
+                adjustment_guidance = []
+                adjustment_guidance.append("\nADJUSTMENT STRATEGY:")
+                if not fat_ok and total_fat > target_fat:
+                    # Find high-fat contributors
+                    fat_contributors = [(name, data.get("fat", 0), data.get("portionSI(gram)", data.get("portion_grams", 0))) 
+                                       for name, data in nutrition_data.items()]
+                    fat_contributors.sort(key=lambda x: x[1], reverse=True)
+                    top_fat = fat_contributors[:3]
+                    adjustment_guidance.append(f"  • Fat is too high. Top contributors: {', '.join([f'{name} ({fat}g fat from {portion}g)' for name, fat, portion in top_fat])}")
+                    adjustment_guidance.append(f"    → Reduce portions of these high-fat ingredients")
+                
+                if not protein_ok:
+                    if total_protein > target_protein:
+                        adjustment_guidance.append(f"  • Protein is too high. Reduce protein source portion.")
+                    else:
+                        adjustment_guidance.append(f"  • Protein is too low. Increase protein source portion.")
+                
+                if not carbs_ok:
+                    if total_carbs > target_carbs:
+                        adjustment_guidance.append(f"  • Carbs are too high. Reduce carb sources (bread, rice, etc.).")
+                    else:
+                        adjustment_guidance.append(f"  • Carbs are too low. Increase carb sources.")
+                
+                feedback_for_portions = "\n".join(current_meal_breakdown) + "\n" + "\n".join(adjustment_guidance)
+                logger.warning(f"⚠️ '{dish_name}' ({meal_type}) [{option_type.upper()}]: Macro targets not met on attempt {refinement_attempt + 1}: {feedback_parts}")
         
         # ======================================================================
         # STAGE 4: Assemble final meal JSON with validation (Claude + CoT)

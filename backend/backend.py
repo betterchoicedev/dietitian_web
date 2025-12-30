@@ -3305,7 +3305,7 @@ def _build_option_with_retries(
                 else:
                     issues = val.get("issues", [])
                     failed_meal = val.get("meal_data", {})
-                    logger.warning(f"⚠️ DSPy result failed validation for '{meal_name}', falling back to legacy approach")
+                    logger.warning(f"⚠️ DSPy result failed validation for '{meal_name}' [{option_type.upper()}], falling back to legacy approach")
                     logger.warning(f"   Validation issues: {issues}")
                     if failed_meal:
                         logger.warning(f"   Failed meal data: {json.dumps(failed_meal, ensure_ascii=False, indent=2)[:500]}...")
