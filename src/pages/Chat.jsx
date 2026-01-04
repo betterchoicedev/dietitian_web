@@ -12,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Image as ImageIcon, Send, Loader2, MessageSquare, InfoIcon, RefreshCw, Users, X, CheckCircle, Clock, Calendar, Edit, Trash2, UtensilsCrossed, Dumbbell } from 'lucide-react';
+import { Image as ImageIcon, Send, Loader2, MessageSquare, InfoIcon, RefreshCw, Users, X, CheckCircle, Clock, Calendar, Edit, Trash2, UtensilsCrossed, Dumbbell, Music } from 'lucide-react';
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/lib/supabase';
@@ -1618,6 +1618,82 @@ Your task is to respond to the user's message below, taking into account their s
   };
 
 
+  // Helper function to normalize data URI with proper MIME type
+  const normalizeDataUri = (dataUri, mediaType) => {
+    if (!dataUri || !dataUri.startsWith('data:')) {
+      return dataUri;
+    }
+    
+    // If it already has a proper MIME type, return as is
+    if (dataUri.match(/^data:[a-z]+\/[a-z0-9+-]+;base64,/)) {
+      return dataUri;
+    }
+    
+    // Fix data:audio;base64, to have a proper MIME type
+    if (mediaType === 'audio' && dataUri.startsWith('data:audio;base64,')) {
+      // Try to detect audio format from base64 data
+      try {
+        const commaIndex = dataUri.indexOf(',');
+        if (commaIndex === -1) {
+          // No comma found, return as is
+          return dataUri;
+        }
+        
+        const base64Data = dataUri.substring(commaIndex + 1);
+        if (!base64Data || base64Data.length < 4) {
+          // Not enough data, use default
+          return dataUri.replace('data:audio;base64,', 'data:audio/ogg;base64,');
+        }
+        
+        // Decode first few bytes to detect format (need at least 4 bytes for header detection)
+        const sampleSize = Math.min(100, base64Data.length);
+        const binaryString = atob(base64Data.substring(0, sampleSize));
+        
+        if (binaryString.length < 4) {
+          // Not enough decoded data, use default
+          return dataUri.replace('data:audio;base64,', 'data:audio/ogg;base64,');
+        }
+        
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        // Check for Opus (OggS header) - most common for WhatsApp audio
+        if (bytes.length >= 4 && bytes[0] === 0x4F && bytes[1] === 0x67 && bytes[2] === 0x67 && bytes[3] === 0x53) {
+          console.log('✅ Detected Ogg/Opus audio format');
+          return dataUri.replace('data:audio;base64,', 'data:audio/ogg;base64,');
+        }
+        // Check for MP3 (ID3 tag or MPEG header)
+        if (bytes.length >= 3 && ((bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) || 
+            (bytes[0] === 0xFF && (bytes[1] & 0xE0) === 0xE0))) {
+          console.log('✅ Detected MP3 audio format');
+          return dataUri.replace('data:audio;base64,', 'data:audio/mpeg;base64,');
+        }
+        // Check for WAV (RIFF header)
+        if (bytes.length >= 4 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) {
+          console.log('✅ Detected WAV audio format');
+          return dataUri.replace('data:audio;base64,', 'data:audio/wav;base64,');
+        }
+        // Default to ogg for unknown audio (most compatible, especially for Opus)
+        console.log('⚠️ Unknown audio format, defaulting to audio/ogg');
+        return dataUri.replace('data:audio;base64,', 'data:audio/ogg;base64,');
+      } catch (e) {
+        console.warn('⚠️ Failed to detect audio format, using default (audio/ogg):', e);
+        // Default to ogg format (most compatible for Opus audio)
+        return dataUri.replace('data:audio;base64,', 'data:audio/ogg;base64,');
+      }
+    }
+    
+    // Fix data:image;base64, to have a proper MIME type
+    if (mediaType === 'image' && dataUri.startsWith('data:image;base64,')) {
+      // Default to PNG for images
+      return dataUri.replace('data:image;base64,', 'data:image/png;base64,');
+    }
+    
+    return dataUri;
+  };
+
   // Function to render message content with files (images, videos, etc.)
   const renderMessageContent = (msg) => {
     // Support both 'message' (database column) and 'content' (local state) fields
@@ -1650,8 +1726,127 @@ Your task is to respond to the user's message below, taking into account their s
     const hasContentImage = imageUrl;
     const isFromDietitian = isDietitianMessage(msg);
 
+    // Check for base64 image or audio in message column (when topic is 'image' or 'audio')
+    const topic = msg.topic;
+    const topicLower = topic ? topic.toLowerCase() : '';
+    // Check both message and content columns for base64 data
+    const messageData = msg.message || msg.content || '';
+    const trimmedMessageData = messageData.trim();
+    
+    // Check for base64 image (supports: data:image/png;base64, data:image/jpeg;base64, data:image;base64, etc.)
+    // Use case-insensitive topic check
+    const hasBase64Image = topicLower === 'image' && trimmedMessageData.startsWith('data:image');
+    
+    // Check for base64 audio (supports: data:audio;base64, data:audio/ogg;base64, data:audio/mpeg;base64, etc.)
+    // Use case-insensitive topic check
+    const hasBase64Audio = topicLower === 'audio' && trimmedMessageData.startsWith('data:audio');
+    
+    // Normalize data URIs to have proper MIME types
+    const normalizedImageData = hasBase64Image ? normalizeDataUri(trimmedMessageData, 'image') : null;
+    const normalizedAudioData = hasBase64Audio ? normalizeDataUri(trimmedMessageData, 'audio') : null;
+    
+    // Debug logging for troubleshooting
+    if (topicLower === 'image' || topicLower === 'audio') {
+      console.log('🎨 Base64 media detection:', {
+        topic,
+        topicLower,
+        hasMessage: !!msg.message,
+        hasContent: !!msg.content,
+        messageLength: trimmedMessageData.length,
+        messagePreview: trimmedMessageData.substring(0, 100),
+        startsWithDataImage: trimmedMessageData.startsWith('data:image'),
+        startsWithDataAudio: trimmedMessageData.startsWith('data:audio'),
+        hasBase64Image,
+        hasBase64Audio
+      });
+    }
+
     return (
       <>
+        {/* Show base64 image from message column (when topic is 'image') */}
+        {hasBase64Image && (
+          <div className="mb-3">
+            {normalizedImageData ? (
+              <img
+                src={normalizedImageData}
+                alt="Client image"
+                className="rounded-lg max-w-full max-h-64 object-cover shadow-sm border border-gray-200 cursor-pointer hover:opacity-90 transition-opacity duration-200"
+                onClick={() => handleImageClick(normalizedImageData)}
+                onError={(e) => {
+                  console.error('❌ Failed to load base64 image from message:', {
+                    topic,
+                    originalLength: trimmedMessageData.length,
+                    normalizedLength: normalizedImageData.length,
+                    originalPreview: trimmedMessageData.substring(0, 100),
+                    normalizedPreview: normalizedImageData.substring(0, 100),
+                    error: e
+                  });
+                }}
+              />
+            ) : (
+              <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm">
+                Image data not found
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Show base64 audio from message column (when topic is 'audio') */}
+        {hasBase64Audio && (
+          <div className="mb-3">
+            {normalizedAudioData ? (
+              <div className="flex items-center gap-3 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex-shrink-0 w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center shadow-md">
+                  <Music className="w-6 h-6 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+                    <span>🎵 Audio Message</span>
+                  </div>
+                  <audio
+                    src={normalizedAudioData}
+                    controls
+                    className="w-full h-10"
+                    preload="metadata"
+                    style={{ 
+                      outline: 'none',
+                      borderRadius: '8px'
+                    }}
+                    onError={(e) => {
+                      console.error('❌ Failed to load base64 audio from message:', {
+                        topic,
+                        originalLength: trimmedMessageData.length,
+                        normalizedLength: normalizedAudioData.length,
+                        originalPreview: trimmedMessageData.substring(0, 100),
+                        normalizedPreview: normalizedAudioData.substring(0, 100),
+                        error: e
+                      });
+                    }}
+                    onLoadedMetadata={(e) => {
+                      console.log('✅ Audio loaded successfully:', {
+                        duration: e.target.duration,
+                        readyState: e.target.readyState,
+                        format: normalizedAudioData.substring(5, normalizedAudioData.indexOf(';'))
+                      });
+                    }}
+                    onCanPlay={(e) => {
+                      console.log('✅ Audio can play:', {
+                        readyState: e.target.readyState
+                      });
+                    }}
+                  >
+                    Your browser does not support the audio tag.
+                  </audio>
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm">
+                Audio data not found
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Show file attachment (image, video, etc.) */}
         {fileUrl && fileType === 'image' && (
           <div className="mb-3">
@@ -1736,38 +1931,50 @@ Your task is to respond to the user's message below, taking into account their s
         )}
 
         {/* Show text content with different formatting based on message type */}
-        {isFromDietitian ? (
-          <div className="space-y-1">
-            {/* Extract dietitian name and message content */}
-            {(() => {
-              const colonIndex = text.indexOf(': ');
-              if (colonIndex !== -1) {
-                const dietitianName = text.substring(0, colonIndex);
-                const messageContent = text.substring(colonIndex + 2);
+        {/* Show text normally if it exists and there's no base64 media */}
+        {/* Also check that text is not base64 data itself */}
+        {text && text.trim() && !hasBase64Image && !hasBase64Audio && 
+         !text.startsWith('data:image') && !text.startsWith('data:audio') && 
+         text !== trimmedMessageData && (
+          isFromDietitian ? (
+            <div className="space-y-1">
+              {/* Extract dietitian name and message content */}
+              {(() => {
+                const colonIndex = text.indexOf(': ');
+                if (colonIndex !== -1) {
+                  const dietitianName = text.substring(0, colonIndex);
+                  const messageContent = text.substring(colonIndex + 2);
 
-                return (
-                  <>
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-6 h-6 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-full flex items-center justify-center shadow-sm">
-                        <div className="w-2 h-2 bg-white rounded-full"></div>
+                  return (
+                    <>
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-6 h-6 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-full flex items-center justify-center shadow-sm">
+                          <div className="w-2 h-2 bg-white rounded-full"></div>
+                        </div>
+                        <span className="text-sm font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg">
+                          {dietitianName}
+                        </span>
                       </div>
-                      <span className="text-sm font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg">
-                        {dietitianName}
-                      </span>
-                    </div>
-                    <div className="whitespace-pre-wrap text-slate-800 leading-relaxed pl-8 border-l-2 border-emerald-200 text-sm">
-                      {messageContent}
-                    </div>
-                  </>
-                );
-              } else {
-                // Fallback if no colon found
-                return <div className="whitespace-pre-wrap text-sm leading-relaxed">{text}</div>;
-              }
-            })()}
+                      <div className="whitespace-pre-wrap text-slate-800 leading-relaxed pl-8 border-l-2 border-emerald-200 text-sm">
+                        {messageContent}
+                      </div>
+                    </>
+                  );
+                } else {
+                  // Fallback if no colon found
+                  return <div className="whitespace-pre-wrap text-sm leading-relaxed">{text}</div>;
+                }
+              })()}
+            </div>
+          ) : (
+            <div className="whitespace-pre-wrap text-sm leading-relaxed">{text}</div>
+          )
+        )}
+        {/* Show text as caption for base64 image/audio messages only if text exists and is not the base64 data itself */}
+        {text && text.trim() && (hasBase64Image || hasBase64Audio) && !text.startsWith('data:image') && !text.startsWith('data:audio') && (
+          <div className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-600 italic">
+            {text}
           </div>
-        ) : (
-          <div className="whitespace-pre-wrap text-sm leading-relaxed">{text}</div>
         )}
       </>
     );

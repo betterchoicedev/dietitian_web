@@ -74,34 +74,44 @@ const sendMealPlanActivationNotification = async (userCode, mealPlanName, client
     
     console.log('📝 Notification message to send:', notificationMessage);
 
-    // Add notification to user_message_queue table
-    const { data, error } = await supabase
-      .from('user_message_queue')
-      .insert({
-        user_id: clientId,
-        user_code: userCode,
-        message_type: 'system_reminder',
-        message_content: notificationMessage,
-        message_priority: 1, // High priority for meal plan notifications
-        scheduled_for: new Date().toISOString(),
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        trigger_type: 'immediate',
-        context_data: {
-          notification_type: 'meal_plan_activation',
-          meal_plan_name: mealPlanName
-        },
-        status: 'pending'
-      })
-      .select()
+    // Get phone number from chat_users table
+    const { data: clientData, error: clientError } = await supabase
+      .from('chat_users')
+      .select('phone_number')
+      .eq('user_code', userCode)
       .single();
 
-    if (error) {
-      console.error('Error adding meal plan notification to user_message_queue:', error);
-      throw error;
+    if (clientError || !clientData?.phone_number) {
+      console.error('Error fetching phone number from chat_users:', clientError);
+      throw new Error(`Failed to get phone number for user ${userCode}`);
     }
 
-    console.log('✅ Meal plan activation notification sent successfully:', data);
-    return data;
+    const phoneNumber = clientData.phone_number;
+
+    // Prepare the API request body
+    const requestBody = {
+      phone_number: phoneNumber,
+      message: notificationMessage
+    };
+
+    // Send message via external API
+    const response = await fetch('https://api-gw.eu-prod.betterchoice.one/whapi/send-external-message', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Error sending message via API:', response.status, errorText);
+      throw new Error(`API error: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ Meal plan activation notification sent successfully via external API:', result);
+    return result;
   } catch (error) {
     console.error('Failed to send meal plan activation notification:', error);
     // Don't throw error to avoid breaking the main flow
@@ -299,29 +309,6 @@ const checkAndSendFutureMealPlanNotifications = async () => {
     // Send notifications for each future meal plan
     for (const mealPlan of futureMealPlans) {
       try {
-        // Check if we already sent a notification for this meal plan today
-        const today = new Date().toISOString().split('T')[0];
-        const { data: existingNotification, error: checkError } = await supabase
-          .from('user_message_queue')
-          .select('id')
-          .eq('user_code', mealPlan.user_code)
-          .eq('message_type', 'system_reminder')
-          .eq('context_data->notification_type', 'future_meal_plan_advance')
-          .eq('context_data->meal_plan_name', mealPlan.meal_plan_name || 'Untitled Meal Plan')
-          .gte('scheduled_for', `${today}T00:00:00.000Z`)
-          .lt('scheduled_for', `${today}T23:59:59.999Z`)
-          .limit(1);
-        
-        if (checkError) {
-          console.error('Error checking existing notifications:', checkError);
-          continue;
-        }
-        
-        if (existingNotification && existingNotification.length > 0) {
-          console.log(`📬 Notification already sent today for meal plan: ${mealPlan.meal_plan_name}`);
-          continue;
-        }
-        
         // Get client ID for notification
         const { data: clientData, error: clientError } = await supabase
           .from('chat_users')
@@ -375,35 +362,44 @@ const sendFutureMealPlanNotification = async (userCode, mealPlanName, clientId, 
     
     console.log('📝 Future notification message to send:', notificationMessage);
 
-    // Add notification to user_message_queue table
-    const { data, error } = await supabase
-      .from('user_message_queue')
-      .insert({
-        user_id: clientId,
-        user_code: userCode,
-        message_type: 'system_reminder',
-        message_content: notificationMessage,
-        message_priority: 2, // Medium priority for advance notifications
-        scheduled_for: new Date().toISOString(),
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        trigger_type: 'immediate',
-        context_data: {
-          notification_type: 'future_meal_plan_advance',
-          meal_plan_name: mealPlanName,
-          activation_date: activationDate
-        },
-        status: 'pending'
-      })
-      .select()
+    // Get phone number from chat_users table
+    const { data: clientData, error: clientError } = await supabase
+      .from('chat_users')
+      .select('phone_number')
+      .eq('user_code', userCode)
       .single();
 
-    if (error) {
-      console.error('Error adding future meal plan notification to user_message_queue:', error);
-      throw error;
+    if (clientError || !clientData?.phone_number) {
+      console.error('Error fetching phone number from chat_users:', clientError);
+      throw new Error(`Failed to get phone number for user ${userCode}`);
     }
 
-    console.log('✅ Future meal plan notification sent successfully:', data);
-    return data;
+    const phoneNumber = clientData.phone_number;
+
+    // Prepare the API request body
+    const requestBody = {
+      phone_number: phoneNumber,
+      message: notificationMessage
+    };
+
+    // Send message via external API
+    const response = await fetch('https://api-gw.eu-prod.betterchoice.one/whapi/send-external-message', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Error sending message via API:', response.status, errorText);
+      throw new Error(`API error: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ Future meal plan notification sent successfully via external API:', result);
+    return result;
   } catch (error) {
     console.error('Failed to send future meal plan notification:', error);
   }
@@ -3725,30 +3721,6 @@ const MenuLoad = () => {
         // Send notifications for each future meal plan
         for (const mealPlan of futureMealPlans) {
           try {
-            // Check if we already sent a notification for this meal plan today
-            const today = new Date().toISOString().split('T')[0];
-            const { data: existingNotification, error: checkError } = await supabase
-              .from('user_message_queue')
-              .select('id')
-              .eq('user_code', mealPlan.user_code)
-              .eq('message_type', 'system_reminder')
-              .eq('context_data->notification_type', 'future_meal_plan_advance')
-              .eq('context_data->meal_plan_name', mealPlan.meal_plan_name || 'Untitled Meal Plan')
-              .gte('scheduled_for', `${today}T00:00:00.000Z`)
-              .lt('scheduled_for', `${today}T23:59:59.999Z`)
-              .limit(1);
-            
-            if (checkError) {
-              console.error('Error checking existing notifications:', checkError);
-              errors++;
-              continue;
-            }
-            
-            if (existingNotification && existingNotification.length > 0) {
-              console.log(`📬 Notification already sent today for meal plan: ${mealPlan.meal_plan_name}`);
-              continue;
-            }
-            
             // Get client ID for notification
             const { data: clientData, error: clientError } = await supabase
               .from('chat_users')
@@ -3839,6 +3811,23 @@ const MenuLoad = () => {
           } else {
             console.log(`✅ Updated expired menu: ${menu.meal_plan_name}`);
             updatedCount++;
+            
+            // Also delete from second Supabase client_meal_plans table
+            try {
+              const { error: deleteSecondDbError } = await secondSupabase
+                .from('client_meal_plans')
+                .delete()
+                .eq('original_meal_plan_id', menu.id);
+              
+              if (deleteSecondDbError) {
+                console.error(`Error deleting expired meal plan ${menu.id} from client_meal_plans:`, deleteSecondDbError);
+                // Don't increment errorCount as main update succeeded
+              } else {
+                console.log(`✅ Deleted expired meal plan ${menu.id} from client_meal_plans table`);
+              }
+            } catch (deleteError) {
+              console.error(`Error deleting expired meal plan ${menu.id} from client_meal_plans:`, deleteError);
+            }
           }
         }
 
