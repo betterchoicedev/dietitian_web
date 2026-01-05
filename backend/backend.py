@@ -51,6 +51,14 @@ from google.cloud import storage
 from google.oauth2 import service_account
 from werkzeug.utils import secure_filename
 
+# Import supabase_api blueprint
+try:
+    from supabase_api import supabase_bp
+    SUPABASE_API_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"supabase_api module not available: {e}")
+    SUPABASE_API_AVAILABLE = False
+
 
 
 
@@ -94,6 +102,11 @@ CORS(
     resources={r"/api/*": {"origins": allowed_origins}},
     supports_credentials=True,
 )
+
+# Register blueprints
+if SUPABASE_API_AVAILABLE:
+    app.register_blueprint(supabase_bp)
+    logger.info("Registered supabase_api blueprint at /api/db")
 
 
 
