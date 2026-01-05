@@ -1932,10 +1932,11 @@ Your task is to respond to the user's message below, taking into account their s
 
         {/* Show text content with different formatting based on message type */}
         {/* Show text normally if it exists and there's no base64 media */}
-        {/* Also check that text is not base64 data itself */}
-        {text && text.trim() && !hasBase64Image && !hasBase64Audio && 
+        {/* For base64 media messages, only show text if it's different from the base64 data (caption) */}
+        {/* For regular messages (not base64 media), always show text if it exists */}
+        {text && text.trim() && 
          !text.startsWith('data:image') && !text.startsWith('data:audio') && 
-         text !== trimmedMessageData && (
+         ((!hasBase64Image && !hasBase64Audio) || (text !== trimmedMessageData)) && (
           isFromDietitian ? (
             <div className="space-y-1">
               {/* Extract dietitian name and message content */}
