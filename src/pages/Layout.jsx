@@ -25,7 +25,9 @@ import {
   Apple,
   LayoutDashboard,
   Dumbbell,
-  Shield
+  Shield,
+  ExternalLink,
+  Copy
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -52,14 +54,25 @@ import { Input } from '@/components/ui/input';
 import SystemMessageModal from '@/components/SystemMessageModal';
 import { useSystemMessages } from '@/hooks/useSystemMessages';
 import { getMyProfile } from '@/utils/auth';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { useToast } from '@/components/ui/use-toast';
+import QRCode from 'react-qr-code';
+import { Textarea } from '@/components/ui/textarea';
 
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, signOut } = useAuth();
-  const { language, translations, toggleLanguage } = useLanguage();
+  const { language, translations, toggleLanguage, isRTL } = useLanguage();
   const { clients, selectedUserCode, selectClient, isLoading: clientsLoading } = useClient();
   const { unreadCount, refreshCount } = useSystemMessages();
+  const { toast } = useToast();
   
   // Debug: log unread count changes
   useEffect(() => {
@@ -75,6 +88,8 @@ export default function Layout() {
   const [isClientSelectOpen, setIsClientSelectOpen] = useState(false);
   const dataLoadedRef = useRef(false);
   const [userProfile, setUserProfile] = useState(null);
+  const [referralLinkDialogOpen, setReferralLinkDialogOpen] = useState(false);
+  const qrCodeRef = useRef(null);
 
   // Debug sidebar state changes
   useEffect(() => {
@@ -229,6 +244,196 @@ export default function Layout() {
     }
   };
 
+  const generateClientReferralLink = () => {
+    if (!userProfile?.id) return '';
+    // Encode the dietitian ID in base64 and use hash fragment to hide it from URL when copying
+    // The signup page needs to read window.location.hash to get the ID
+    const encodedId = btoa(userProfile.id);
+    return `https://betterchoice.one/signup#d=${encodedId}`;
+  };
+
+  const handleCopyReferralLink = async () => {
+    const link = generateClientReferralLink();
+    if (!link) {
+      toast({
+        title: translations?.error || 'Error',
+        description: translations?.unableToGenerateLink || 'Unable to generate referral link.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(link);
+      toast({
+        title: translations?.copied || 'Copied',
+        description: translations?.referralLinkCopied || 'Client referral link copied to clipboard.',
+      });
+    } catch (err) {
+      console.error('❌ Failed to copy referral link:', err);
+      toast({
+        title: translations?.error || 'Error',
+        description: translations?.copyFailed || 'Unable to copy the referral link.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleCopyQRCodeImage = async () => {
+    try {
+      const qrContainer = qrCodeRef.current;
+      if (!qrContainer) {
+        throw new Error('QR code container not found');
+      }
+
+      const svgElement = qrContainer.querySelector('svg');
+      if (!svgElement) {
+        throw new Error('QR code SVG not found');
+      }
+
+      // Get SVG as string with explicit dimensions
+      const svgData = new XMLSerializer().serializeToString(svgElement);
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+
+      // Create an image to convert SVG to canvas
+      const img = new Image();
+      const qrDisplaySize = 180; // QR code size
+      const canvasWidth = 500;
+      const canvasHeight = 650;
+      const padding = 50;
+      
+      // Brand colors from landing page
+      const tealGreen = '#14B8A6'; // Bright teal-green for brand name
+      const darkTeal = '#0D9488'; // Darker teal
+      const darkBlue = '#0F172A'; // Dark blue-black
+      const white = '#FFFFFF';
+      
+      img.onload = async () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = canvasWidth;
+          canvas.height = canvasHeight;
+          const ctx = canvas.getContext('2d');
+          
+          // Draw gradient background (teal-green to dark blue)
+          const gradient = ctx.createLinearGradient(0, 0, 0, canvasHeight);
+          gradient.addColorStop(0, darkTeal);
+          gradient.addColorStop(0.5, '#0F4C5C');
+          gradient.addColorStop(1, darkBlue);
+          ctx.fillStyle = gradient;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          // Add brand name at top with teal-green color
+          ctx.fillStyle = tealGreen;
+          ctx.font = 'bold 36px Inter, system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+          ctx.fillText('BetterChoice AI', canvasWidth / 2, 40);
+          
+          // Add main heading in white
+          ctx.fillStyle = white;
+          ctx.font = 'bold 28px Inter, system-ui, sans-serif';
+          ctx.fillText('Sign Up', canvasWidth / 2, 90);
+          
+          // Add subtitle
+          ctx.font = '18px Inter, system-ui, sans-serif';
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+          ctx.fillText('Scan to get started', canvasWidth / 2, 125);
+          
+          // Draw white rounded rectangle for QR code area with shadow effect
+          const whiteAreaY = 170;
+          const whiteAreaHeight = qrDisplaySize + (padding * 2);
+          const whiteAreaWidth = qrDisplaySize + (padding * 2);
+          const whiteAreaX = (canvasWidth - whiteAreaWidth) / 2;
+          const borderRadius = 20;
+          
+          // Shadow
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+          ctx.shadowBlur = 20;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 10;
+          
+          ctx.fillStyle = white;
+          ctx.beginPath();
+          ctx.moveTo(whiteAreaX + borderRadius, whiteAreaY);
+          ctx.arcTo(whiteAreaX + whiteAreaWidth, whiteAreaY, whiteAreaX + whiteAreaWidth, whiteAreaY + borderRadius, borderRadius);
+          ctx.arcTo(whiteAreaX + whiteAreaWidth, whiteAreaY + whiteAreaHeight, whiteAreaX + whiteAreaWidth - borderRadius, whiteAreaY + whiteAreaHeight, borderRadius);
+          ctx.arcTo(whiteAreaX, whiteAreaY + whiteAreaHeight, whiteAreaX, whiteAreaY + whiteAreaHeight - borderRadius, borderRadius);
+          ctx.arcTo(whiteAreaX, whiteAreaY, whiteAreaX + borderRadius, whiteAreaY, borderRadius);
+          ctx.closePath();
+          ctx.fill();
+          
+          // Reset shadow
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+          
+          // Draw the QR code in the center of white area
+          const qrX = whiteAreaX + padding;
+          const qrY = whiteAreaY + padding;
+          ctx.drawImage(img, qrX, qrY, qrDisplaySize, qrDisplaySize);
+          
+          // Add footer text
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+          ctx.font = '16px Inter, system-ui, sans-serif';
+          ctx.fillText('betterchoice.one', canvasWidth / 2, whiteAreaY + whiteAreaHeight + 40);
+          
+          // Convert canvas to blob and copy
+          canvas.toBlob(async (blob) => {
+            try {
+              if (!blob) {
+                throw new Error('Failed to create image blob');
+              }
+              await navigator.clipboard.write([
+                new ClipboardItem({ 'image/png': blob })
+              ]);
+              toast({
+                title: translations?.copied || 'Copied',
+                description: translations?.qrCodeCopied || 'QR code image copied to clipboard.',
+              });
+            } catch (err) {
+              console.error('❌ Failed to copy QR code image:', err);
+              toast({
+                title: translations?.error || 'Error',
+                description: translations?.copyFailed || 'Unable to copy the QR code image.',
+                variant: 'destructive',
+              });
+            } finally {
+              URL.revokeObjectURL(url);
+            }
+          }, 'image/png');
+        } catch (err) {
+          console.error('❌ Failed to process QR code image:', err);
+          toast({
+            title: translations?.error || 'Error',
+            description: translations?.copyFailed || 'Unable to copy the QR code image.',
+            variant: 'destructive',
+          });
+          URL.revokeObjectURL(url);
+        }
+      };
+      
+      img.onerror = () => {
+        toast({
+          title: translations?.error || 'Error',
+          description: translations?.copyFailed || 'Unable to copy the QR code image.',
+          variant: 'destructive',
+        });
+        URL.revokeObjectURL(url);
+      };
+      
+      img.src = url;
+    } catch (err) {
+      console.error('❌ Failed to copy QR code image:', err);
+      toast({
+        title: translations?.error || 'Error',
+        description: translations?.copyFailed || 'Unable to copy the QR code image.',
+        variant: 'destructive',
+      });
+    }
+  };
+
   // Filter clients based on search term (search both name and user_code)
   const filteredClients = clients.filter(client => {
     const searchTerm = clientSearchTerm.toLowerCase();
@@ -263,6 +468,67 @@ export default function Layout() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
       {/* System Message Modal */}
       <SystemMessageModal />
+
+      {/* Client Referral Link Dialog */}
+      <Dialog open={referralLinkDialogOpen} onOpenChange={setReferralLinkDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ExternalLink className="h-5 w-5 text-primary" />
+              {translations?.clientReferralLink || 'Client Referral Link'}
+            </DialogTitle>
+            <DialogDescription>
+              {translations?.clientReferralLinkSubtitle ||
+                'Generate a link to share with clients. When they sign up using this link, they will automatically be assigned to you.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start">
+              <div className="flex-1">
+                <Input
+                  value={generateClientReferralLink()}
+                  readOnly
+                  className="font-mono text-sm"
+                  onClick={(e) => e.target.select()}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {translations?.referralLinkHint ||
+                    'Click to select and copy, or use the copy button. Clients who sign up using this link will be automatically assigned to you.'}
+                </p>
+                <Button
+                  onClick={handleCopyReferralLink}
+                  className="mt-4 gap-2"
+                  disabled={!userProfile?.id}
+                >
+                  <Copy className="h-4 w-4" />
+                  {translations?.copyLink || 'Copy Link'}
+                </Button>
+              </div>
+              {userProfile?.id && (
+                <div className={cn("flex flex-col items-center gap-2", isRTL ? "md:mr-4" : "md:ml-4")}>
+                  <div ref={qrCodeRef} className="bg-white p-3 rounded-lg border border-gray-200">
+                    <QRCode
+                      value={generateClientReferralLink()}
+                      size={128}
+                      style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                      viewBox={`0 0 256 256`}
+                    />
+                  </div>
+                  <Button
+                    onClick={handleCopyQRCodeImage}
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    {translations?.copyQRCode || 'Copy QR Code'}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       
       {/* Header */}
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-white/80 backdrop-blur-xl shadow-sm">
@@ -553,7 +819,17 @@ export default function Layout() {
         </nav>
         
         {/* Sidebar Footer */}
-        <div className="absolute bottom-4 left-4 right-4 hidden md:block">
+        <div className="absolute bottom-4 left-4 right-4 hidden md:block space-y-3">
+          <Button 
+            className="w-full h-11 bg-gradient-to-r from-primary to-primary-lighter hover:from-primary/90 hover:to-primary-lighter/90 text-white shadow-md hover:shadow-lg transition-all duration-300 font-medium"
+            onClick={() => {
+              setReferralLinkDialogOpen(true);
+              setSidebarOpen(false);
+            }}
+          >
+            <ExternalLink className="mr-2 h-4 w-4" />
+            {translations.clientReferralLink || 'Client Referral Link'}
+          </Button>
           <div className="bg-gradient-to-r from-primary/10 to-success/10 rounded-xl p-4 border border-primary/20">
             <div className="flex items-center gap-3">
               <div className="w-2 h-2 bg-success rounded-full animate-pulse-glow"></div>

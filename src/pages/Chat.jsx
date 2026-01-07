@@ -3,7 +3,7 @@ import { ChatUser, ChatMessage, ChatConversation } from '@/api/entities';
 import { Menu } from '@/api/entities';
 import { Client } from '@/api/entities';
 import { User } from '@/api/entities';
-import { InvokeLLM, UploadFile } from '@/api/integrations';
+import { UploadFile } from '@/api/integrations';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useClient } from '@/contexts/ClientContext';
 import { Button } from '@/components/ui/button';
@@ -517,32 +517,7 @@ export default function Chat() {
     }
   };
 
-  // Test function to manually trigger auto-refresh
-  const testAutoRefresh = async () => {
-    if (!selectedClient?.user_code || !conversationId) return;
-    
-    try {
-      console.log('🧪 Testing auto-refresh manually...');
-      const latestMessages = await ChatMessage.listByConversation(conversationId, { limit: 20 });
-      // Reverse to show oldest at top, newest at bottom
-      const reversedMessages = filterValidMessages(latestMessages.reverse());
-      
-      if (reversedMessages.length > messages.length) {
-        console.log(`🧪 Test: New messages detected! Old: ${messages.length}, New: ${reversedMessages.length}`);
-        setMessages(reversedMessages);
-        // Only update firstMessageId if we don't have one yet (initial load)
-        if (!firstMessageId) {
-          setFirstMessageId(reversedMessages.length > 0 ? reversedMessages[0].id : null);
-        }
-        setHasMoreMessages(latestMessages.length === 20);
-        setLastRefreshTime(new Date());
-      } else {
-        console.log('🧪 Test: No new messages found');
-      }
-    } catch (error) {
-      console.error('Test auto-refresh failed:', error);
-    }
-  };
+ 
 
   // Fetch scheduled reminders for the selected client
   const fetchScheduledReminders = async () => {
@@ -1037,7 +1012,7 @@ export default function Chat() {
         return;
       }
 
-      // Regular user message flow (AI response)
+      // Regular user message flow - just store the message
       // Create the user message object
       let userMessage = { 
         role: 'user', 
@@ -1093,325 +1068,6 @@ export default function Chat() {
       setMessages(prev => [storedUserMessage, ...prev]);
       setHasNewMessages(false); // Clear new message indicator when user sends a message
 
-      // Prepare chat history for AI prompt (include stored message)
-      const chatHistoryForPrompt = [storedUserMessage, ...messages]
-        .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
-        .join('\n');
-
-      // Prepare comprehensive client profile for AI context
-      const clientProfile = {
-        name: selectedClient.full_name,
-        user_code: selectedClient.user_code,
-        // Personal information
-        ...(selectedClient.age && { age: selectedClient.age }),
-        ...(selectedClient.date_of_birth && { date_of_birth: selectedClient.date_of_birth }),
-        ...(selectedClient.gender && { gender: selectedClient.gender }),
-        ...(selectedClient.weight_kg && { weight_kg: selectedClient.weight_kg }),
-        ...(selectedClient.height_cm && { height_cm: selectedClient.height_cm }),
-        ...(selectedClient.user_language && { user_language: selectedClient.user_language }),
-
-        // Health and dietary information
-        ...(selectedClient.food_allergies && { food_allergies: selectedClient.food_allergies }),
-        ...(selectedClient.food_limitations && { food_limitations: selectedClient.food_limitations }),
-        ...(selectedClient.Activity_level && { activity_level: selectedClient.Activity_level }),
-        ...(selectedClient.goal && { goal: selectedClient.goal }),
-
-        // Nutrition targets and preferences
-        ...(selectedClient.base_daily_total_calories && { daily_total_calories: selectedClient.base_daily_total_calories }),
-        ...(selectedClient.number_of_meals && { number_of_meals: selectedClient.number_of_meals }),
-        ...(selectedClient.macros && { macros: selectedClient.macros }),
-        ...(selectedClient.client_preference && { client_preference: selectedClient.client_preference }),
-        ...(selectedClient.recommendations && { recommendations: selectedClient.recommendations }),
-
-        // Chat history from other platforms
-        ...(selectedClient.user_context && { user_context: selectedClient.user_context }),
-
-        // Legacy fields for backward compatibility
-        ...(selectedClient.height && { height: selectedClient.height }),
-        ...(selectedClient.weight && { weight: selectedClient.weight }),
-        ...(selectedClient.activity_level && { activity_level: selectedClient.activity_level })
-      };
-
-      // Log comprehensive client profile for debugging
-      console.log('🧠 Comprehensive client profile being sent to LLM:', JSON.stringify(clientProfile, null, 2));
-
-      // Prepare meal plan context with detailed meal information
-      const mealPlanContext = mealPlanData ? {
-        meal_plan: mealPlanData.meal_plan,
-        daily_total_calories: mealPlanData.daily_total_calories,
-        macros_target: mealPlanData.macros_target,
-        recommendations: mealPlanData.recommendations,
-        dietary_restrictions: mealPlanData.dietary_restrictions,
-        // Extract detailed meal information for better AI responses
-        meals: mealPlanData.meal_plan?.meals || [],
-        totals: mealPlanData.meal_plan?.totals || {},
-        note: mealPlanData.meal_plan?.note || ''
-      } : null;
-
-      // Prepare AI prompt
-      let aiPrompt;
-      const instruction = `You are a professional and friendly HEALTHY nutrition coach for BetterChoice.
-Your response must be in natural, conversational language. DO NOT output JSON, code, or markdown.
-Address the client by their first name: ${selectedClient.full_name.split(' ')[0]}.
-
-**CRITICAL HEALTHY DIETITIAN RULES:**
-• You are a HEALTHY nutrition coach - prioritize nutritious, whole foods over processed snacks
-• NEVER suggest unhealthy processed snacks (like BISLI, Bamba, chips, candy, cookies, etc.) unless the user EXPLICITLY requests them in their preferences
-• For snacks, always suggest healthy options like: fruits, vegetables, nuts, yogurt, cottage cheese, hummus, whole grain crackers, etc.
-• Only include unhealthy snacks if the user specifically mentions "likes BISLI", "loves chips", "wants candy" etc. in their client_preferences
-• Even then, limit unhealthy snacks to maximum 1-2 times per week, not daily
-• Focus on balanced nutrition with whole foods, lean proteins, complex carbohydrates, and healthy fats
-
-IMPORTANT: You have access to the client's current meal plan. You can answer detailed questions about their specific meals, ingredients, nutrition values, and provide personalized advice based on their actual meal plan.
-
-Here is the comprehensive context for your response:
-
-CLIENT PROFILE:
-${JSON.stringify(clientProfile, null, 2)}
-
-DIETARY CONSIDERATIONS:
-${clientProfile.food_allergies ? `- Food Allergies: ${Array.isArray(clientProfile.food_allergies) ? clientProfile.food_allergies.join(', ') : clientProfile.food_allergies}` : '- No known food allergies'}
-${clientProfile.food_limitations ? `- Food Limitations: ${Array.isArray(clientProfile.food_limitations) ? clientProfile.food_limitations.join(', ') : clientProfile.food_limitations}` : '- No specific food limitations'}
-${clientProfile.activity_level ? `- Activity Level: ${clientProfile.activity_level}` : ''}
-${clientProfile.goal ? `- Health Goal: ${clientProfile.goal}` : ''}
-
-NUTRITION TARGETS:
-${clientProfile.daily_total_calories ? `- Daily Calories: ${clientProfile.daily_total_calories} kcal` : ''}
-${clientProfile.number_of_meals ? `- Number of Meals: ${clientProfile.number_of_meals}` : ''}
-${clientProfile.macros ? `- Macro Targets: ${typeof clientProfile.macros === 'string' ? clientProfile.macros : JSON.stringify(clientProfile.macros)}` : ''}
-
-CHAT HISTORY (most recent messages are last):
-${chatHistoryForPrompt}
-
-${clientProfile.user_context ? `
-PREVIOUS CHAT HISTORY FROM OTHER PLATFORMS:
-${clientProfile.user_context}
-` : ''}
-
-CURRENT MEAL PLAN DETAILS:
-${mealPlanContext ? `
-Your personalized meal plan includes:
-
-DAILY TOTALS:
-- Calories: ${mealPlanContext.totals?.calories || 'Not specified'} kcal
-- Protein: ${mealPlanContext.totals?.protein || 'Not specified'}g
-- Fat: ${mealPlanContext.totals?.fat || 'Not specified'}g
-- Carbs: ${mealPlanContext.totals?.carbs || 'Not specified'}g
-
-MEALS:
-${mealPlanContext.meals?.map((meal, index) => `
-${index + 1}. ${meal.meal}:
-   - Main Option: ${meal.main?.meal_title || meal.main?.name || 'Not specified'}
-     Calories: ${meal.main?.nutrition?.calories || 'Not specified'} kcal
-     Protein: ${meal.main?.nutrition?.protein || 'Not specified'}g
-     Fat: ${meal.main?.nutrition?.fat || 'Not specified'}g
-     Carbs: ${meal.main?.nutrition?.carbs || 'Not specified'}g
-     Ingredients: ${meal.main?.ingredients?.map(ing => `${ing.item} (${ing.household_measure})`).join(', ') || 'Not specified'}
-   
-   - Alternative Option: ${meal.alternative?.meal_title || meal.alternative?.name || 'Not specified'}
-     Calories: ${meal.alternative?.nutrition?.calories || 'Not specified'} kcal
-     Protein: ${meal.alternative?.nutrition?.protein || 'Not specified'}g
-     Fat: ${meal.alternative?.nutrition?.fat || 'Not specified'}g
-     Carbs: ${meal.alternative?.nutrition?.carbs || 'Not specified'}g
-     Ingredients: ${meal.alternative?.ingredients?.map(ing => `${ing.item} (${ing.household_measure})`).join(', ') || 'Not specified'}
-`).join('\n') || 'No meals specified'}
-
-${mealPlanContext.note ? `NOTES: ${mealPlanContext.note}` : ''}
-
-RECOMMENDATIONS: ${mealPlanContext.recommendations ? JSON.stringify(mealPlanContext.recommendations, null, 2) : 'None specified'}
-
-You can ask me specific questions about any meal, ingredient, nutrition values, or request modifications to your meal plan.
-` : 'No meal plan available. I can help you create a personalized meal plan based on your preferences and goals.'}
-
----
-Your task is to respond to the user's message below, taking into account their specific dietary needs, health goals, allergies, limitations, nutrition targets, and their current meal plan. You can provide detailed information about their meals, suggest modifications, explain nutrition values, and answer any questions about their personalized meal plan.
-`;
-
-      if (fileUrl) {
-        aiPrompt = `${instruction}The user has sent a ${fileType} file and a message. ${fileType === 'image' ? 'Analyze the image and' : ''} Provide a helpful response.\nFILE URL: ${fileUrl}\nUSER MESSAGE: "${message}"`;
-      } else {
-        aiPrompt = `${instruction}The user has sent a message. Provide a helpful response.\nUSER MESSAGE: "${message}"`;
-      }
-
-      // Default fallback response in case AI fails
-      let aiResponse = `Hi ${selectedClient.full_name.split(' ')[0]}! Thank you for your message${fileUrl ? ` and the ${fileType}` : ''}. \n\n`;
-
-      // Include previous chat context if available
-      if (clientProfile.user_context) {
-        aiResponse += `I can see from our previous conversations that we've discussed your nutrition journey. I'm here to continue supporting you with your health goals.\n\n`;
-      }
-
-      // Include personalized information from client profile
-      if (clientProfile.daily_total_calories || clientProfile.macros || clientProfile.goal) {
-        aiResponse += `Based on your profile:\n\n`;
-
-        if (clientProfile.daily_total_calories) {
-          aiResponse += `• Your daily calorie target: ${clientProfile.daily_total_calories} calories\n`;
-        }
-        if (clientProfile.macros) {
-          const macrosText = typeof clientProfile.macros === 'string' ? clientProfile.macros : JSON.stringify(clientProfile.macros);
-          aiResponse += `• Your macro targets: ${macrosText}\n`;
-        }
-        if (clientProfile.goal) {
-          aiResponse += `• Your health goal: ${clientProfile.goal}\n`;
-        }
-        if (clientProfile.activity_level) {
-          aiResponse += `• Your activity level: ${clientProfile.activity_level}\n`;
-        }
-        if (clientProfile.number_of_meals) {
-          aiResponse += `• Your meal plan: ${clientProfile.number_of_meals} meals per day\n`;
-        }
-
-        // Add dietary considerations
-        if (clientProfile.food_allergies || clientProfile.food_limitations) {
-          aiResponse += `\nDietary considerations:\n`;
-          if (clientProfile.food_allergies) {
-            const allergies = Array.isArray(clientProfile.food_allergies) ? clientProfile.food_allergies.join(', ') : clientProfile.food_allergies;
-            aiResponse += `• Allergies: ${allergies}\n`;
-          }
-          if (clientProfile.food_limitations) {
-            const limitations = Array.isArray(clientProfile.food_limitations) ? clientProfile.food_limitations.join(', ') : clientProfile.food_limitations;
-            aiResponse += `• Limitations: ${limitations}\n`;
-          }
-        }
-      }
-
-      if (mealPlanContext && mealPlanContext.meals && mealPlanContext.meals.length > 0) {
-        aiResponse += `\nYour personalized meal plan includes:\n\n`;
-
-        // Daily totals
-        if (mealPlanContext.totals) {
-          aiResponse += `📊 Daily Totals:\n`;
-          aiResponse += `• Calories: ${mealPlanContext.totals.calories || 'Not specified'} kcal\n`;
-          aiResponse += `• Protein: ${mealPlanContext.totals.protein || 'Not specified'}g\n`;
-          aiResponse += `• Fat: ${mealPlanContext.totals.fat || 'Not specified'}g\n`;
-          aiResponse += `• Carbs: ${mealPlanContext.totals.carbs || 'Not specified'}g\n\n`;
-        }
-
-        // Meals overview
-        aiResponse += `🍽️ Your Meals:\n`;
-        mealPlanContext.meals.forEach((meal, index) => {
-          aiResponse += `${index + 1}. ${meal.meal}\n`;
-          if (meal.main?.meal_title) {
-            aiResponse += `   Main: ${meal.main.meal_title} (${meal.main.nutrition?.calories || 'N/A'} kcal)\n`;
-          }
-          if (meal.alternative?.meal_title) {
-            aiResponse += `   Alternative: ${meal.alternative.meal_title} (${meal.alternative.nutrition?.calories || 'N/A'} kcal)\n`;
-          }
-        });
-
-        aiResponse += `\nYou can ask me specific questions about any meal, ingredient, or nutrition values in your plan!\n`;
-      } else if (mealPlanContext) {
-        aiResponse += `\nYour current meal plan details:\n`;
-        if (mealPlanContext.daily_total_calories) {
-          aiResponse += `• Plan calories: ${mealPlanContext.daily_total_calories} calories\n`;
-        }
-        if (mealPlanContext.macros_target) {
-          aiResponse += `• Plan macro targets: ${JSON.stringify(mealPlanContext.macros_target)}\n`;
-        }
-        if (mealPlanContext.dietary_restrictions) {
-          aiResponse += `• Plan dietary restrictions: ${JSON.stringify(mealPlanContext.dietary_restrictions)}\n`;
-        }
-        if (mealPlanContext.recommendations) {
-          aiResponse += `\nPersonalized recommendations:\n${mealPlanContext.recommendations}\n`;
-        }
-      } else {
-        aiResponse += `\nHere are some general nutrition insights tailored for you:\n\n`;
-        aiResponse += `1. Focus on balanced meals with protein, healthy fats, and complex carbohydrates\n`;
-        aiResponse += `2. Stay well-hydrated with at least 8 glasses of water daily\n`;
-        aiResponse += `3. Eat regular meals to maintain stable energy levels\n`;
-        if (clientProfile.goal) {
-          aiResponse += `4. Keep your health goal in mind: ${clientProfile.goal}\n`;
-        }
-      }
-
-      if (fileUrl && fileType === 'image') {
-        aiResponse += `\n\nRegarding the image you've shared:\n`;
-        aiResponse += `- This appears to be a meal you've shared for analysis\n`;
-        aiResponse += `- Consider how it fits into your daily nutrition goals\n`;
-        aiResponse += `- Feel free to ask specific questions about the nutritional content\n`;
-      } else if (fileUrl && fileType === 'video') {
-        aiResponse += `\n\nRegarding the video you've shared:\n`;
-        aiResponse += `- Thank you for sharing this video\n`;
-        aiResponse += `- I can provide guidance based on your description\n`;
-      }
-
-      aiResponse += `\n\nWould you like more specific advice about your meal plan or nutrition goals?`;
-
-      // Try to get AI response, use fallback if it fails
-      try {
-        const response = await InvokeLLM({
-          prompt: aiPrompt,
-          add_context_from_internet: false,
-          imageUrl: fileUrl && fileType === 'image' ? fileUrl : undefined
-        });
-        if (response) {
-          aiResponse = response;
-        }
-      } catch (aiError) {
-        console.error('Error getting AI response, using fallback:', aiError);
-      }
-
-      // Clean up the response to remove any prepended JSON
-      if (aiResponse.trim().startsWith('{')) {
-        const lastBracketIndex = aiResponse.lastIndexOf('}');
-        if (lastBracketIndex !== -1) {
-          const potentialJson = aiResponse.substring(0, lastBracketIndex + 1);
-          const remainingText = aiResponse.substring(lastBracketIndex + 1).trim();
-
-          try {
-            // Only strip the JSON if there is text following it.
-            if (remainingText) {
-              JSON.parse(potentialJson);
-              aiResponse = remainingText;
-            }
-          } catch (e) {
-            // It wasn't valid JSON, so do nothing and keep the original response.
-          }
-        }
-      }
-
-      // Send AI response via external API
-      console.log('📬 Sending AI response via external API...');
-      const queueData = {
-        conversation_id: conversationId,
-        client_id: clientId, // Add client ID from chat_users table
-        dietitian_id: currentDietitian?.id, // Add dietitian ID from auth
-        user_code: selectedClient.user_code,
-        content: aiResponse,
-        role: 'assistant',
-        priority: 1
-      };
-      
-      // Validate required fields before adding to queue
-      if (!queueData.client_id || !queueData.dietitian_id) {
-        console.error('❌ Missing required IDs for queue:', { clientId, dietitianId: currentDietitian?.id });
-        setError('Missing required user information for message queue');
-        return;
-      }
-      
-      await addToUserMessageQueue(queueData);
-      console.log('✅ AI response sent via external API');
-
-      // Create a temporary message object for local display (not stored in database)
-      const tempAiMessage = {
-        id: `temp-${Date.now()}`,
-        role: 'assistant',
-        content: aiResponse,
-        conversation_id: conversationId,
-        created_at: new Date().toISOString(),
-        attachments: fileUrl ? { 
-          file_url: fileUrl,
-          file_type: fileType,
-          file_name: imageFile?.name,
-          mime_type: imageFile?.type
-        } : null
-      };
-
-      // Update local state with the temporary AI message
-      setMessages(prev => [tempAiMessage, ...prev]);
-      setHasNewMessages(false); // Clear new message indicator when AI responds
-
       // Clear form
       setMessage('');
       setImageFile(null);
@@ -1425,9 +1081,9 @@ Your task is to respond to the user's message below, taking into account their s
       }, 100);
       
       // Show success toast
-      showToast(`✅ AI response sent to ${selectedClient.full_name}!`, 'success');
+      showToast(`✅ Message sent to ${selectedClient.full_name}!`, 'success');
       
-      console.log('✅ Message exchange completed successfully');
+      console.log('✅ Message sent successfully');
     } catch (error) {
       console.error('Error sending message:', error);
       setError(translations.failedToSend || 'Failed to send message');
