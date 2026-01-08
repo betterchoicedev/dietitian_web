@@ -1,12 +1,45 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/logo-placeholder.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BetterChoice Nutritionist</title>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/png" href="/images/logos/logo-placeholder.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <!-- Open Graph / Facebook / WhatsApp -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://www.betterchoicefood.com/" />
+    <meta property="og:title" content="BetterChoice AI | תזונה שעובדת בשבילך" />
+    <meta property="og:image" content="https://www.betterchoicefood.com/images/logos/logo-placeholder.png" />
+    <meta property="og:image:width" content="600" />
+    <meta property="og:image:height" content="600" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:secure_url" content="https://www.betterchoicefood.com/images/logos/logo-placeholder.png" />
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="BetterChoice AI | תזונה שעובדת בשבילך" />
+    <meta name="twitter:image" content="https://www.betterchoicefood.com/images/logos/logo-placeholder.png" />
+    <link rel="apple-touch-icon" href="/images/logos/logo-placeholder.png" />
+    <!--
+      manifest.json provides metadata used when your web app is installed on a
+      user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
+    -->
+    <link rel="manifest" href="/manifest.json" />
+    <title>BetterChoice AI | תזונה שעובדת בשבילך</title>
+    <!-- Structured Data for Google Search -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "BetterChoice AI",
+      "url": "https://www.betterchoicefood.com/",
+      "logo": "https://www.betterchoicefood.com/images/logos/logo-placeholder.png",
+      "description": "BetterChoice AI | תזונה שעובדת בשבילך",
+      "sameAs": []
+    }
+    </script>
   </head>
   <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
     <script>
       // Polyfill for $.trim to prevent errors from third-party libraries
@@ -19,6 +52,14 @@
       }
     </script>
     <script type="module" src="/src/main.jsx"></script>
-    <!-- Test deployment with correct token -->
+    <!-- Google tag (gtag.js) - Managed by Cookie Consent -->
+    <script type="text/plain" data-category="analytics" async src="https://www.googletagmanager.com/gtag/js?id=G-8GHW73KZVM"></script>
+    <script type="text/plain" data-category="analytics">
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-8GHW73KZVM');
+    </script>
   </body>
 </html>

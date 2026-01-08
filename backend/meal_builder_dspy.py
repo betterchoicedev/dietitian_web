@@ -108,42 +108,36 @@ class ValidatedMeal(BaseModel):
 # ============================================================================
 
 class MealNaming(dspy.Signature):
-    """Generate ingredient list (max 7 items) for a given dish.
-    
-    ⚠️ CRITICAL: ONLY USE REAL, EXISTING, POPULAR INGREDIENTS FROM THE CLIENT'S REGION.
-    
-    0. REGIONAL & POPULAR INGREDIENTS PRIORITY:
-       • Focus on ingredients that are COMMONLY AVAILABLE and POPULAR in the client's region
-       • Use brands and products that locals would actually recognize and buy
-       • For Israel: Tnuva dairy, Angel bread, Achla hummus, Osem products, etc.
-       • For USA: Common US brands (Kraft, Dannon, etc.) and generic produce
-       • ONLY use exotic/rare ingredients if the dish name specifically requires them
-       • When in doubt, choose the most mainstream, accessible option
-    
-    1. REAL INGREDIENTS ONLY - VERIFY EVERYTHING:
-       • Before suggesting ANY ingredient, verify it's a REAL, COMMONLY AVAILABLE food item in that region
-       • Use web search if unsure about ingredient existence or availability - search online to confirm each ingredient is real
-    
-    2. Client requests are mandatory. Read client_preference FIRST and include every food they explicitly mentioned (even if bilingual).
-    3. Allergies/limitations override everything. If a client request conflicts → ignore the request and stay safe.
-    4. Dish name = promise. Before finalizing ingredients ask:
-       • What dish am I building?
-       • What core ingredients define it?
-       • Are those ingredients REAL and available in the client's region? Search online if needed to verify.
-       • Are those ingredients in my list? If not, add them. (Shakshuka needs tomato base, Carbonara needs pasta/egg/cheese, etc.)
-       • If a core ingredient is banned (allergy/limitation) → use clearly adapted version with REAL substitutes.
-    5. Ingredient naming conventions:
-       • For GENERIC items (no brand needed): Use simple names like "Eggs", "Olive oil", "Cherry tomatoes", "Avocado", "Whole wheat bread", "Salmon", "Chicken breast"
-       • For BRANDED/PROCESSED items (typically sold with brands): Include REGIONAL brand + product specification:
-         - ⚠️ IF region='israel': ONLY use Israeli brands: "Tnuva Cottage Cheese 5%", "Strauss Yogurt", "Yotvata Milk", "Hummus Achla", "Angel Whole Wheat Bread", "Osem Pasta"
-         - ⚠️ IF region='usa': ONLY use USA brands: "Dannon Yogurt", "Kraft Cheese", "Land O'Lakes Butter", "Cheerios", "Quaker Oats"
-         - ⚠️ NEVER mix regions: Don't use Tnuva in USA meals or Dannon in Israeli meals
-       • Format: "[Regional Brand] [Product Name] [Variant if needed]" - e.g., "Tnuva Cottage Cheese 5%" (Israel), "Kraft Cheese" (USA)
-    6. After core items, add complementary ingredients to hit macros using whole foods and REGIONAL brand names popular in that area.
-       • Always verify each complementary ingredient is REAL, POPULAR and commonly available in the region before including it
-    7. Output EVERYTHING in English only (ingredients list).
-    
-    SEARCH THE WEB: If you're uncertain whether an ingredient exists, is popular, or is commonly available in the region, search the internet to verify before including it in the output.
+    """You are a Regional Culinary Expert and Professional Nutritionist specializing in localized grocery sourcing. Your goal is to generate a precise ingredient list for a given dish that is safe, regionally accurate, and macro-aligned.
+
+### INPUT DATA:
+- **Meal Type:** {{meal_type}}
+- **Dish Name:** {{dish_name}}
+- **Target Macros:** {{macro_targets}}
+- **Required Protein Source:** {{required_protein_source}}
+- **Region:** {{region}}
+- **Allergies to Avoid:** {{allergies}}
+- **Dietary Limitations:** {{limitations}}
+- **Ingredients to Avoid for Variety:** {{avoid_ingredients}}
+- **Client Preference:** {{client_preference}} (Parse carefully; may be in Hebrew or English)
+
+### MANDATORY REASONING STEPS:
+1. **Safety Filter:** Identify all ingredients in {{allergies}} and {{limitations}}. These are strictly forbidden. If a core ingredient of the dish is an allergen, you must select a real-world, regional substitute (e.g., Almond milk for Dairy).
+2. **Preference Parsing:** Analyze {{client_preference}}. Translate any Hebrew terms to English. Every food item mentioned by the client MUST be included in the list unless it violates a safety constraint.
+3. **Core Identity & Protein:** Identify the essential items that define the {{dish_name}}. You must include the {{required_protein_source}} as the primary protein.
+4. **Regional Brand Verification:** - Determine the dominant grocery brands in the specified {{region}}.
+    - For Fresh Items (Produce, Eggs, Raw Meat): Use generic names (e.g., "Large Eggs", "Fresh Chicken Breast").
+    - For Packaged/Branded Items (Dairy, Breads, Sauces, Oils): Use the web to find a real, popular brand in that specific region.
+    - Format branded items as: "[Regional Brand] [Product Name] [Variant]".
+5. **Macro Alignment:** Use the {{macro_targets}} to choose specific product versions (e.g., "Low Fat," "Whole Grain," or specific percentage of fat) and quantities that would logically fit these targets.
+6. **Web Search Verification:** If you are unsure if a brand exists or is currently sold in the {{region}}, search the web to confirm its availability before including it.
+
+### STRICT CONSTRAINTS:
+- **Maximum 7 Ingredients:** The list must contain exactly (or up to) 7 items total. No more.
+- **English Only:** All outputted ingredient names and brand names must be in English.
+- **Regional Consistency:** Never mix regions (e.g., do not suggest a US brand for a client in Israel).
+- **No Hallucinations:** Every branded item must be a real product that a local could actually buy in a supermarket today.
+- **Variety:** Do not include any ingredients listed in {{avoid_ingredients}}.
     """
     
     meal_type = dspy.InputField(desc="Type of meal")
@@ -160,38 +154,50 @@ class MealNaming(dspy.Signature):
 
 
 class PortionCalculation(dspy.Signature):
-    """Calculate ingredient weights in grams to hit macro targets using culinary role hierarchy.
+    """Role: Culinary Mathematician & Nutritionist.
+    Objective: Calculate precise ingredient weights (grams) to hit macro targets using a prioritized anchor strategy.
     
-    ANCHOR-BASED CALCULATION STRATEGY:
-    1. PROTEIN ANCHOR: Start by calculating portion for protein_anchor to meet protein target
-       - Typical ranges: 100-200g meat/fish, 100-150g eggs (2-3 units), 150-250g dairy
-    2. CARB ANCHOR: Calculate portion for carb_anchor to meet carbs target
-       - Typical ranges: 80-200g grains/pasta/bread, 150-300g potatoes/rice
-    3. FAT SOURCES: Use fat_source ingredients to reach calorie target
-       - Keep fats reasonable: 5-20g oils, 10-30g nuts/seeds, 15-40g cheese
-       - Fat calories should not exceed 35% of total calories unless dish requires it
-    4. BASE & FLAVOR: Add minimal portions for vegetables and seasonings
-       - Base (vegetables): 50-150g
-       - Flavor (herbs/spices): 1-10g
+    ### PHASE 1: ANCHOR-BASED CALCULATION HIERARCHY
+    1. PROTEIN ANCHOR (Mandatory Start):
+       - Calculate weight to meet the 'protein' target using the protein_anchor.
+       - Formula: (target_protein / protein_per_100g) * 100.
+       - CONSTRAINT: If the portion exceeds realistic volume (e.g., >250g meat or >4 eggs), cap it and distribute the remaining protein deficit to the ingredient with the next highest protein density.
     
-    CULINARY PLAUSIBILITY CHECKS:
-    • Total meal weight should be 200-800g (realistic for one meal)
-    • Protein anchor should be the largest single ingredient by weight (unless it's a carb-heavy dish)
-    • Oil/fat portions should not exceed protein portions (unless it's a fat-based dish like salad with dressing)
-    • Ratios must make culinary sense for the dish type
+    2. CARB ANCHOR:
+       - Calculate weight to meet 'carbs' target after accounting for carbs already present in the protein anchor.
+       - Formula: ((target_carbs - carbs_from_protein) / carbs_per_100g) * 100.
     
-    PRACTICAL PORTIONS:
-    • DISCRETE items (eggs, slices): Use WHOLE numbers
-    • FLEXIBLE items (vegetables, oils, grains): Can use decimals
-    • Set discrete items first, then adjust flexible items to hit targets
+    3. FAT SOURCES:
+       - Use fat_source ingredients to fill the remaining 'calorie' gap.
+       - Ensure fat does not exceed 35% of total calories unless the dish is fat-dominant (e.g., Keto).
     
-    ⚠️ CRITICAL: ALL OUTPUT MUST BE IN ENGLISH (ingredient names, brands, household measures)
+    4. BASE & FLAVOR (Fillers):
+       - Add 'Base' (vegetables) at 50g–200g and 'Flavor' at 1g–15g. These are macro-neutral.
+
+    ### PHASE 2: CULINARY PLAUSIBILITY & DISCRETE LOGIC
+    - DISCRETE ITEMS: Ingredients like eggs or bread slices must be ROUNDED to the nearest whole number.
+    - FLEXIBLE ITEMS: Grains, meats, and oils can use exact decimals (e.g., 32.5g).
+    - VOLUME CHECK: Total meal weight must stay between 200g and 850g.
+    - RATIO CHECK: The protein anchor should visually be the main component of the plate.
+
+    ### PHASE 3: OUTPUT REQUIREMENTS
+    - All output must be in ENGLISH.
+    - Ensure 'portionSI' is a numeric value.
+    - 'household_measure' should be user-friendly (e.g., "1.5 cups", "2 large eggs", "1 tbsp").
+    
+    ### PHASE 4: FEEDBACK ADJUSTMENT (if provided)
+    - If 'feedback_from_validation' is provided, it contains specific instructions from previous validation attempts.
+    - READ the feedback carefully and ADJUST portions accordingly.
+    - The feedback will specify which ingredients to reduce/increase and by how much.
+    - Example: "Reduce Tnuva White Cheese 5% to 144g and olive oil to 5g" → Use EXACTLY these values.
+    - DO NOT ignore feedback - it means previous calculations were incorrect.
     """
     
     dish_name = dspy.InputField(desc="Name of the dish")
     ingredients_with_roles = dspy.InputField(desc="JSON list of ingredients with: name, role (protein_anchor/carb_anchor/fat_source/base/flavor), calories_per_100g, protein_per_100g, fat_per_100g, carbs_per_100g, brand")
     macro_targets = dspy.InputField(desc="Target macros for ENTIRE MEAL: {calories, protein, fat, carbs}")
     required_protein_source = dspy.InputField(desc="Main protein source (must match protein_anchor)")
+    feedback_from_validation = dspy.InputField(desc="Optional feedback from validation stage with specific adjustments needed. If provided, MUST follow these instructions exactly.")
     
     calculated_portions = dspy.OutputField(desc="JSON in ENGLISH: {ingredient: {portionSI(gram): <number>, household_measure: '<text>', brand of pruduct: '<brand>'}}")
     culinary_reasoning = dspy.OutputField(desc="Brief explanation of portion logic: which anchors were used first, how ratios maintain dish integrity")
@@ -207,24 +213,30 @@ class NutritionLookup(dspy.Signature):
 
 
 class MealValidation(dspy.Signature):
-    """Validate if the meal is culinary sound and meets macro targets.
+    """
+    Role: Senior Culinary Auditor & Macro Specialist.
+    Objective: Perform a rigorous 4-point audit of the meal plan against targets and culinary standards.
+
+    ### AUDIT PROTOCOL (Internal Monologue):
+    1. MATHEMATICAL AUDIT: Calculate the current totals for Calories, Protein, Fat, and Carbs. Compare against `macro_targets` using `allowed_margins`. 
     
-    VALIDATION CHECKS:
-    1. MACRO ACCURACY: Are totals within acceptable ranges?
-       - Use dynamic margins based on target values (higher tolerance for low values)
-    2. CULINARY PLAUSIBILITY: Do portion sizes make sense?
-       - Is total meal weight realistic (200-800g)?
-       - Are ingredient ratios appropriate for the dish?
-       - Is the protein anchor the main component (unless it's a carb-focused dish)?
-    3. FAT LOGIC: Are fat portions reasonable?
-       - Fat calories should typically be 20-35% of total
-       - Oil/butter portions should not exceed protein portions (unless intentional)
-    4. INGREDIENT COUNT: Are we within 7 ingredients max?
+    2. CULINARY SCALE AUDIT: 
+       - Total weight check: Sum all grams. If < 200g or > 850g, flag as unrealistic.
+
+    3. FAT & SENSORY AUDIT: 
+       - Ensure fat isn't overwhelming the dish (target 20-35% of total calories).
+       - Flag excessive oil (>20g) or butter (>15g) as "Culinary Implausibility" unless it is a specific high-fat meal.
+
+    4. COMPLIANCE AUDIT: 
+       - Confirm the ingredient count is ≤ 7.
+       - Confirm all ingredients are in English and include regional brands where required.
     
-    If invalid, provide SPECIFIC, ACTIONABLE feedback:
-    - "Reduce olive oil by 5g to lower fat from X to Y"
-    - "Increase chicken by 20g to reach protein target"
-    - "Total meal weight is 950g (too high), reduce rice by 50g"
+    ### FEEDBACK GENERATION RULES:
+    When providing feedback, distinguish between DISCRETE and FLEXIBLE items:
+    - DISCRETE ITEMS: Ingredients like eggs or bread slices must be ROUNDED to the nearest whole number.
+    - FLEXIBLE ITEMS: Grains, meats, and oils can use exact decimals (e.g., 32.5g).
+    - VOLUME CHECK: Total meal weight must stay between 200g and 850g.
+    - RATIO CHECK: The protein anchor should visually be the main component of the plate.
     """
     
     dish_name = dspy.InputField(desc="Name of the dish")
@@ -1319,15 +1331,17 @@ Examples:
                 "macro_targets": macro_targets
             }
             
+            # Prepare feedback for PortionCalculation
+            feedback_text = feedback_for_portions if feedback_for_portions else ""
             if feedback_for_portions:
-                stage3_input["feedback_from_validation"] = feedback_for_portions
                 logger.info(f"   📋 Applying feedback: {feedback_for_portions[:200]}...")
             
             portion_result = self.calculate_portions(
                 dish_name=dish_name,
                 ingredients_with_roles=json.dumps(ingredients_with_roles, indent=2),
                 macro_targets=json.dumps(macro_targets),
-                required_protein_source=required_protein_source
+                required_protein_source=required_protein_source,
+                feedback_from_validation=feedback_text
             )
             
             culinary_reasoning = portion_result.culinary_reasoning
@@ -1912,4 +1926,3 @@ try:
     configure_dspy_backends()
 except Exception as e:
     logger.warning(f"⚠️ Failed to pre-configure DSPy on import: {e}")
-
