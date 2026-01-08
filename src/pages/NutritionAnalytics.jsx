@@ -157,37 +157,129 @@ export default function NutritionAnalytics() {
           return;
         }
 
-        // Process food logs data
-        const processedLogs = logsData.map(log => {
-          // Parse JSONB food_items if needed
-          let foodItems = [];
-          if (log.food_items) {
-            try {
-              foodItems = typeof log.food_items === 'string'
-                ? JSON.parse(log.food_items)
-                : Array.isArray(log.food_items)
-                  ? log.food_items
-                  : [log.food_items];
-            } catch (e) {
-              console.warn('Failed to parse food_items:', e);
-              foodItems = [];
+        // Helper function to parse and normalize food_items
+        const parseFoodItems = (foodItemsData) => {
+          if (!foodItemsData) return [];
+          
+          try {
+            // Parse if string
+            let parsed = typeof foodItemsData === 'string'
+              ? JSON.parse(foodItemsData)
+              : foodItemsData;
+
+            // Format 2: Object with food_items array (fallback format)
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.food_items) {
+              return Array.isArray(parsed.food_items) ? parsed.food_items : [];
             }
+
+            // Format 1: Direct array of food items
+            if (Array.isArray(parsed)) {
+              return parsed;
+            }
+
+            // Single object
+            if (typeof parsed === 'object') {
+              return [parsed];
+            }
+
+            return [];
+          } catch (e) {
+            console.warn('Failed to parse food_items:', e);
+            return [];
+          }
+        };
+
+        // Helper function to extract macros from a food item (handles both formats)
+        const extractMacrosFromItem = (item) => {
+          if (!item || typeof item !== 'object') return { calories: 0, protein: 0, carbs: 0, fat: 0 };
+
+          // Format 1: Simple format with c, f, p, cals
+          if (item.cals !== undefined || item.c !== undefined) {
+            return {
+              calories: item.cals || 0,
+              protein: item.p || 0,
+              carbs: item.c || 0,
+              fat: item.f || 0
+            };
           }
 
+          // Format 2: Detailed format with macros object
+          if (item.macros && typeof item.macros === 'object') {
+            return {
+              calories: item.macros.calories || 0,
+              protein: item.macros.protein_g || 0,
+              carbs: item.macros.carbs_g || 0,
+              fat: item.macros.fat_g || 0
+            };
+          }
+
+          return { calories: 0, protein: 0, carbs: 0, fat: 0 };
+        };
+
+        // Helper function to calculate totals from food items
+        const calculateTotalsFromFoodItems = (foodItems) => {
+          return foodItems.reduce((totals, item) => {
+            const macros = extractMacrosFromItem(item);
+            return {
+              calories: totals.calories + (macros.calories || 0),
+              protein: totals.protein + (macros.protein || 0),
+              carbs: totals.carbs + (macros.carbs || 0),
+              fat: totals.fat + (macros.fat || 0)
+            };
+          }, { calories: 0, protein: 0, carbs: 0, fat: 0 });
+        };
+
+        // Process food logs data
+        const processedLogs = logsData.map(log => {
+          // Parse food_items
+          let foodItems = parseFoodItems(log.food_items);
+          
+          // Check if log has nested structure (Format 2 fallback)
+          let parsedLog = log;
+          if (log.food_items && typeof log.food_items === 'object' && !Array.isArray(log.food_items) && log.food_items.food_items) {
+            // This is the fallback format - extract nested data
+            parsedLog = {
+              ...log,
+              meal_label: log.food_items.meal_label || log.meal_label,
+              total_calories: log.food_items.total_calories || log.total_calories,
+              food_items: log.food_items.food_items || []
+            };
+            foodItems = parseFoodItems(parsedLog.food_items);
+          }
+
+          // Calculate totals from food_items if totals are missing or zero
+          const calculatedTotals = calculateTotalsFromFoodItems(foodItems);
+          
+          // Use existing totals if available, otherwise calculate from food_items
+          const total_calories = (typeof parsedLog.total_calories === 'number' && !isNaN(parsedLog.total_calories) && parsedLog.total_calories > 0)
+            ? parsedLog.total_calories
+            : calculatedTotals.calories;
+          
+          const total_protein_g = (typeof parsedLog.total_protein_g === 'number' && !isNaN(parsedLog.total_protein_g) && parsedLog.total_protein_g > 0)
+            ? parsedLog.total_protein_g
+            : calculatedTotals.protein;
+          
+          const total_carbs_g = (typeof parsedLog.total_carbs_g === 'number' && !isNaN(parsedLog.total_carbs_g) && parsedLog.total_carbs_g > 0)
+            ? parsedLog.total_carbs_g
+            : calculatedTotals.carbs;
+          
+          const total_fat_g = (typeof parsedLog.total_fat_g === 'number' && !isNaN(parsedLog.total_fat_g) && parsedLog.total_fat_g > 0)
+            ? parsedLog.total_fat_g
+            : calculatedTotals.fat;
+
           return {
-            ...log,
+            ...parsedLog,
             food_items: foodItems,
-            // Ensure numeric values are valid numbers
-            total_calories: typeof log.total_calories === 'number' && !isNaN(log.total_calories) ? log.total_calories : 0,
-            total_protein_g: typeof log.total_protein_g === 'number' && !isNaN(log.total_protein_g) ? log.total_protein_g : 0,
-            total_carbs_g: typeof log.total_carbs_g === 'number' && !isNaN(log.total_carbs_g) ? log.total_carbs_g : 0,
-            total_fat_g: typeof log.total_fat_g === 'number' && !isNaN(log.total_fat_g) ? log.total_fat_g : 0,
+            total_calories,
+            total_protein_g,
+            total_carbs_g,
+            total_fat_g,
             // Stable ISO date key and formatted label
-            iso_date: typeof log.log_date === 'string'
-              ? log.log_date
-              : (log.log_date ? new Date(log.log_date).toISOString().slice(0, 10) : null),
-            display_date: log.log_date ? new Date(log.log_date).toLocaleDateString() : 'Unknown Date',
-            original_date: log.log_date
+            iso_date: typeof parsedLog.log_date === 'string'
+              ? parsedLog.log_date
+              : (parsedLog.log_date ? new Date(parsedLog.log_date).toISOString().slice(0, 10) : null),
+            display_date: parsedLog.log_date ? new Date(parsedLog.log_date).toLocaleDateString() : 'Unknown Date',
+            original_date: parsedLog.log_date
           };
         });
 
@@ -286,9 +378,10 @@ export default function NutritionAnalytics() {
       if (!item) return '';
       if (typeof item === 'string') return item;
       if (typeof item === 'object') {
+        // Handle both formats
         return (
-          item.food_name ||
-          item.name ||
+          item.name ||           // Format 1: simple format
+          item.food_name ||      // Format 2: detailed format
           item.title ||
           item.product_name ||
           item.label ||
@@ -324,7 +417,20 @@ export default function NutritionAnalytics() {
       items.forEach((it) => {
         const name = normalizeFoodItemName(it).trim();
         if (!name) return;
-        existing.itemsCount[name] = (existing.itemsCount[name] || 0) + 1;
+        
+        // Preserve quantity information if available
+        const quantity = (it && typeof it === 'object') 
+          ? (it.quantity || it.portion_estimate || '')
+          : '';
+        
+        if (!existing.itemsCount[name]) {
+          existing.itemsCount[name] = { count: 0, quantity: quantity };
+        }
+        existing.itemsCount[name].count += 1;
+        // Update quantity if this item has one and we don't have one yet
+        if (quantity && !existing.itemsCount[name].quantity) {
+          existing.itemsCount[name].quantity = quantity;
+        }
       });
 
       labelToGroup.set(labelKey, existing);
@@ -337,7 +443,11 @@ export default function NutritionAnalytics() {
       protein: g.protein,
       carbs: g.carbs,
       fat: g.fat,
-      food_items: Object.entries(g.itemsCount).map(([name, count]) => ({ name, count })),
+      food_items: Object.entries(g.itemsCount).map(([name, data]) => ({ 
+        name, 
+        count: data.count,
+        quantity: data.quantity 
+      })),
     }));
   };
 
@@ -512,7 +622,11 @@ export default function NutritionAnalytics() {
         ? log.food_items.map(item => {
             if (typeof item === 'string') return item;
             if (typeof item === 'object') {
-              return item.food_name || item.name || item.title || item.product_name || item.label || JSON.stringify(item);
+              // Handle both formats
+              const name = item.name || item.food_name || item.title || item.product_name || item.label || '';
+              const quantity = item.quantity || item.portion_estimate || '';
+              const displayName = quantity ? `${name} (${quantity})` : name;
+              return displayName || JSON.stringify(item);
             }
             return String(item);
           }).join('; ')
@@ -690,7 +804,7 @@ export default function NutritionAnalytics() {
     if (!nutritionTargets || !targetAchievements) return null;
 
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card className="glass-premium border-border/40 shadow-premium hover:shadow-glow-primary transition-all duration-300">
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
@@ -914,13 +1028,17 @@ export default function NutritionAnalytics() {
         </Card>
       </section>
 
-      {/* Targets Comparison */}
-      {renderTargetsComparison()}
+      {/* Targets Comparison and Statistics Cards - Side by Side */}
+      <section className="container mx-auto px-6 mb-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Targets Comparison */}
+          <div>
+            {renderTargetsComparison()}
+          </div>
 
-      {/* Statistics Cards */}
-      {stats && (
-        <section className="container mx-auto px-6 mb-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* Statistics Cards */}
+          {stats && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <Card className="glass-premium border-border/40 shadow-premium hover:shadow-glow-primary transition-all duration-300">
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
@@ -980,9 +1098,10 @@ export default function NutritionAnalytics() {
                 </div>
               </CardContent>
             </Card>
-          </div>
-        </section>
-      )}
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* Charts Section */}
       <section className="container mx-auto px-6 mb-8">
