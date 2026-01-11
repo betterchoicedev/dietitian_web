@@ -682,7 +682,7 @@ export default function Layout() {
 
       {/* Sidebar */}
       <div className={cn(
-        "fixed inset-y-0 w-64 md:w-72 glass-premium bg-white/90 border-r border-border/40 shadow-xl backdrop-blur-2xl z-[60] transition-transform duration-300 ease-out mobile-sidebar",
+        "fixed inset-y-0 w-64 md:w-72 glass-premium bg-white/90 border-r border-border/40 shadow-xl backdrop-blur-2xl z-[60] transition-transform duration-300 ease-out mobile-sidebar flex flex-col h-full",
         {
           'translate-x-0': (sidebarOpen || !isMobile) && !hasOpenDialog, // Show on desktop or when open on mobile, but not when dialog is open
           '-translate-x-full': (!sidebarOpen && isMobile && language === 'en') || (hasOpenDialog && language === 'en'), // Hide on mobile when closed (LTR) or when dialog is open (LTR)
@@ -693,7 +693,8 @@ export default function Layout() {
           'border-l': language === 'he'
         }
       )}>
-        <div className="flex h-16 items-center justify-between px-6 border-b border-border/30">
+        {/* Header */}
+        <div className="flex h-16 flex-shrink-0 items-center justify-between px-6 border-b border-border/30">
           {/* Sidebar Logo */}
           <div className="flex items-center gap-3">
             <div className="relative">
@@ -718,7 +719,8 @@ export default function Layout() {
           </button>
         </div>
 
-        <nav className="space-y-6 p-4 pb-8 md:pb-4">
+        {/* Scrollable Navigation */}
+        <nav className="flex-1 overflow-y-auto space-y-6 p-4">
           {/* Client Management Group */}
           <div className="space-y-1">
             <div className="px-3 mb-2">
@@ -819,7 +821,7 @@ export default function Layout() {
         </nav>
         
         {/* Sidebar Footer */}
-        <div className="absolute bottom-4 left-4 right-4 hidden md:block space-y-3">
+        <div className="flex-shrink-0 p-4 space-y-3 border-t border-border/30 bg-white/50 backdrop-blur-sm">
           <Button 
             className="w-full h-11 bg-gradient-to-r from-primary to-primary-lighter hover:from-primary/90 hover:to-primary-lighter/90 text-white shadow-md hover:shadow-lg transition-all duration-300 font-medium"
             onClick={() => {
