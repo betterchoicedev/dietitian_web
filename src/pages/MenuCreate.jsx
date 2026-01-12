@@ -7182,7 +7182,6 @@ const MenuCreate = () => {
         }
       }
       
-      setHasUnsavedMealPlanChanges(true);
       return updated;
     });
   };
@@ -7212,7 +7211,6 @@ const MenuCreate = () => {
         }
       }
       
-      setHasUnsavedMealPlanChanges(true);
       return updated;
     });
   };
@@ -7355,7 +7353,6 @@ const MenuCreate = () => {
         }
       }
       
-      setHasUnsavedMealPlanChanges(true);
       return updated;
     });
   };
@@ -7385,7 +7382,6 @@ const MenuCreate = () => {
         }
       }
       
-      setHasUnsavedMealPlanChanges(true);
       return updated;
     });
   };
@@ -17150,107 +17146,6 @@ const MenuCreate = () => {
 
       </Dialog>
 
-      {/* Unsaved Changes Warning Dialog */}
-
-      <Dialog open={showUnsavedChangesDialog} onOpenChange={setShowUnsavedChangesDialog}>
-
-        <DialogContent className="sm:max-w-md">
-
-          <DialogHeader>
-
-            <DialogTitle className="flex items-center gap-2 text-orange-600">
-
-              <span className="text-2xl">💾</span>
-
-              {translations.unsavedChangesWarning || 'Unsaved Changes'}
-
-            </DialogTitle>
-
-            <DialogDescription className="text-gray-600 pt-2">
-
-              {translations.unsavedChangesMessage || 'You have unsaved changes to the meal plan structure. Please save your changes before generating a menu.'}
-
-            </DialogDescription>
-
-          </DialogHeader>
-
-          
-
-          <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 my-4">
-
-            <div className="flex items-start gap-3">
-
-              <div className="text-orange-600 text-lg">⚠️</div>
-
-              <div>
-
-                <h4 className="font-medium text-orange-800 mb-1">
-
-                  {translations.whatYouNeedToDo || 'What you need to do:'}
-
-                </h4>
-
-                <p className="text-sm text-orange-700">
-
-                  {translations.saveMealPlanFirst || 'Go to the "Meal Plan Structure" section and click "Save Plan" to save your changes before generating the menu.'}
-
-                </p>
-
-              </div>
-
-            </div>
-
-          </div>
-
-          
-
-          <DialogFooter className="flex gap-3 sm:gap-3">
-
-            <Button
-
-              variant="outline"
-
-              onClick={() => setShowUnsavedChangesDialog(false)}
-
-              className="flex-1 border-gray-300 text-gray-700 hover:bg-gray-50"
-
-            >
-
-              {translations.cancel || 'Cancel'}
-
-            </Button>
-
-            <Button
-
-              onClick={() => {
-
-                setShowUnsavedChangesDialog(false);
-
-                // Scroll to meal plan structure section
-
-                const mealPlanSection = document.querySelector('[data-meal-plan-section]');
-
-                if (mealPlanSection) {
-
-                  mealPlanSection.scrollIntoView({ behavior: 'smooth' });
-
-                }
-
-              }}
-
-              className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
-
-            >
-
-              {translations.goToMealPlan || 'Go to Meal Plan'}
-
-            </Button>
-
-          </DialogFooter>
-
-        </DialogContent>
-
-      </Dialog>
 
       {/* Missing Daily Target Calories Dialog */}
       <Dialog open={showMissingCaloriesDialog} onOpenChange={setShowMissingCaloriesDialog}>
