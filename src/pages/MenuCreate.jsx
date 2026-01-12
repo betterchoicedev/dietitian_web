@@ -3186,11 +3186,6 @@ const MenuCreate = () => {
 
       setNumberOfMeals(selectedClient.number_of_meals || 4);
 
-      // Reset unsaved changes when client changes
-
-      setHasUnsavedMealPlanChanges(false);
-
-      setSavedMealPlanStructure(null);
 
       // Temporarily clear meal plan structure to prevent false comparisons
 
@@ -3380,11 +3375,6 @@ const MenuCreate = () => {
 
 
 
-  const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
-
-  const [hasUnsavedMealPlanChanges, setHasUnsavedMealPlanChanges] = useState(false);
-
-  const [savedMealPlanStructure, setSavedMealPlanStructure] = useState(null);
 
   const [updatingMealDescriptions, setUpdatingMealDescriptions] = useState(false);
 
@@ -3457,85 +3447,6 @@ const MenuCreate = () => {
     fat: false
   });
 
-  // Function to check if there are unsaved changes to meal plan structure
-
-  const checkForUnsavedChanges = () => {
-
-    if (!savedMealPlanStructure || !mealPlanStructure || !Array.isArray(mealPlanStructure) || !Array.isArray(savedMealPlanStructure)) return false;
-
-    // Ensure both structures have the same length
-
-    if (mealPlanStructure.length !== savedMealPlanStructure.length) return false;
-
-    // Compare current structure with saved structure
-
-    const currentStructure = mealPlanStructure.map(meal => ({
-
-      meal: meal.meal,
-
-      description: meal.description,
-
-      calories: meal.calories,
-
-      calories_pct: meal.calories_pct
-
-    }));
-
-    return JSON.stringify(currentStructure) !== JSON.stringify(savedMealPlanStructure);
-
-  };
-
-  // Update unsaved changes state when meal plan structure changes
-
-  useEffect(() => {
-
-    // Don't check for changes if we're in the middle of loading a new client
-
-    if (loadingUserTargets) {
-
-      setHasUnsavedMealPlanChanges(false);
-
-      return;
-
-    }
-
-    // Only check for unsaved changes if we have both structures and they're properly loaded
-
-    if (savedMealPlanStructure && mealPlanStructure && Array.isArray(mealPlanStructure) && Array.isArray(savedMealPlanStructure)) {
-
-      // Add a small delay to ensure the structure is fully updated
-
-      const timeoutId = setTimeout(() => {
-
-        const hasChanges = checkForUnsavedChanges();
-
-        console.log('🔍 Checking for unsaved changes:', {
-
-          hasChanges,
-
-          currentLength: mealPlanStructure.length,
-
-          savedLength: savedMealPlanStructure.length,
-
-          current: mealPlanStructure.map(m => ({ meal: m.meal, description: m.description })),
-
-          saved: savedMealPlanStructure.map(m => ({ meal: m.meal, description: m.description }))
-
-        });
-
-        setHasUnsavedMealPlanChanges(hasChanges);
-
-      }, 200);
-
-      return () => clearTimeout(timeoutId);
-
-    } else {
-
-      setHasUnsavedMealPlanChanges(false);
-
-    }
-
-  }, [mealPlanStructure, savedMealPlanStructure, loadingUserTargets]);
 
 
 
@@ -6392,11 +6303,6 @@ const MenuCreate = () => {
 
       setError(null); // Clear any existing errors
 
-      // Reset unsaved changes when fetching new user targets
-
-      setHasUnsavedMealPlanChanges(false);
-
-      setSavedMealPlanStructure(null);
 
       console.log('🎯 Fetching nutritional targets for user:', userCode);
 
@@ -6669,19 +6575,6 @@ const MenuCreate = () => {
           setManualAlternativesMode(true);
         }
 
-        // Store the modified structure (with locks) as the saved structure for comparison
-
-        setSavedMealPlanStructure(mealPlanWithLocks.map(meal => ({
-
-          meal: meal.meal,
-
-          description: meal.description,
-
-          calories: meal.calories,
-
-          calories_pct: meal.calories_pct
-
-        })));
 
       } else {
 
@@ -6725,15 +6618,7 @@ const MenuCreate = () => {
 
             console.log('✅ Default meal plan structure saved successfully');
 
-            // Store the saved structure for comparison
-
-            setSavedMealPlanStructure(mealPlanToSave);
-
           }
-
-          // Set the saved structure to match the current structure
-
-          setSavedMealPlanStructure(mealPlanToSave);
 
         } catch (err) {
 
@@ -7342,7 +7227,6 @@ const MenuCreate = () => {
           updated[index].alternative = {};
         }
         updated[index].alternative[field] = value;
-        setHasUnsavedMealPlanChanges(true);
         return updated;
       });
       return;
@@ -8129,7 +8013,6 @@ const MenuCreate = () => {
       
       setMealPlanStructure(newMealPlanStructure);
       setSelectedTemplate(template);
-      setHasUnsavedMealPlanChanges(true);
       
       console.log('✅ Applied meal template successfully:', newMealPlanStructure);
       
@@ -8901,11 +8784,6 @@ const MenuCreate = () => {
 
       alert('Meal plan structure saved successfully!');
 
-      // Update the saved structure to match current structure
-
-      setSavedMealPlanStructure(mealPlanToSave);
-
-      setHasUnsavedMealPlanChanges(false);
 
       
 
@@ -9002,8 +8880,6 @@ const MenuCreate = () => {
 
 
         setMealPlanStructure(updatedStructure);
-
-        setHasUnsavedMealPlanChanges(true);
 
 
 
@@ -9696,9 +9572,9 @@ const MenuCreate = () => {
 
 
 
-        // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+        const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
 
-        const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+        // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
 
         method: "POST",
 
@@ -9905,9 +9781,9 @@ const MenuCreate = () => {
 
 
 
-      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
 
-      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
 
         method: "POST",
 
@@ -10297,17 +10173,6 @@ const MenuCreate = () => {
 
     }
 
-    // Check if there are unsaved changes to meal plan structure
-
-    if (hasUnsavedMealPlanChanges && !loadingUserTargets) {
-
-      console.log('⚠️ Unsaved changes detected, showing dialog');
-
-      setShowUnsavedChangesDialog(true);
-
-      return; // Don't proceed until user saves or confirms
-
-    }
 
 
 
@@ -10533,9 +10398,9 @@ const MenuCreate = () => {
 
 
 
-      // const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
+      const templateRes = await fetch("https://dietitian-be.azurewebsites.net/api/template", {
 
-      const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
+      // const templateRes = await fetch("http://127.0.0.1:8000/api/template", {
 
         method: "POST",
 
@@ -10706,9 +10571,9 @@ const MenuCreate = () => {
 
 
 
-      // const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
+      const buildRes = await fetch("https://dietitian-be.azurewebsites.net/api/build-menu", {
 
-      const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
+      // const buildRes = await fetch("http://127.0.0.1:8000/api/build-menu", {
 
         method: "POST",
 
@@ -13853,9 +13718,6 @@ const MenuCreate = () => {
                         console.warn('⚠️ Failed to refresh user targets after save:', e);
                       }
 
-                      // Update the saved meal plan structure to reflect the changes
-                      setSavedMealPlanStructure(saveData.meal_plan_structure);
-                      setHasUnsavedMealPlanChanges(false);
 
                       // Show success message (you could add a toast notification here)
                       alert('Nutrition targets and meal plan structure saved successfully!');
@@ -14175,8 +14037,6 @@ const MenuCreate = () => {
                             description: ''
                           })));
                           
-                          // Mark as having unsaved changes
-                          setHasUnsavedMealPlanChanges(true);
                         }}
                         className="text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md flex-shrink-0 h-8 w-8 p-0"
                         title="Clear template selection and meal descriptions"

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Code Generator</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', 'Poppins', Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #059669 0%, #10b981 50%, #34d399 100%);
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(5, 150, 105, 0.3);
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+        }
+        h1 {
+            background: linear-gradient(135deg, #047857 0%, #059669 50%, #10b981 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 30px;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        #qrcode {
+            margin: 30px auto;
+            padding: 20px;
+            background: white;
+            border-radius: 12px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: fit-content;
+        }
+        #qrcode canvas {
+            display: block;
+            margin: 0 auto;
+        }
+        .link {
+            margin-top: 30px;
+            padding: 15px;
+            background: #ecfdf5;
+            border: 1px solid #a7f3d0;
+            border-radius: 8px;
+            word-break: break-all;
+            font-size: 12px;
+            color: #047857;
+            text-align: left;
+        }
+        button {
+            margin-top: 25px;
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #059669 0%, #10b981 50%, #22c55e 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            box-shadow: 0 8px 30px rgba(5, 150, 105, 0.3);
+            transition: all 0.3s ease;
+        }
+        button:hover {
+            box-shadow: 0 12px 40px rgba(5, 150, 105, 0.4);
+            transform: translateY(-2px);
+            background: linear-gradient(135deg, #047857 0%, #059669 50%, #10b981 100%);
+        }
+        button:active {
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BetterChoice QR Code</h1>
+        <div id="qrcode"></div>
+        <div class="link" id="link-display"></div>
+    </div>
+
+    <script>
+        const link = 'https://betterchoice.one/signup#d=NmYzMmRjNWEtZDU4NS00YzI4LTk3ZWYtMjk5NWI0ODIwZGQ4';
+        
+        // Display the link
+        
+        // Generate QR Code
+        new QRCode(document.getElementById("qrcode"), {
+            text: link,
+            width: 256,
+            height: 256,
+            colorDark: "#000000",
+            colorLight: "#ffffff",
+            correctLevel: QRCode.CorrectLevel.H
+        });
+        
+        function downloadQR() {
+            const canvas = document.querySelector('#qrcode canvas');
+            if (canvas) {
+                const url = canvas.toDataURL('image/png');
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'referral-qr-code.png';
+                a.click();
+            }
+        }
+    </script>
+</body>
+</html>
+

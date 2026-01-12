@@ -131,8 +131,10 @@ class MealNaming(dspy.Signature):
     - Format branded items as: "[Regional Brand] [Product Name] [Variant]".
 5. **Macro Alignment:** Use the {{macro_targets}} to choose specific product versions (e.g., "Low Fat," "Whole Grain," or specific percentage of fat) and quantities that would logically fit these targets.
 6. **Web Search Verification:** If you are unsure if a brand exists or is currently sold in the {{region}}, search the web to confirm its availability before including it.
+7. **Deduplication:** Review the list for any overlapping ingredients. Each unique food item must appear only ONCE. For example, do not list "Eggs" and "Scrambled Eggs" separately; combine them into a single entry (e.g., "3 Large Eggs").
 
 ### STRICT CONSTRAINTS:
+- **Atomic Items:** List ingredients as they are purchased, not as they are prepared (e.g., "Raw Chicken Breast" instead of "Grilled Chicken").
 - **Maximum 7 Ingredients:** The list must contain exactly (or up to) 7 items total. No more.
 - **English Only:** All outputted ingredient names and brand names must be in English.
 - **Regional Consistency:** Never mix regions (e.g., do not suggest a US brand for a client in Israel).
@@ -741,6 +743,9 @@ class MealBuilderChain(dspy.Module):
         
         # Custom Gemini lookup
         self.nutrition_lookup = GeminiNutritionLookup()
+        
+        # Track if we've already logged region (only log once per instance)
+        self._region_logged = False
     
     def _get_allowed_margin(self, value: float) -> float:
         """
@@ -905,17 +910,18 @@ The data must be for "{ingredient_query}" specifically, not a similar or substit
         # Extract preferences
         region = preferences.get("region", "israel")
         
-        # Debug logging for region
-        logger.info(f"🌍 Region from preferences: '{region}' (type: {type(region)})")
-        if not region or region.strip().lower() == "israel":
-            logger.warning(f"⚠️ Using default region 'israel' - check if user's region is set correctly in database")
-        
         # Normalize region (handle case sensitivity, whitespace)
         if region:
             region = region.strip().lower()
         else:
             region = "israel"
-            logger.warning(f"⚠️ Region was empty/None, defaulting to 'israel'")
+        
+        # Debug logging for region (only once per instance, since it's the same user)
+        if not self._region_logged:
+            logger.info(f"🌍 Region from preferences: '{region}' (type: {type(region)})")
+            if not preferences.get("region") or region == "israel":
+                logger.warning(f"⚠️ Using default region 'israel' - check if user's region is set correctly in database")
+            self._region_logged = True
         
         raw_allergies = preferences.get("allergies", []) or []
         raw_limitations = preferences.get("limitations", []) or []
