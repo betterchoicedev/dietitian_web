@@ -786,6 +786,14 @@ export default function Layout() {
                 <MessageSquare className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
                 <span className="font-medium">{translations.chat}</span>
               </Button>
+
+              <Link to="/menuload" onClick={() => setSidebarOpen(false)}>
+              <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-info/8 hover:text-info transition-all duration-300 group">
+                <FileText className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+                <span className="font-medium">{translations.menuload}</span>
+              </Button>
+            </Link>
+            
             </Link>
             <Link to={createPageUrl('MenuCreate')} onClick={() => setSidebarOpen(false)}>
               <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-success/8 hover:text-success-darker transition-all duration-300 group">
@@ -811,12 +819,7 @@ export default function Layout() {
                 <span className="font-medium">{translations.nutritionAnalytics || 'Nutrition Analytics'}</span>
               </Button>
             </Link>
-            <Link to="/menuload" onClick={() => setSidebarOpen(false)}>
-              <Button variant="ghost" className="w-full justify-start h-11 rounded-xl hover:bg-info/8 hover:text-info transition-all duration-300 group">
-                <FileText className="mr-3 h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
-                <span className="font-medium">{translations.menuload}</span>
-              </Button>
-            </Link>
+           
           </div>
         </nav>
         

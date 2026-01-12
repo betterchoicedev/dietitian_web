@@ -5927,15 +5927,50 @@ const MenuCreate = () => {
 
     
 
+    const currentMealCount = mealPlanStructure.length || numberOfMeals;
+
     setNumberOfMeals(newNumberOfMeals);
 
     
 
-    // Update meal plan structure based on new number of meals
+    // Preserve existing meals and only add/remove as needed
+    let updatedStructure = [...mealPlanStructure];
 
-    const newStructure = getDefaultMealPlanStructure(translations, newNumberOfMeals);
+    if (newNumberOfMeals > currentMealCount) {
+      // Adding meals: keep existing ones and add new empty ones
+      const mealsToAdd = newNumberOfMeals - currentMealCount;
+      const defaultStructure = getDefaultMealPlanStructure(translations, newNumberOfMeals);
+      
+      // Get the new meals that need to be added (the ones beyond current count)
+      const newMeals = defaultStructure.slice(currentMealCount);
+      
+      // Preserve existing meals and add new ones
+      updatedStructure = [...mealPlanStructure, ...newMeals];
+      
+      console.log(`➕ Adding ${mealsToAdd} new meal(s) to structure`);
+    } else if (newNumberOfMeals < currentMealCount) {
+      // Removing meals: keep only the first N meals
+      updatedStructure = mealPlanStructure.slice(0, newNumberOfMeals);
+      console.log(`➖ Removing ${currentMealCount - newNumberOfMeals} meal(s) from structure`);
+    } else {
+      // Same number, no change needed
+      console.log(`✓ Number of meals unchanged: ${newNumberOfMeals}`);
+    }
 
-    setMealPlanStructure(newStructure);
+    // Recalculate calories distribution if needed
+    if (updatedStructure.length > 0) {
+      const totalCalories = userTargets?.calories_per_day || selectedClient?.daily_target_total_calories || 0;
+      if (totalCalories > 0) {
+        const caloriesPerMeal = Math.round((totalCalories / updatedStructure.length) * 10) / 10;
+        updatedStructure = updatedStructure.map(meal => ({
+          ...meal,
+          calories: Math.round(caloriesPerMeal),
+          calories_pct: Math.round((100 / updatedStructure.length) * 10) / 10
+        }));
+      }
+    }
+
+    setMealPlanStructure(updatedStructure);
 
     
 
@@ -5943,9 +5978,12 @@ const MenuCreate = () => {
 
     try {
 
-      await ChatUser.update(selectedClient.user_code, { number_of_meals: newNumberOfMeals });
-
-      console.log('✅ Updated number of meals for client:', newNumberOfMeals);
+      if (entities?.ChatUser?.update) {
+        await entities.ChatUser.update(selectedClient.user_code, { number_of_meals: newNumberOfMeals });
+        console.log('✅ Updated number of meals for client:', newNumberOfMeals);
+      } else {
+        console.warn('⚠️ ChatUser.update is not available');
+      }
 
     } catch (error) {
 
@@ -13047,68 +13085,6 @@ const MenuCreate = () => {
 
 
 
-      {/* Client Selection - Now using global selection from sidebar */}
-
-      <Card>
-
-        <CardHeader>
-
-          <CardTitle>{translations.clientSelection || 'Selected Client'}</CardTitle>
-
-          <CardDescription>
-
-            {selectedClient 
-
-              ? `${translations.clientFromSidebar || 'Client selected from sidebar'}: ${selectedClient.full_name}`
-
-              : translations.selectClientInSidebar || 'Please select a client in the sidebar to generate a menu'
-
-            }
-
-          </CardDescription>
-
-        </CardHeader>
-
-        <CardContent>
-
-          {selectedClient ? (
-
-            <div className="p-3 bg-green-50 border border-green-200 rounded-md">
-
-              <div className="flex items-center gap-2 text-sm text-green-700">
-
-                <span>✓</span>
-
-                <span className="font-medium">{translations.selected || 'Selected'}: {selectedClient.full_name}</span>
-
-                <span className="text-green-600">({selectedClient.user_code})</span>
-
-              </div>
-
-            </div>
-
-          ) : (
-
-            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-
-              <div className="flex items-center gap-2 text-sm text-yellow-700">
-
-                <span>⚠️</span>
-
-                <span>{translations.noClientSelected || 'No client selected'}</span>
-
-              </div>
-
-            </div>
-
-          )}
-
-        </CardContent>
-
-      </Card>
-
-
-
       {/* Number of Meals per Day Section */}
 
       {selectedClient && (
@@ -13177,88 +13153,8 @@ const MenuCreate = () => {
 
       )}
 
-
-
-      {/* User Targets Display */}
-
-      {/* Menu Generation Section */}
-
-      {selectedClient && userTargets && (
-
-        <Card className="border-green-200 bg-green-50/30 mb-6">
-
-          <CardHeader>
-
-            <CardTitle className="flex items-center gap-2 text-green-800">
-
-              <span>🍽️</span>
-
-              {translations.generateMenu || 'Generate Menu'}
-
-            </CardTitle>
-
-            <CardDescription className="text-green-600">
-
-              {translations.generateMenuFor ? `${translations.generateMenuFor} ${selectedClient.full_name}` : `Generate personalized menu for ${selectedClient.full_name}`}
-
-            </CardDescription>
-
-          </CardHeader>
-
-          <CardContent>
-
-            <div className="space-y-4">
-
-              {/* Show button only when not loading */}
-
-              {!loading && (
-
-                <div className="flex flex-wrap gap-4">
-
-                  <Button
-
-                    onClick={fetchMenu}
-
-                    disabled={!selectedClient}
-
-                    className="bg-green-600 hover:bg-green-700 text-white px-6 py-3"
-
-                  >
-
-                    <span className="text-lg">🎯</span>
-
-                    {translations.generateMenu || 'Generate Menu'}
-
-                  </Button>
-
-                </div>
-
-              )}
-
-              
-
-              {/* Loading Progress Indicator */}
-
-              {loading && (
-
-                <div className="mt-6">
-
-                  <WaterBarLoading />
-
-                </div>
-
-              )}
-
-            </div>
-
-          </CardContent>
-
-        </Card>
-
-      )}
-
-      {/* Daily Calories and Macros Section */}
-      {selectedClient && userTargets && (
+{/* Daily Calories and Macros Section */}
+{selectedClient && userTargets && (
         <Card className="border-green-200 bg-green-50/30 mb-6">
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -13747,1403 +13643,139 @@ const MenuCreate = () => {
         </Card>
       )}
 
-      {/* Meal Plan Structure Section */}
+ {/* Meal Plan Structure Section */}
 
-      {selectedClient && userTargets && (
+ {selectedClient && userTargets && (
 
-        <Card className="border-blue-200 bg-blue-50/30 mb-6 transition-all duration-500 rounded-lg" data-meal-plan-section>
+<Card className="border-blue-200 bg-blue-50/30 mb-6 transition-all duration-500 rounded-lg" data-meal-plan-section>
 
-          <CardHeader>
+  <CardHeader>
 
-            <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between">
 
-              <div className="flex items-center gap-2 text-blue-800">
+      <div className="flex items-center gap-2 text-blue-800">
 
-                <span>📋</span>
+        <span>📋</span>
 
-                <CardTitle>{translations.mealPlanStructure || 'Meal Plan Structure'}</CardTitle>
+        <CardTitle>{translations.mealPlanStructure || 'Meal Plan Structure'}</CardTitle>
 
-              </div>
+      </div>
 
-              <Button
+      <Button
 
-                type="button"
+        type="button"
 
-                variant="ghost"
+        variant="ghost"
 
-                size="sm"
+        size="sm"
 
-                onClick={() => setIsMealPlanMinimized(!isMealPlanMinimized)}
+        onClick={() => setIsMealPlanMinimized(!isMealPlanMinimized)}
 
-                className="text-blue-600 hover:bg-blue-100"
+        className="text-blue-600 hover:bg-blue-100"
 
-                title={isMealPlanMinimized ? "Expand Meal Plan Structure" : "Minimize Meal Plan Structure"}
+        title={isMealPlanMinimized ? "Expand Meal Plan Structure" : "Minimize Meal Plan Structure"}
 
-              >
+      >
 
-                {isMealPlanMinimized ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+        {isMealPlanMinimized ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
 
-              </Button>
+      </Button>
 
-            </div>
+    </div>
 
-            <CardDescription className="text-blue-600">
+    <CardDescription className="text-blue-600">
 
-              {translations.mealPlanDescription || 'Configure how daily calories are distributed across meals'}
+      {translations.mealPlanDescription || 'Configure how daily calories are distributed across meals'}
 
-            </CardDescription>
+    </CardDescription>
 
-          </CardHeader>
+  </CardHeader>
 
-          {!isMealPlanMinimized && (
+  {!isMealPlanMinimized && (
 
-            <CardContent className="animate-in slide-in-from-top-2 duration-300">
+    <CardContent className="animate-in slide-in-from-top-2 duration-300">
 
-              {!selectedClient?.daily_target_total_calories && (
-                <Alert className="mb-4 border-red-200 bg-red-50">
-                  <AlertTitle className="text-red-800 flex items-center gap-2">
-                    <span>⚠️</span>
-                    {translations.missingCaloriesWarning || 'Missing Client Profile Information'}
-                  </AlertTitle>
-                  <AlertDescription className="text-red-700">
-                    {translations.missingCaloriesEditMessage || `The client "${selectedClient?.full_name || 'selected client'}" does not have a daily target calories value set. Please complete the client profile information in the "Clients" page before editing these settings.`}
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              <div className="space-y-3">
-
-                <div className="flex items-center justify-between">
-
-                  <p className="text-sm text-gray-600">
-
-                    {translations.mealPlanDescription || 'Configure how daily calories are distributed across meals'}
-
-                  </p>
-
-                  <div className="flex gap-2">
-
-                    <Button
-
-                      type="button"
-
-                      variant="outline"
-
-                      size="sm"
-
-                      onClick={updateMealPlanDescriptionsWithAI}
-
-                      disabled={updatingMealDescriptions || !selectedClient?.daily_target_total_calories}
-
-                      className="text-purple-600 border-purple-600 hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed"
-
-                      title="Use AI to update meal descriptions based on client's eating habits"
-
-                    >
-
-                      {updatingMealDescriptions ? (
-
-                        <Loader className={`h-4 w-4 ${dir === 'rtl' ? 'ml-1' : 'mr-1'} animate-spin`} />
-
-                      ) : (
-
-                        <Sparkles className={`h-4 w-4 ${dir === 'rtl' ? 'ml-1' : 'mr-1'}`} />
-
-                      )}
-
-                      {updatingMealDescriptions ? (translations.updating || 'Updating...') : (translations.aiUpdate || 'AI Update')}
-
-                    </Button>
-
-                    <Button
-
-                      type="button"
-
-                      variant="outline"
-
-                      size="sm"
-
-                      onClick={saveMealPlanStructure}
-
-                      disabled={!selectedClient?.daily_target_total_calories}
-
-                      className="text-blue-600 border-blue-600 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
-
-                      title="Save meal plan structure to database"
-
-                    >
-
-                      <Save className="h-4 w-4 mr-1" />
-
-                      {translations.saveMealPlan || 'Save Plan'}
-
-                    </Button>
-
-                    {process.env.NODE_ENV === 'development' && !manualAlternativesMode && (
-                      <Button
-
-                        type="button"
-
-                        variant="outline"
-
-                        size="sm"
-
-                        onClick={saveAsTemplate}
-
-                        className="text-purple-600 border-purple-600 hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed"
-
-                        title={
-
-                          mealPlanStructure.some(meal => !meal.description || meal.description.trim() === '')
-
-                            ? translations.fillAllMealsFirst || 'Fill all meal descriptions first'
-
-                            : translations.saveCurrentAsReusableTemplate || 'Save current meal plan as a reusable template'
-
-                        }
-
-                        disabled={
-
-                          mealPlanStructure.length === 0 || 
-
-                          mealPlanStructure.some(meal => !meal.description || meal.description.trim() === '')
-
-                        }
-
-                      >
-
-                        <Save className={`h-4 w-4 ${dir === 'rtl' ? 'ml-1' : 'mr-1'}`} />
-
-                        {translations.saveAsTemplate || 'Save as Template'}
-
-                      </Button>
-                    )}
-
-                    <Button
-
-                      type="button"
-
-                      variant="outline"
-
-                      size="sm"
-
-                      onClick={addMealToPlan}
-
-                      disabled={!selectedClient?.daily_target_total_calories}
-
-                      className="text-green-600 border-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed"
-
-                    >
-
-                      <Plus className={`h-4 w-4 ${dir === 'rtl' ? 'ml-1' : 'mr-1'}`} />
-
-                      {translations.addMeal || 'Add Meal'}
-
-                    </Button>
-
-                  </div>
-
-                </div>
-
-                {/* Meal Template Selector */}
-                <div className="border border-blue-200 rounded-lg p-3 bg-gradient-to-br from-blue-50 to-white mb-4 shadow-sm">
-                  <div className="flex items-center gap-3">
-                    <div className={`flex items-center gap-2 flex-shrink-0 ${dir === 'rtl' ? 'flex-row-reverse' : ''}`}>
-                      <span className="text-lg">📝</span>
-                      <label className="text-sm font-semibold text-gray-800 whitespace-nowrap">
-                        {translations.mealTemplate || 'Meal Template'}:
-                      </label>
-                    </div>
-                    <div className="flex-1">
-                      <Select
-                        value={selectedTemplate?.id || ''}
-                        onValueChange={(value) => {
-                          const template = mealTemplates.find(t => t.id === value);
-                          if (template) {
-                            applyMealTemplate(template);
-                          }
-                        }}
-                        disabled={loadingTemplates}
-                      >
-                        <SelectTrigger className="w-full bg-white border-blue-200 hover:border-blue-300 focus:ring-blue-500 focus:border-blue-500 transition-colors">
-                          <SelectValue placeholder={loadingTemplates ? 'Loading templates...' : (translations.selectTemplate || 'Select a template (optional)')} />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-[400px]">
-                          {mealTemplates.map(template => {
-                            const currentMealCount = numberOfMeals || 4;
-                            const hasMatchingVariant = template.availableMealCounts?.includes(currentMealCount);
-                            const isDisabled = !hasMatchingVariant;
-                            const displayName = getTemplateDisplayName(template);
-                            const templateEmoji = getTemplateEmoji(template.name);
-                            
-                            return (
-                              <SelectItem 
-                                key={template.id} 
-                                value={template.id}
-                                disabled={isDisabled}
-                                className={`cursor-pointer ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-50 focus:bg-blue-50'}`}
-                              >
-                                <div className="flex items-center justify-between gap-3 py-1 w-full">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-lg">{templateEmoji}</span>
-                                    <span className="font-medium">{displayName}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    {template.tags && template.tags.length > 0 && (
-                                      <span className="text-xs text-gray-500">({template.tags.join(', ')})</span>
-                                    )}
-                                    <Badge 
-                                      variant="outline" 
-                                      className={`text-xs ${hasMatchingVariant ? 'bg-green-50 border-green-300 text-green-700' : 'bg-red-50 border-red-300 text-red-700'}`}
-                                    >
-                                      {template.availableMealCounts?.join(', ') || '?'} meals
-                                    </Badge>
-                                  </div>
-                                </div>
-                              </SelectItem>
-                            );
-                          })}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {!manualAlternativesMode && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setShowTemplateManager(true)}
-                        className="text-purple-600 border-purple-300 hover:bg-purple-50 whitespace-nowrap"
-                        title={translations.manageTemplates || 'Manage Templates'}
-                      >
-                        <span className={dir === 'rtl' ? 'ml-1' : 'mr-1'}>⚙️</span> {translations.manage || 'Manage'}
-                      </Button>
-                    )}
-                    {selectedTemplate && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          // Clear the template selection
-                          setSelectedTemplate(null);
-                          
-                          // Also clear all meal descriptions from the structure
-                          setMealPlanStructure(prev => prev.map(meal => ({
-                            ...meal,
-                            description: ''
-                          })));
-                          
-                        }}
-                        className="text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md flex-shrink-0 h-8 w-8 p-0"
-                        title="Clear template selection and meal descriptions"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                  {selectedTemplate && (
-                    <div className="mt-2 flex items-start gap-2 bg-blue-100/50 border border-blue-200 rounded-md p-2">
-                      <span className="text-blue-600">ℹ️</span>
-                      <p className="text-xs text-blue-800">
-                        <span className="font-medium">{translations.templateApplied || 'Template applied'}:</span> <span className="text-base">{getTemplateEmoji(selectedTemplate.name)}</span> {getTemplateDisplayName(selectedTemplate)}
-                        <span className="ml-2 text-blue-600">({numberOfMeals} meals)</span>
-                      </p>
-                    </div>
-                  )}
-                  {!selectedTemplate && mealTemplates.length > 0 && (() => {
-                    const currentMealCount = numberOfMeals || 4;
-                    const compatibleCount = mealTemplates.filter(t => t.availableMealCounts?.includes(currentMealCount)).length;
-                    const totalCount = mealTemplates.length;
-                    
-                    return (
-                      <div className={`mt-2 flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-md p-2 ${dir === 'rtl' ? 'flex-row-reverse' : ''}`}>
-                        <span className="text-blue-600">💡</span>
-                        <div className="flex-1">
-                          <p className="text-xs text-blue-700">
-                            {(translations.templateFilterInfo || `Showing templates for ${currentMealCount} meals:`).replace('{count}', currentMealCount)}
-                          </p>
-                          <p className="text-xs text-blue-600 font-medium mt-0.5">
-                            {compatibleCount} {translations.compatibleTemplates || 'compatible'}, {totalCount - compatibleCount} {translations.incompatibleDisabled || 'incompatible (disabled)'}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                  {(() => {
-                    // Only show warning if no template AND meals are not all filled
-                    const mealsWithDescriptions = mealPlanStructure.filter(meal => 
-                      meal.description && meal.description.trim() !== ''
-                    ).length;
-                    const totalMeals = mealPlanStructure.length;
-                    const allMealsFilled = mealsWithDescriptions === totalMeals;
-                    
-                    if (!selectedTemplate && !allMealsFilled) {
-                      return (
-                        <div className={`mt-2 flex items-start gap-2 bg-amber-50 border border-amber-300 rounded-md p-3 ${dir === 'rtl' ? 'flex-row-reverse' : ''}`}>
-                          <span className="text-amber-600 text-lg">⚠️</span>
-                          <div className="flex-1">
-                            <p className="text-sm font-semibold text-amber-900 mb-1">
-                              {translations.noTemplateSelected || 'No template selected'}
-                            </p>
-                            <p className="text-xs text-amber-800">
-                              {translations.mustFillAllDescriptions || 'You must fill in descriptions for ALL meals below, or select a template above. Partial descriptions are not allowed.'}
-                            </p>
-                            <p className="text-xs text-amber-700 mt-1 font-medium">
-                              {translations.currentProgress || 'Progress'}: {(translations.mealsFilledProgress || '{filled}/{total} meals filled').replace('{filled}', mealsWithDescriptions).replace('{total}', totalMeals)}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    }
-                    return null;
-                  })()}
-                </div>
-
-                {/* Manual Alternatives Mode Toggle */}
-                <div className="mb-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <Button
-                      type="button"
-                      variant={manualAlternativesMode ? "default" : "outline"}
-                      onClick={() => setManualAlternativesMode(!manualAlternativesMode)}
-                      disabled={!selectedClient?.daily_target_total_calories}
-                    >
-                      {manualAlternativesMode ? "✓ " : ""}
-                      {translations.chooseYourOwnAlternatives || "Choose Your Own Alternatives"}
-                    </Button>
-                    {manualAlternativesMode && (
-                      <p className="text-xs text-gray-600">
-                        {translations.manualAlternativesHint || "Fill in macros (C, P, F) for both main and alternative meals. Carbs will be calculated automatically. Macros must not exceed meal calories."}
-                      </p>
-                    )}
-                  </div>
-                  {/* Total Macros Validation */}
-                  {manualAlternativesMode && userTargets && (() => {
-                    const validation = validateTotalMacros();
-                    const mainTotals = validation.mainTotals;
-                    const altTotals = validation.altTotals;
-                    const targets = validation.targets;
-                    
-                    // Helper to check if value matches target (within tolerance of 3)
-                    const tolerance = 3;
-                    const matchesTarget = (value, target) => Math.abs(value - target) <= tolerance;
-                    const getStatusColor = (value, target) => {
-                      const diff = Math.abs(value - target);
-                      if (diff <= tolerance) return 'text-green-700';
-                      return 'text-red-700 font-bold'; // Red and bold when not matching within tolerance
-                    };
-                    const getStatusIcon = (value, target) => {
-                      const diff = Math.abs(value - target);
-                      if (diff <= tolerance) return '✓';
-                      if (value > target) return '↑';
-                      return '↓';
-                    };
-                    
-                    return (
-                      <div className="mt-2 space-y-2">
-                        {/* Summary */}
-                        <div className={`border rounded-md p-3 ${validation.isValid ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
-                          <div className="grid grid-cols-12 gap-4 text-xs">
-                            {/* Explanation Section - Left */}
-                            <div className="col-span-4 pr-4 border-r border-gray-300">
-                              <p className="font-semibold text-gray-800 mb-2">
-                                {translations.howToBuildMealPlan || "How to Build with This Structure:"}
-                              </p>
-                              <div className="space-y-2 text-xs text-gray-700">
-                                {language === 'he' ? (
-                                  <p className="text-xs leading-relaxed" dir="rtl">
-                                    {translations.mealPlanStructureExplanationHe || "מבנה תכנית הארוחות הזה מאפשר לך ליצור ארוחות עיקריות וארוחות חלופיות. לכל ארוחה יכולים להיות מאקרו-נוטריינטים משלה (קלוריות, חלבון, שומן, פחמימות). הארוחות העיקריות מייצגות את תכנית הארוחות הראשית, בעוד שהארוחות החלופיות מספקות אפשרויות החלפה. שתיהן חייבות להיות שוות ליעדים היומיים המוצגים מימין."}
-                                  </p>
-                                ) : (
-                                  <p className="text-xs leading-relaxed">
-                                    {translations.mealPlanStructureExplanationEn || "This meal plan structure allows you to create main meals and alternative meals. Each meal can have its own macros (calories, protein, fat, carbs). The main meals represent the primary meal plan, while alternative meals provide substitution options. Both must equal the daily targets shown on the right."}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                            
-                            {/* Main and Alternative Meals - Right */}
-                            <div className="col-span-8">
-                              <div className="text-xs font-semibold text-gray-800 mb-2">
-                                {translations.totalMacrosSummary || "Total Macros Summary (must equal daily targets)"}
-                              </div>
-                              <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                  <p className="font-semibold text-gray-800 mb-1">Main Meals:</p>
-                                  <div className="pl-2 space-y-0.5">
-                                    <div className={getStatusColor(mainTotals.calories, targets.calories)}>
-                                      <span className="font-medium">{getStatusIcon(mainTotals.calories, targets.calories)}</span> Calories: {mainTotals.calories} / {targets.calories} {mainTotals.calories !== targets.calories && `(${mainTotals.calories > targets.calories ? '+' : ''}${mainTotals.calories - targets.calories})`}
-                                    </div>
-                                    <div className={getStatusColor(mainTotals.protein, targets.protein)}>
-                                      <span className="font-medium">{getStatusIcon(mainTotals.protein, targets.protein)}</span> Protein: {mainTotals.protein}g / {targets.protein}g {mainTotals.protein !== targets.protein && `(${mainTotals.protein > targets.protein ? '+' : ''}${mainTotals.protein - targets.protein}g)`}
-                                    </div>
-                                    <div className={getStatusColor(mainTotals.fat, targets.fat)}>
-                                      <span className="font-medium">{getStatusIcon(mainTotals.fat, targets.fat)}</span> Fat: {mainTotals.fat}g / {targets.fat}g {mainTotals.fat !== targets.fat && `(${mainTotals.fat > targets.fat ? '+' : ''}${mainTotals.fat - targets.fat}g)`}
-                                    </div>
-                                    {targets.carbs > 0 && (
-                                      <div className={getStatusColor(mainTotals.carbs, targets.carbs)}>
-                                        <span className="font-medium">{getStatusIcon(mainTotals.carbs, targets.carbs)}</span> Carbs: {mainTotals.carbs}g / {targets.carbs}g {mainTotals.carbs !== targets.carbs && `(${mainTotals.carbs > targets.carbs ? '+' : ''}${mainTotals.carbs - targets.carbs}g)`}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                                <div>
-                                  <p className="font-semibold text-gray-800 mb-1">Alternative Meals:</p>
-                                  <div className="pl-2 space-y-0.5">
-                                    <div className={getStatusColor(altTotals.calories, targets.calories)}>
-                                      <span className="font-medium">{getStatusIcon(altTotals.calories, targets.calories)}</span> Calories: {altTotals.calories} / {targets.calories} {altTotals.calories !== targets.calories && `(${altTotals.calories > targets.calories ? '+' : ''}${altTotals.calories - targets.calories})`}
-                                    </div>
-                                    <div className={getStatusColor(altTotals.protein, targets.protein)}>
-                                      <span className="font-medium">{getStatusIcon(altTotals.protein, targets.protein)}</span> Protein: {altTotals.protein}g / {targets.protein}g {altTotals.protein !== targets.protein && `(${altTotals.protein > targets.protein ? '+' : ''}${altTotals.protein - targets.protein}g)`}
-                                    </div>
-                                    <div className={getStatusColor(altTotals.fat, targets.fat)}>
-                                      <span className="font-medium">{getStatusIcon(altTotals.fat, targets.fat)}</span> Fat: {altTotals.fat}g / {targets.fat}g {altTotals.fat !== targets.fat && `(${altTotals.fat > targets.fat ? '+' : ''}${altTotals.fat - targets.fat}g)`}
-                                    </div>
-                                    {targets.carbs > 0 && (
-                                      <div className={getStatusColor(altTotals.carbs, targets.carbs)}>
-                                        <span className="font-medium">{getStatusIcon(altTotals.carbs, targets.carbs)}</span> Carbs: {altTotals.carbs}g / {targets.carbs}g {altTotals.carbs !== targets.carbs && `(${altTotals.carbs > targets.carbs ? '+' : ''}${altTotals.carbs - targets.carbs}g)`}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-
-                <div className="border rounded-lg overflow-hidden">
-
-                  <div className="bg-gray-50 px-4 py-2 border-b">
-
-                    <div className="grid grid-cols-12 gap-2 text-xs font-medium text-gray-600">
-
-                      <div className="col-span-3">{translations.mealName || 'Meal Name'}</div>
-
-                      <div className="col-span-2">{translations.mealDescriptionShort || translations.description || 'Description'}</div>
-
-                      <div className="col-span-2">{translations.caloriesLabel || translations.calories || 'Calories'}</div>
-
-                      <div className="col-span-2">{translations.percentage || 'Percentage'}</div>
-
-                      <div className="col-span-1">{translations.lock || 'Lock'}</div>
-
-                      <div className="col-span-2">{translations.actions || 'Actions'}</div>
-
-                    </div>
-
-                  </div>
-
-                  
-
-                  {mealPlanStructure.map((meal, index) => (
-                    <React.Fragment key={`meal-${index}`}>
-                    <div className="px-4 py-3 border-b last:border-b-0 bg-white">
-
-                      <div className="grid grid-cols-12 gap-2 items-start">
-
-                        {/* Meal Name */}
-
-                        <div className="col-span-3">
-
-                          <Input
-
-                            value={meal.meal}
-
-                            onChange={(e) => updateMealInPlan(index, 'meal', e.target.value)}
-
-                            disabled={!selectedClient?.daily_target_total_calories}
-
-                            className="text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
-
-                            placeholder={translations.mealName || 'Meal name'}
-
-                          />
-
-                        </div>
-
-                        
-
-                        {/* Description */}
-
-                        <div className="col-span-2 flex">
-
-                          <div className="relative flex-1 w-full" data-description-field="true">
-
-                            {expandedDescriptionIndex === index ? (
-                              <Textarea
-
-                                value={meal.description}
-
-                                onChange={(e) => {
-                                  updateMealInPlan(index, 'description', e.target.value);
-                                  // Auto-resize textarea when expanded
-                                  e.target.style.height = 'auto';
-                                  e.target.style.height = Math.min(e.target.scrollHeight, 300) + 'px';
-                                }}
-
-                                onBlur={() => {
-                                  // Clear any existing timeout
-                                  if (blurTimeoutRef.current) {
-                                    clearTimeout(blurTimeoutRef.current);
-                                  }
-                                  
-                                  // Delay collapse to allow clicking another field to expand first
-                                  blurTimeoutRef.current = setTimeout(() => {
-                                    setExpandedDescriptionIndex((currentExpanded) => {
-                                      // Only collapse if we're still expanded on this field
-                                      return currentExpanded === index ? null : currentExpanded;
-                                    });
-                                  }, 150);
-                                }}
-
-                                disabled={!selectedClient?.daily_target_total_calories}
-
-                                className={`text-sm resize-none flex-1 w-full transition-all duration-200 min-h-[100px] max-h-[300px] disabled:bg-gray-100 disabled:cursor-not-allowed ${!selectedTemplate && (!meal.description || meal.description.trim() === '') ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200' : ''}`}
-
-                                placeholder={!selectedTemplate ? (translations.required || 'Required') : (translations.mealDescriptionShort || translations.descriptionPlaceholder || 'Optional description')}
-
-                                rows={4}
-
-                                autoFocus
-
-                              />
-                            ) : (
-                              <Input
-
-                                value={meal.description}
-
-                                onMouseDown={(e) => {
-                                  if (!selectedClient?.daily_target_total_calories) {
-                                    e.preventDefault();
-                                    return;
-                                  }
-                                  // Clear any pending blur timeout from previous field
-                                  if (blurTimeoutRef.current) {
-                                    clearTimeout(blurTimeoutRef.current);
-                                    blurTimeoutRef.current = null;
-                                  }
-                                  
-                                  // Set expanded index immediately on mouse down (before blur fires)
-                                  e.preventDefault();
-                                  setExpandedDescriptionIndex(index);
-                                }}
-
-                                readOnly
-
-                                disabled={!selectedClient?.daily_target_total_calories}
-
-                                className={`text-sm cursor-pointer truncate disabled:bg-gray-100 disabled:cursor-not-allowed ${!selectedTemplate && (!meal.description || meal.description.trim() === '') ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200' : ''}`}
-
-                                placeholder={!selectedTemplate ? (translations.required || 'Required') : (translations.mealDescriptionShort || translations.descriptionPlaceholder || 'Optional description')}
-
-                                title={meal.description || ''}
-
-                              />
-                            )}
-
-                            {!selectedTemplate && (!meal.description || meal.description.trim() === '') && (
-
-                              <span className="absolute -right-2 -top-2 flex h-3 w-3">
-
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-
-                                <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
-
-                              </span>
-
-                            )}
-
-                          </div>
-
-                        </div>
-
-                        
-
-                        {/* Calories */}
-
-                        <div className="col-span-2">
-
-                          <div className="relative">
-
-                            <Input
-
-                              type="number"
-
-                              value={tempCalorieInputs[index] !== undefined ? tempCalorieInputs[index] : meal.calories}
-
-                              onChange={(e) => handleTempCalorieInput(index, e.target.value)}
-
-                              onKeyDown={(e) => {
-
-                                if (e.key === 'Enter') {
-
-                                  e.preventDefault(); // Prevent form submission
-
-                                  confirmCalorieInput(index);
-
-                                } else if (e.key === 'Escape') {
-
-                                  e.preventDefault(); // Prevent any default behavior
-
-                                  cancelCalorieInput(index);
-
-                                }
-
-                              }}
-
-                              onBlur={() => {
-
-                                if (tempCalorieInputs[index] !== undefined) {
-
-                                  confirmCalorieInput(index);
-
-                                }
-
-                              }}
-
-                              disabled={!selectedClient?.daily_target_total_calories}
-
-                              className={`text-sm disabled:bg-gray-100 disabled:cursor-not-allowed ${calorieInputErrors[index] ? 'border-red-500' : ''}`}
-
-                              placeholder="0"
-
-                            />
-
-                            {calorieInputErrors[index] && (
-
-                              <div className="absolute -bottom-6 left-0 text-xs text-red-500">
-
-                                {calorieInputErrors[index]}
-
-                              </div>
-
-                            )}
-
-                          </div>
-
-                        </div>
-
-                        
-
-                        {/* Percentage */}
-
-                        <div className="col-span-2">
-
-                          <div className="text-sm text-gray-600">
-
-                            {meal.calories_pct.toFixed(1)}%
-
-                          </div>
-
-                        </div>
-
-                        
-
-                        {/* Lock */}
-
-                        <div className="col-span-1">
-
-                          <Button
-
-                            type="button"
-
-                            variant={meal.locked ? "default" : "outline"}
-
-                            size="sm"
-
-                            onClick={() => updateMealInPlan(index, 'locked', !meal.locked)}
-
-                            disabled={!selectedClient?.daily_target_total_calories}
-
-                            className={`w-full disabled:opacity-50 disabled:cursor-not-allowed ${meal.locked ? 'bg-blue-600 hover:bg-blue-700' : 'text-blue-600 border-blue-600 hover:bg-blue-50'}`}
-
-                            title={meal.locked ? "Unlock meal" : "Lock meal"}
-
-                          >
-
-                            🔒
-
-                          </Button>
-
-                        </div>
-
-                        
-
-                        {/* Actions */}
-
-                        <div className="col-span-2">
-
-                          <div className="flex gap-1">
-
-                            <Button
-
-                              type="button"
-
-                              variant="outline"
-
-                              size="sm"
-
-                              onClick={() => moveMealInPlan(index, 'up')}
-
-                              disabled={index === 0 || !selectedClient?.daily_target_total_calories}
-
-                              className="text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-
-                              title="Move up"
-
-                            >
-
-                              <ArrowUp className="h-3 w-3" />
-
-                            </Button>
-
-                            <Button
-
-                              type="button"
-
-                              variant="outline"
-
-                              size="sm"
-
-                              onClick={() => moveMealInPlan(index, 'down')}
-
-                              disabled={index === mealPlanStructure.length - 1 || !selectedClient?.daily_target_total_calories}
-
-                              className="text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-
-                              title="Move down"
-
-                            >
-
-                              <ArrowDown className="h-3 w-3" />
-
-                            </Button>
-
-                            <Button
-
-                              type="button"
-
-                              variant="outline"
-
-                              size="sm"
-
-                              onClick={() => removeMealFromPlan(index)}
-
-                              disabled={mealPlanStructure.length <= 1 || !selectedClient?.daily_target_total_calories}
-
-                              className="text-red-600 border-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
-
-                              title="Remove meal"
-
-                            >
-
-                              <X className="h-3 w-3" />
-
-                            </Button>
-
-                          </div>
-
-                        </div>
-
-                      </div>
-
-                    </div>
-
-                    {/* Main Meal Macros Row */}
-                    {manualAlternativesMode && (
-                      <div className="px-4 py-3 bg-green-50 border-t border-green-200">
-                        <div className="grid grid-cols-12 gap-2 items-center">
-                          <div className="col-span-3 text-xs font-medium text-green-700">
-                            {translations.mainMealMacros || 'Main Meal Macros'} - {meal.meal}
-                          </div>
-                          <div className="col-span-2">
-                            <div className="text-xs text-green-600 mb-1 flex items-center gap-1">
-                              {translations.protein || 'Protein'} (P)
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => toggleMainMealMacroLock(index, 'protein')}
-                                disabled={!selectedClient?.daily_target_total_calories}
-                                className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                                  meal.main?.lockedMacro === 'protein'
-                                    ? 'text-blue-600 hover:text-blue-700'
-                                    : 'text-gray-400 hover:text-gray-600'
-                                }`}
-                                title={meal.main?.lockedMacro === 'protein' ? 'Unlock protein' : 'Lock protein'}
-                              >
-                                {meal.main?.lockedMacro === 'protein' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
-                              </Button>
-                            </div>
-                            <Input
-                              type="number"
-                              value={meal.main?.protein || ''}
-                              onChange={(e) => updateMealMainMacro(index, 'protein', e.target.value)}
-                              placeholder="Protein (g)"
-                              className={`text-sm ${(() => {
-                                const validation = validateMacros(
-                                  meal.main?.calories || meal.calories || 0,
-                                  meal.main?.protein || 0,
-                                  meal.main?.fat || 0,
-                                  meal.main?.carbs || 0
-                                );
-                                return !validation.isValid ? 'border-red-500' : '';
-                              })()}`}
-                              disabled={!selectedClient?.daily_target_total_calories || meal.main?.lockedMacro === 'protein'}
-                            />
-                          </div>
-                          <div className="col-span-2">
-                            <div className="text-xs text-green-600 mb-1 flex items-center gap-1">
-                              {translations.fat || 'Fat'} (F)
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => toggleMainMealMacroLock(index, 'fat')}
-                                disabled={!selectedClient?.daily_target_total_calories}
-                                className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                                  meal.main?.lockedMacro === 'fat'
-                                    ? 'text-blue-600 hover:text-blue-700'
-                                    : 'text-gray-400 hover:text-gray-600'
-                                }`}
-                                title={meal.main?.lockedMacro === 'fat' ? 'Unlock fat' : 'Lock fat'}
-                              >
-                                {meal.main?.lockedMacro === 'fat' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
-                              </Button>
-                            </div>
-                            <Input
-                              type="number"
-                              value={meal.main?.fat || ''}
-                              onChange={(e) => updateMealMainMacro(index, 'fat', e.target.value)}
-                              placeholder="Fat (g)"
-                              className={`text-sm ${(() => {
-                                const validation = validateMacros(
-                                  meal.main?.calories || meal.calories || 0,
-                                  meal.main?.protein || 0,
-                                  meal.main?.fat || 0,
-                                  meal.main?.carbs || 0
-                                );
-                                return !validation.isValid ? 'border-red-500' : '';
-                              })()}`}
-                              disabled={!selectedClient?.daily_target_total_calories || meal.main?.lockedMacro === 'fat'}
-                            />
-                          </div>
-                          <div className="col-span-3">
-                            <div className="text-xs text-green-600 mb-1 flex items-center gap-1">
-                              {translations.carbs || 'Carbs'} (C)
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => toggleMainMealMacroLock(index, 'carbs')}
-                                disabled={!selectedClient?.daily_target_total_calories}
-                                className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                                  meal.main?.lockedMacro === 'carbs'
-                                    ? 'text-blue-600 hover:text-blue-700'
-                                    : 'text-gray-400 hover:text-gray-600'
-                                }`}
-                                title={meal.main?.lockedMacro === 'carbs' ? 'Unlock carbs' : 'Lock carbs'}
-                              >
-                                {meal.main?.lockedMacro === 'carbs' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
-                              </Button>
-                            </div>
-                            <div className="relative">
-                              <Input
-                                type="number"
-                                value={(() => {
-                                  if (meal.main?.lockedMacro === 'carbs') {
-                                    return meal.main?.carbs || '';
-                                  }
-                                  // Show calculated value, but allow editing
-                                  const calculated = calculateCarbsFromMacros(
-                                    meal.main?.calories || meal.calories,
-                                    meal.main?.protein,
-                                    meal.main?.fat
-                                  );
-                                  // If we have a stored carbs value, use it; otherwise use calculated
-                                  return meal.main?.carbs !== undefined ? (meal.main.carbs || '') : (calculated || '');
-                                })()}
-                                onChange={(e) => updateMealMainMacro(index, 'carbs', e.target.value)}
-                                placeholder="Carbs (g)"
-                                className={`text-sm ${(() => {
-                                  const validation = validateMacros(
-                                    meal.main?.calories || meal.calories || 0,
-                                    meal.main?.protein || 0,
-                                    meal.main?.fat || 0,
-                                    meal.main?.carbs || 0
-                                  );
-                                  return !validation.isValid ? 'border-red-500' : '';
-                                })()}`}
-                                disabled={!selectedClient?.daily_target_total_calories || meal.main?.lockedMacro === 'carbs'}
-                              />
-                              {(() => {
-                                const validation = validateMacros(
-                                  meal.main?.calories || meal.calories || 0,
-                                  meal.main?.protein || 0,
-                                  meal.main?.fat || 0,
-                                  meal.main?.carbs || 0
-                                );
-                                return !validation.isValid ? (
-                                  <div className="absolute -bottom-5 left-0 text-xs text-red-600">
-                                    ⚠️ {validation.error}
-                                  </div>
-                                ) : null;
-                              })()}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Alternative Meal Input Row */}
-                    {manualAlternativesMode && (
-                      <div className="px-4 py-3 bg-blue-50 border-t border-blue-200">
-                        <div className="grid grid-cols-12 gap-2 items-center">
-                          <div className="col-span-2">
-                            <div className="text-xs font-medium text-blue-700 mb-1">
-                              {translations.alternativeFor || 'Alternative for'} {meal.meal}
-                            </div>
-                            <div className="relative flex-1 w-full">
-                              <Textarea
-                                value={meal.alternative?.description || ''}
-                                onChange={(e) => updateMealAlternative(index, 'description', e.target.value)}
-                                disabled={!selectedClient?.daily_target_total_calories}
-                                className={`text-sm resize-none flex-1 w-full min-h-[60px] max-h-[150px] disabled:bg-gray-100 disabled:cursor-not-allowed ${!meal.alternative?.description || meal.alternative.description.trim() === '' ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200' : ''}`}
-                                placeholder={translations.alternativeMealDescription || translations.mealDescriptionShort || 'What\'s in the alternative meal'}
-                                rows={3}
-                              />
-                            </div>
-                          </div>
-                          <div className="col-span-1">
-                            <div className="text-[10px] text-blue-600 mb-1 leading-tight">
-                              {translations.caloriesLabel || 'Calories'} (C)
-                              {meal.alternative?.calories_pct !== undefined && (
-                                <span className="ml-1 text-gray-500 block">
-                                  ({meal.alternative.calories_pct.toFixed(1)}%)
-                                </span>
-                              )}
-                            </div>
-                            <Input
-                              type="number"
-                              value={meal.alternative?.calories || ''}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                updateMealAlternative(index, 'calories', val);
-                              }}
-                              placeholder="Calories"
-                              className={`text-xs ${(() => {
-                                const validation = validateMacros(
-                                  meal.alternative?.calories || 0,
-                                  meal.alternative?.protein || 0,
-                                  meal.alternative?.fat || 0,
-                                  meal.alternative?.carbs || 0
-                                );
-                                return !validation.isValid ? 'border-red-500' : '';
-                              })()}`}
-                              disabled={!selectedClient?.daily_target_total_calories}
-                            />
-                          </div>
-                          <div className="col-span-2">
-                            <div className="text-xs text-blue-600 mb-1 flex items-center gap-1">
-                              {translations.protein || 'Protein'} (P)
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => toggleAlternativeMealMacroLock(index, 'protein')}
-                                disabled={!selectedClient?.daily_target_total_calories}
-                                className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                                  meal.alternative?.lockedMacro === 'protein'
-                                    ? 'text-blue-600 hover:text-blue-700'
-                                    : 'text-gray-400 hover:text-gray-600'
-                                }`}
-                                title={meal.alternative?.lockedMacro === 'protein' ? 'Unlock protein' : 'Lock protein'}
-                              >
-                                {meal.alternative?.lockedMacro === 'protein' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
-                              </Button>
-                            </div>
-                            <Input
-                              type="number"
-                              value={meal.alternative?.protein || ''}
-                              onChange={(e) => updateMealAlternative(index, 'protein', e.target.value)}
-                              placeholder="Protein (g)"
-                              className={`text-sm ${(() => {
-                                const validation = validateMacros(
-                                  meal.alternative?.calories || 0,
-                                  meal.alternative?.protein || 0,
-                                  meal.alternative?.fat || 0,
-                                  meal.alternative?.carbs || 0
-                                );
-                                return !validation.isValid ? 'border-red-500' : '';
-                              })()}`}
-                              disabled={!selectedClient?.daily_target_total_calories || meal.alternative?.lockedMacro === 'protein'}
-                            />
-                          </div>
-                          <div className="col-span-2">
-                            <div className="text-xs text-blue-600 mb-1 flex items-center gap-1">
-                              {translations.fat || 'Fat'} (F)
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => toggleAlternativeMealMacroLock(index, 'fat')}
-                                disabled={!selectedClient?.daily_target_total_calories}
-                                className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                                  meal.alternative?.lockedMacro === 'fat'
-                                    ? 'text-blue-600 hover:text-blue-700'
-                                    : 'text-gray-400 hover:text-gray-600'
-                                }`}
-                                title={meal.alternative?.lockedMacro === 'fat' ? 'Unlock fat' : 'Lock fat'}
-                              >
-                                {meal.alternative?.lockedMacro === 'fat' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
-                              </Button>
-                            </div>
-                            <Input
-                              type="number"
-                              value={meal.alternative?.fat || ''}
-                              onChange={(e) => updateMealAlternative(index, 'fat', e.target.value)}
-                              placeholder="Fat (g)"
-                              className={`text-sm ${(() => {
-                                const validation = validateMacros(
-                                  meal.alternative?.calories || 0,
-                                  meal.alternative?.protein || 0,
-                                  meal.alternative?.fat || 0,
-                                  meal.alternative?.carbs || 0
-                                );
-                                return !validation.isValid ? 'border-red-500' : '';
-                              })()}`}
-                              disabled={!selectedClient?.daily_target_total_calories || meal.alternative?.lockedMacro === 'fat'}
-                            />
-                          </div>
-                          <div className="col-span-3">
-                            <div className="text-xs text-blue-600 mb-1 flex items-center gap-1">
-                              {translations.carbs || 'Carbs'} (C)
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => toggleAlternativeMealMacroLock(index, 'carbs')}
-                                disabled={!selectedClient?.daily_target_total_calories}
-                                className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                                  meal.alternative?.lockedMacro === 'carbs'
-                                    ? 'text-blue-600 hover:text-blue-700'
-                                    : 'text-gray-400 hover:text-gray-600'
-                                }`}
-                                title={meal.alternative?.lockedMacro === 'carbs' ? 'Unlock carbs' : 'Lock carbs'}
-                              >
-                                {meal.alternative?.lockedMacro === 'carbs' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
-                              </Button>
-                            </div>
-                            <div className="relative">
-                              <Input
-                                type="number"
-                                value={(() => {
-                                  if (meal.alternative?.lockedMacro === 'carbs') {
-                                    return meal.alternative?.carbs || '';
-                                  }
-                                  // Show calculated value, but allow editing
-                                  const calculated = calculateCarbsFromMacros(
-                                    meal.alternative?.calories,
-                                    meal.alternative?.protein,
-                                    meal.alternative?.fat
-                                  );
-                                  // If we have a stored carbs value, use it; otherwise use calculated
-                                  return meal.alternative?.carbs !== undefined ? (meal.alternative.carbs || '') : (calculated || '');
-                                })()}
-                                onChange={(e) => updateMealAlternative(index, 'carbs', e.target.value)}
-                                placeholder="Carbs (g)"
-                                className={`text-sm ${(() => {
-                                  const validation = validateMacros(
-                                    meal.alternative?.calories || 0,
-                                    meal.alternative?.protein || 0,
-                                    meal.alternative?.fat || 0,
-                                    meal.alternative?.carbs || 0
-                                  );
-                                  return !validation.isValid ? 'border-red-500' : '';
-                                })()}`}
-                                disabled={!selectedClient?.daily_target_total_calories || meal.alternative?.lockedMacro === 'carbs'}
-                              />
-                              {(() => {
-                                const validation = validateMacros(
-                                  meal.alternative?.calories || 0,
-                                  meal.alternative?.protein || 0,
-                                  meal.alternative?.fat || 0,
-                                  meal.alternative?.carbs || 0
-                                );
-                                return !validation.isValid ? (
-                                  <div className="absolute -bottom-5 left-0 text-xs text-red-600">
-                                    ⚠️ {validation.error}
-                                  </div>
-                                ) : null;
-                              })()}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    </React.Fragment>
-                  ))}
-
-                </div>
-
-
-
-                {/* Summary Stats */}
-
-                <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
-
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-
-                    <div>
-
-                      <span className="text-gray-600">{translations.totalMeals || 'Total Meals'}: </span>
-
-                      <span className="font-medium">{mealPlanStructure.length}</span>
-
-                      <span className="text-xs text-gray-500 ml-2">
-
-                        ({mealPlanStructure.filter(meal => meal.locked).length} {translations.locked || 'locked'})
-
-                      </span>
-
-                    </div>
-
-                    <div>
-
-                      <span className="text-gray-600">{translations.totalCalories || 'Total Calories'}: </span>
-
-                      <span className="font-medium">
-
-                        {mealPlanStructure.reduce((sum, meal) => sum + (meal.calories || 0), 0)} / {userTargets?.calories_per_day || userTargets?.calories || 0}
-
-                      </span>
-
-                    </div>
-
-                    <div>
-
-                      <span className="text-gray-600">{translations.lockedCalories || 'Locked Calories'}: </span>
-
-                      <span className="font-medium text-blue-600">
-
-                        {mealPlanStructure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0)}
-
-                      </span>
-
-                    </div>
-
-                    <div>
-
-                      <span className="text-gray-600">{translations.unlockedCalories || 'Unlocked Calories'}: </span>
-
-                      <span className="font-medium text-green-600">
-
-                        {mealPlanStructure.filter(meal => !meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0)}
-
-                      </span>
-
-                    </div>
-
-                    <div>
-
-                      <span className="text-gray-600">{translations.availableBudget || 'Available Budget'}: </span>
-
-                      <span className="font-medium text-purple-600">
-
-                        {Math.max(0, (userTargets?.calories_per_day || userTargets?.calories || 0) - mealPlanStructure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0))} kcal
-
-                      </span>
-
-                    </div>
-
-                    <div>
-
-                      <span className="text-gray-600">{translations.maxPerMeal || 'Max per Meal'}: </span>
-
-                      <span className="font-medium text-orange-600">
-
-                        {Math.max(0, (userTargets?.calories_per_day || userTargets?.calories || 0) - mealPlanStructure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0))} kcal
-
-                      </span>
-
-                    </div>
-
-                    <div>
-
-                      <span className="text-gray-600">{translations.totalPercentage || 'Total Percentage'}: </span>
-
-                      <span className={`font-medium ${Math.abs(mealPlanStructure.reduce((sum, meal) => sum + meal.calories_pct, 0) - 100) < 0.1 ? 'text-green-600' : 'text-red-600'}`}>
-
-                        {mealPlanStructure.reduce((sum, meal) => sum + meal.calories_pct, 0).toFixed(1)}%
-
-                      </span>
-
-                    </div>
-
-                  </div>
-
-                  <p className="text-xs text-gray-500 mt-2">
-
-                    {translations.mealPlanLockNote || 'Note: 🔒 Locked meals maintain their calories. When you edit a meal, that meal keeps its exact value and other unlocked meals scale to fit the remaining budget.'}
-
-                  </p>
-
-                  <p className="text-xs text-blue-600 mt-1">
-
-                    {translations.scalingFormula || 'Formula: Scaling Factor = (Daily Target - Locked Calories - Edited Meal) ÷ Other Unlocked Total'}
-
-                  </p>
-
-                  
-
-                  {/* Validation Status Indicator */}
-
-                  {(() => {
-
-                    const mealsWithDescriptions = mealPlanStructure.filter(meal => 
-
-                      meal.description && meal.description.trim() !== ''
-
-                    ).length;
-
-                    const totalMeals = mealPlanStructure.length;
-
-                    const hasTemplate = !!selectedTemplate;
-
-                    const isValid = hasTemplate || mealsWithDescriptions === totalMeals;
-
-                    const isPartial = !hasTemplate && mealsWithDescriptions > 0 && mealsWithDescriptions < totalMeals;
-
-                    
-
-                    return (
-
-                      <div className={`mt-4 p-3 rounded-lg border-2 ${
-
-                        isValid 
-
-                          ? 'bg-green-50 border-green-300' 
-
-                          : isPartial
-
-                          ? 'bg-amber-50 border-amber-400'
-
-                          : 'bg-red-50 border-red-300'
-
-                      }`}>
-
-                        <div className="flex items-center gap-2">
-
-                          <span className="text-lg">
-
-                            {isValid ? '✅' : isPartial ? '⚠️' : '❌'}
-
-                          </span>
-
-                          <div className="flex-1">
-
-                            <p className={`text-sm font-semibold ${
-
-                              isValid ? 'text-green-800' : isPartial ? 'text-amber-800' : 'text-red-800'
-
-                            }`}>
-
-                              {isValid 
-
-                                ? (hasTemplate 
-
-                                  ? (translations.templateSelectedReady || `Template selected: Ready to generate!`) 
-
-                                  : ((translations.allMealsFilledReady || `All ${totalMeals} meals filled: Ready to generate!`).replace('{count}', totalMeals)))
-
-                                : isPartial
-
-                                ? ((translations.partialMealsWarning || `${mealsWithDescriptions}/${totalMeals} meals filled - Complete all or select a template`).replace('{filled}', mealsWithDescriptions).replace('{total}', totalMeals))
-
-                                : (translations.noMealsFilledWarning || 'No meals filled - Fill all meals or select a template')
-
-                              }
-
-                            </p>
-
-                          </div>
-
-                        </div>
-
-                      </div>
-
-                    );
-
-                  })()}
-
-                </div>
-
-              </div>
-
-            </CardContent>
-
-          )}
-
-        </Card>
-
+      {!selectedClient?.daily_target_total_calories && (
+        <Alert className="mb-4 border-red-200 bg-red-50">
+          <AlertTitle className="text-red-800 flex items-center gap-2">
+            <span>⚠️</span>
+            {translations.missingCaloriesWarning || 'Missing Client Profile Information'}
+          </AlertTitle>
+          <AlertDescription className="text-red-700">
+            {translations.missingCaloriesEditMessage || `The client "${selectedClient?.full_name || 'selected client'}" does not have a daily target calories value set. Please complete the client profile information in the "Clients" page before editing these settings.`}
+          </AlertDescription>
+        </Alert>
       )}
 
+      <div className="space-y-3">
 
+        <div className="flex items-center justify-between">
 
-      {/* Recommendations Section */}
+          <p className="text-sm text-gray-600">
 
-      {selectedClient && (
+            {translations.mealPlanDescription || 'Configure how daily calories are distributed across meals'}
 
-        <Card className="border-purple-200 bg-purple-50/30 mb-6">
+          </p>
 
-          <CardHeader>
+          <div className="flex gap-2">
 
-            <div className="flex items-center justify-between">
+            <Button
 
-              <div className="flex items-center gap-2 text-purple-800">
+              type="button"
 
-                <span>💡</span>
+              variant="outline"
 
-                <CardTitle>
+              size="sm"
 
-                  {translations.recommendations || 'Recommendations'}
+              onClick={updateMealPlanDescriptionsWithAI}
 
-                  {(clientRecommendations.length > 0 || recommendations.length > 0) && (
+              disabled={updatingMealDescriptions || !selectedClient?.daily_target_total_calories}
 
-                    <span className="ml-2 text-sm font-normal text-purple-600">
+              className="text-purple-600 border-purple-600 hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed"
 
-                    </span>
+              title="Use AI to update meal descriptions based on client's eating habits"
 
-                  )}
+            >
 
-                </CardTitle>
+              {updatingMealDescriptions ? (
 
-              </div>
+                <Loader className={`h-4 w-4 ${dir === 'rtl' ? 'ml-1' : 'mr-1'} animate-spin`} />
 
-              <Button
+              ) : (
 
-                type="button"
+                <Sparkles className={`h-4 w-4 ${dir === 'rtl' ? 'ml-1' : 'mr-1'}`} />
 
-                variant="ghost"
+              )}
 
-                size="sm"
+              {updatingMealDescriptions ? (translations.updating || 'Updating...') : (translations.aiUpdate || 'AI Update')}
 
-                onClick={() => setIsRecommendationsMinimized(!isRecommendationsMinimized)}
+            </Button>
 
-                className="text-purple-600 hover:bg-purple-100"
+            <Button
 
-                title={isRecommendationsMinimized ? "Expand Recommendations" : "Minimize Recommendations"}
+              type="button"
 
-              >
+              variant="outline"
 
-                {isRecommendationsMinimized ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+              size="sm"
 
-              </Button>
+              onClick={saveMealPlanStructure}
 
+              disabled={!selectedClient?.daily_target_total_calories}
+
+              className="text-blue-600 border-blue-600 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+
+              title="Save meal plan structure to database"
+
+            >
+
+              <Save className="h-4 w-4 mr-1" />
+
+              {translations.saveMealPlan || 'Save Plan'}
+
+            </Button>
+
+            {process.env.NODE_ENV === 'development' && !manualAlternativesMode && (
               <Button
 
                 type="button"
@@ -15152,388 +13784,1735 @@ const MenuCreate = () => {
 
                 size="sm"
 
-                onClick={addRecommendation}
+                onClick={saveAsTemplate}
 
-                className="text-purple-600 border-purple-600 hover:bg-purple-50"
+                className="text-purple-600 border-purple-600 hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed"
+
+                title={
+
+                  mealPlanStructure.some(meal => !meal.description || meal.description.trim() === '')
+
+                    ? translations.fillAllMealsFirst || 'Fill all meal descriptions first'
+
+                    : translations.saveCurrentAsReusableTemplate || 'Save current meal plan as a reusable template'
+
+                }
+
+                disabled={
+
+                  mealPlanStructure.length === 0 || 
+
+                  mealPlanStructure.some(meal => !meal.description || meal.description.trim() === '')
+
+                }
 
               >
 
-                <Plus className="h-4 w-4 mr-1" />
+                <Save className={`h-4 w-4 ${dir === 'rtl' ? 'ml-1' : 'mr-1'}`} />
 
-                {translations.addRecommendation || 'Add Recommendation'}
+                {translations.saveAsTemplate || 'Save as Template'}
 
               </Button>
+            )}
+
+            <Button
+
+              type="button"
+
+              variant="outline"
+
+              size="sm"
+
+              onClick={addMealToPlan}
+
+              disabled={!selectedClient?.daily_target_total_calories}
+
+              className="text-green-600 border-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed"
+
+            >
+
+              <Plus className={`h-4 w-4 ${dir === 'rtl' ? 'ml-1' : 'mr-1'}`} />
+
+              {translations.addMeal || 'Add Meal'}
+
+            </Button>
+
+          </div>
+
+        </div>
+
+        {/* Meal Template Selector */}
+        <div className="border border-blue-200 rounded-lg p-3 bg-gradient-to-br from-blue-50 to-white mb-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className={`flex items-center gap-2 flex-shrink-0 ${dir === 'rtl' ? 'flex-row-reverse' : ''}`}>
+              <span className="text-lg">📝</span>
+              <label className="text-sm font-semibold text-gray-800 whitespace-nowrap">
+                {translations.mealTemplate || 'Meal Template'}:
+              </label>
+            </div>
+            <div className="flex-1">
+              <Select
+                value={selectedTemplate?.id || ''}
+                onValueChange={(value) => {
+                  const template = mealTemplates.find(t => t.id === value);
+                  if (template) {
+                    applyMealTemplate(template);
+                  }
+                }}
+                disabled={loadingTemplates}
+              >
+                <SelectTrigger className="w-full bg-white border-blue-200 hover:border-blue-300 focus:ring-blue-500 focus:border-blue-500 transition-colors">
+                  <SelectValue placeholder={loadingTemplates ? 'Loading templates...' : (translations.selectTemplate || 'Select a template (optional)')} />
+                </SelectTrigger>
+                <SelectContent className="max-h-[400px]">
+                  {mealTemplates.map(template => {
+                    const currentMealCount = numberOfMeals || 4;
+                    const hasMatchingVariant = template.availableMealCounts?.includes(currentMealCount);
+                    const isDisabled = !hasMatchingVariant;
+                    const displayName = getTemplateDisplayName(template);
+                    const templateEmoji = getTemplateEmoji(template.name);
+                    
+                    return (
+                      <SelectItem 
+                        key={template.id} 
+                        value={template.id}
+                        disabled={isDisabled}
+                        className={`cursor-pointer ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-50 focus:bg-blue-50'}`}
+                      >
+                        <div className="flex items-center justify-between gap-3 py-1 w-full">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">{templateEmoji}</span>
+                            <span className="font-medium">{displayName}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {template.tags && template.tags.length > 0 && (
+                              <span className="text-xs text-gray-500">({template.tags.join(', ')})</span>
+                            )}
+                            <Badge 
+                              variant="outline" 
+                              className={`text-xs ${hasMatchingVariant ? 'bg-green-50 border-green-300 text-green-700' : 'bg-red-50 border-red-300 text-red-700'}`}
+                            >
+                              {template.availableMealCounts?.join(', ') || '?'} meals
+                            </Badge>
+                          </div>
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+            {!manualAlternativesMode && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowTemplateManager(true)}
+                className="text-purple-600 border-purple-300 hover:bg-purple-50 whitespace-nowrap"
+                title={translations.manageTemplates || 'Manage Templates'}
+              >
+                <span className={dir === 'rtl' ? 'ml-1' : 'mr-1'}>⚙️</span> {translations.manage || 'Manage'}
+              </Button>
+            )}
+            {selectedTemplate && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  // Clear the template selection
+                  setSelectedTemplate(null);
+                  
+                  // Also clear all meal descriptions from the structure
+                  setMealPlanStructure(prev => prev.map(meal => ({
+                    ...meal,
+                    description: ''
+                  })));
+                  
+                }}
+                className="text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md flex-shrink-0 h-8 w-8 p-0"
+                title="Clear template selection and meal descriptions"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+          {selectedTemplate && (
+            <div className="mt-2 flex items-start gap-2 bg-blue-100/50 border border-blue-200 rounded-md p-2">
+              <span className="text-blue-600">ℹ️</span>
+              <p className="text-xs text-blue-800">
+                <span className="font-medium">{translations.templateApplied || 'Template applied'}:</span> <span className="text-base">{getTemplateEmoji(selectedTemplate.name)}</span> {getTemplateDisplayName(selectedTemplate)}
+                <span className="ml-2 text-blue-600">({numberOfMeals} meals)</span>
+              </p>
+            </div>
+          )}
+          {!selectedTemplate && mealTemplates.length > 0 && (() => {
+            const currentMealCount = numberOfMeals || 4;
+            const compatibleCount = mealTemplates.filter(t => t.availableMealCounts?.includes(currentMealCount)).length;
+            const totalCount = mealTemplates.length;
+            
+            return (
+              <div className={`mt-2 flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-md p-2 ${dir === 'rtl' ? 'flex-row-reverse' : ''}`}>
+                <span className="text-blue-600">💡</span>
+                <div className="flex-1">
+                  <p className="text-xs text-blue-700">
+                    {(translations.templateFilterInfo || `Showing templates for ${currentMealCount} meals:`).replace('{count}', currentMealCount)}
+                  </p>
+                  <p className="text-xs text-blue-600 font-medium mt-0.5">
+                    {compatibleCount} {translations.compatibleTemplates || 'compatible'}, {totalCount - compatibleCount} {translations.incompatibleDisabled || 'incompatible (disabled)'}
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
+          {(() => {
+            // Only show warning if no template AND meals are not all filled
+            const mealsWithDescriptions = mealPlanStructure.filter(meal => 
+              meal.description && meal.description.trim() !== ''
+            ).length;
+            const totalMeals = mealPlanStructure.length;
+            const allMealsFilled = mealsWithDescriptions === totalMeals;
+            
+            if (!selectedTemplate && !allMealsFilled) {
+              return (
+                <div className={`mt-2 flex items-start gap-2 bg-amber-50 border border-amber-300 rounded-md p-3 ${dir === 'rtl' ? 'flex-row-reverse' : ''}`}>
+                  <span className="text-amber-600 text-lg">⚠️</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-amber-900 mb-1">
+                      {translations.noTemplateSelected || 'No template selected'}
+                    </p>
+                    <p className="text-xs text-amber-800">
+                      {translations.mustFillAllDescriptions || 'You must fill in descriptions for ALL meals below, or select a template above. Partial descriptions are not allowed.'}
+                    </p>
+                    <p className="text-xs text-amber-700 mt-1 font-medium">
+                      {translations.currentProgress || 'Progress'}: {(translations.mealsFilledProgress || '{filled}/{total} meals filled').replace('{filled}', mealsWithDescriptions).replace('{total}', totalMeals)}
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          })()}
+        </div>
+
+        {/* Manual Alternatives Mode Toggle */}
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <Button
+              type="button"
+              variant={manualAlternativesMode ? "default" : "outline"}
+              onClick={() => setManualAlternativesMode(!manualAlternativesMode)}
+              disabled={!selectedClient?.daily_target_total_calories}
+            >
+              {manualAlternativesMode ? "✓ " : ""}
+              {translations.chooseYourOwnAlternatives || "Choose Your Own Alternatives"}
+            </Button>
+            {manualAlternativesMode && (
+              <p className="text-xs text-gray-600">
+                {translations.manualAlternativesHint || "Fill in macros (C, P, F) for both main and alternative meals. Carbs will be calculated automatically. Macros must not exceed meal calories."}
+              </p>
+            )}
+          </div>
+          {/* Total Macros Validation */}
+          {manualAlternativesMode && userTargets && (() => {
+            const validation = validateTotalMacros();
+            const mainTotals = validation.mainTotals;
+            const altTotals = validation.altTotals;
+            const targets = validation.targets;
+            
+            // Helper to check if value matches target (within tolerance of 3)
+            const tolerance = 3;
+            const matchesTarget = (value, target) => Math.abs(value - target) <= tolerance;
+            const getStatusColor = (value, target) => {
+              const diff = Math.abs(value - target);
+              if (diff <= tolerance) return 'text-green-700';
+              return 'text-red-700 font-bold'; // Red and bold when not matching within tolerance
+            };
+            const getStatusIcon = (value, target) => {
+              const diff = Math.abs(value - target);
+              if (diff <= tolerance) return '✓';
+              if (value > target) return '↑';
+              return '↓';
+            };
+            
+            return (
+              <div className="mt-2 space-y-2">
+                {/* Summary */}
+                <div className={`border rounded-md p-3 ${validation.isValid ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+                  <div className="grid grid-cols-12 gap-4 text-xs">
+                    {/* Explanation Section - Left */}
+                    <div className="col-span-4 pr-4 border-r border-gray-300">
+                      <p className="font-semibold text-gray-800 mb-2">
+                        {translations.howToBuildMealPlan || "How to Build with This Structure:"}
+                      </p>
+                      <div className="space-y-2 text-xs text-gray-700">
+                        {language === 'he' ? (
+                          <p className="text-xs leading-relaxed" dir="rtl">
+                            {translations.mealPlanStructureExplanationHe || "מבנה תכנית הארוחות הזה מאפשר לך ליצור ארוחות עיקריות וארוחות חלופיות. לכל ארוחה יכולים להיות מאקרו-נוטריינטים משלה (קלוריות, חלבון, שומן, פחמימות). הארוחות העיקריות מייצגות את תכנית הארוחות הראשית, בעוד שהארוחות החלופיות מספקות אפשרויות החלפה. שתיהן חייבות להיות שוות ליעדים היומיים המוצגים מימין."}
+                          </p>
+                        ) : (
+                          <p className="text-xs leading-relaxed">
+                            {translations.mealPlanStructureExplanationEn || "This meal plan structure allows you to create main meals and alternative meals. Each meal can have its own macros (calories, protein, fat, carbs). The main meals represent the primary meal plan, while alternative meals provide substitution options. Both must equal the daily targets shown on the right."}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Main and Alternative Meals - Right */}
+                    <div className="col-span-8">
+                      <div className="text-xs font-semibold text-gray-800 mb-2">
+                        {translations.totalMacrosSummary || "Total Macros Summary (must equal daily targets)"}
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="font-semibold text-gray-800 mb-1">Main Meals:</p>
+                          <div className="pl-2 space-y-0.5">
+                            <div className={getStatusColor(mainTotals.calories, targets.calories)}>
+                              <span className="font-medium">{getStatusIcon(mainTotals.calories, targets.calories)}</span> Calories: {mainTotals.calories} / {targets.calories} {mainTotals.calories !== targets.calories && `(${mainTotals.calories > targets.calories ? '+' : ''}${mainTotals.calories - targets.calories})`}
+                            </div>
+                            <div className={getStatusColor(mainTotals.protein, targets.protein)}>
+                              <span className="font-medium">{getStatusIcon(mainTotals.protein, targets.protein)}</span> Protein: {mainTotals.protein}g / {targets.protein}g {mainTotals.protein !== targets.protein && `(${mainTotals.protein > targets.protein ? '+' : ''}${mainTotals.protein - targets.protein}g)`}
+                            </div>
+                            <div className={getStatusColor(mainTotals.fat, targets.fat)}>
+                              <span className="font-medium">{getStatusIcon(mainTotals.fat, targets.fat)}</span> Fat: {mainTotals.fat}g / {targets.fat}g {mainTotals.fat !== targets.fat && `(${mainTotals.fat > targets.fat ? '+' : ''}${mainTotals.fat - targets.fat}g)`}
+                            </div>
+                            {targets.carbs > 0 && (
+                              <div className={getStatusColor(mainTotals.carbs, targets.carbs)}>
+                                <span className="font-medium">{getStatusIcon(mainTotals.carbs, targets.carbs)}</span> Carbs: {mainTotals.carbs}g / {targets.carbs}g {mainTotals.carbs !== targets.carbs && `(${mainTotals.carbs > targets.carbs ? '+' : ''}${mainTotals.carbs - targets.carbs}g)`}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-gray-800 mb-1">Alternative Meals:</p>
+                          <div className="pl-2 space-y-0.5">
+                            <div className={getStatusColor(altTotals.calories, targets.calories)}>
+                              <span className="font-medium">{getStatusIcon(altTotals.calories, targets.calories)}</span> Calories: {altTotals.calories} / {targets.calories} {altTotals.calories !== targets.calories && `(${altTotals.calories > targets.calories ? '+' : ''}${altTotals.calories - targets.calories})`}
+                            </div>
+                            <div className={getStatusColor(altTotals.protein, targets.protein)}>
+                              <span className="font-medium">{getStatusIcon(altTotals.protein, targets.protein)}</span> Protein: {altTotals.protein}g / {targets.protein}g {altTotals.protein !== targets.protein && `(${altTotals.protein > targets.protein ? '+' : ''}${altTotals.protein - targets.protein}g)`}
+                            </div>
+                            <div className={getStatusColor(altTotals.fat, targets.fat)}>
+                              <span className="font-medium">{getStatusIcon(altTotals.fat, targets.fat)}</span> Fat: {altTotals.fat}g / {targets.fat}g {altTotals.fat !== targets.fat && `(${altTotals.fat > targets.fat ? '+' : ''}${altTotals.fat - targets.fat}g)`}
+                            </div>
+                            {targets.carbs > 0 && (
+                              <div className={getStatusColor(altTotals.carbs, targets.carbs)}>
+                                <span className="font-medium">{getStatusIcon(altTotals.carbs, targets.carbs)}</span> Carbs: {altTotals.carbs}g / {targets.carbs}g {altTotals.carbs !== targets.carbs && `(${altTotals.carbs > targets.carbs ? '+' : ''}${altTotals.carbs - targets.carbs}g)`}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+
+        <div className="border rounded-lg overflow-hidden">
+
+          <div className="bg-gray-50 px-4 py-2 border-b">
+
+            <div className="grid grid-cols-12 gap-2 text-xs font-medium text-gray-600">
+
+              <div className="col-span-3">{translations.mealName || 'Meal Name'}</div>
+
+              <div className="col-span-2">{translations.mealDescriptionShort || translations.description || 'Description'}</div>
+
+              <div className="col-span-2">{translations.caloriesLabel || translations.calories || 'Calories'}</div>
+
+              <div className="col-span-2">{translations.percentage || 'Percentage'}</div>
+
+              <div className="col-span-1">{translations.lock || 'Lock'}</div>
+
+              <div className="col-span-2">{translations.actions || 'Actions'}</div>
 
             </div>
 
-            <CardDescription className="text-purple-600">
+          </div>
 
-              {translations.recommendationsDescription || 'Add personalized recommendations for this meal plan'}
+          
 
-            </CardDescription>
+          {mealPlanStructure.map((meal, index) => (
+            <React.Fragment key={`meal-${index}`}>
+            <div className="px-4 py-3 border-b last:border-b-0 bg-white">
 
-          </CardHeader>
+              <div className="grid grid-cols-12 gap-2 items-start">
 
-          {!isRecommendationsMinimized && (
+                {/* Meal Name */}
 
-          <CardContent>
+                <div className="col-span-3">
 
-            <div className="space-y-6">
+                  <Input
 
-              {/* Client Recommendations Section */}
+                    value={meal.meal}
 
-              {selectedClient && (
+                    onChange={(e) => updateMealInPlan(index, 'meal', e.target.value)}
 
-                <div>
+                    disabled={!selectedClient?.daily_target_total_calories}
 
-                  <div className="flex items-center gap-2 mb-4">
+                    className="text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
 
-                    <h3 className="text-lg font-semibold text-gray-800">
+                    placeholder={translations.mealName || 'Meal name'}
 
-                      {translations.clientRecommendations || 'Client Recommendations'}
-
-                    </h3>
-
-                    <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-700">
-
-                      {translations.fromDatabase || 'From Database'}
-
-                    </Badge>
-
-                    {loadingClientRecommendations && (
-
-                      <Loader className="animate-spin h-4 w-4 text-blue-600" />
-
-                    )}
-
-                  </div>
-
-                  
-
-                  {clientRecommendations.length > 0 ? (
-
-                    <div className="space-y-3">
-
-                      {clientRecommendations.map((rec, index) => (
-
-                        <div key={rec.id} className="bg-blue-50 rounded-lg p-4 border border-blue-200 shadow-sm">
-
-                          <div className="flex items-start justify-between mb-3">
-
-                            <div className="flex items-center gap-2">
-
-                              <Badge 
-
-                                variant="outline" 
-
-                                className={`${
-
-                                  rec.priority === 'high' ? 'bg-red-50 border-red-200 text-red-700' :
-
-                                  rec.priority === 'medium' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
-
-                                  'bg-green-50 border-green-200 text-green-700'
-
-                                }`}
-
-                              >
-
-                                {rec.priority === 'high' ? '🔴' : rec.priority === 'medium' ? '🟡' : '🟢'} {translations[rec.priority + 'Priority'] || rec.priority}
-
-                              </Badge>
-
-                              <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-700">
-
-                                {translations[rec.category + 'Recommendation'] || rec.category}
-
-                              </Badge>
-
-                              <Badge variant="outline" className="bg-gray-50 border-gray-200 text-gray-600">
-
-                                {translations.clients || 'Client'}
-
-                              </Badge>
-
-                            </div>
-
-                            <div className="flex gap-2">
-
-                              <Button
-
-                                type="button"
-
-                                variant="outline"
-
-                                size="sm"
-
-                                onClick={() => {
-
-                                  // Convert client recommendation to meal plan recommendation
-
-                                  const mealPlanRec = {
-
-                                    id: Date.now(),
-
-                                    category: rec.category,
-
-                                    title: rec.title,
-
-                                    content: rec.content,
-
-                                    priority: rec.priority,
-
-                                    source: 'meal_plan'
-
-                                  };
-
-                                  setRecommendations(prev => [...prev, mealPlanRec]);
-
-                                  setClientRecommendations(prev => prev.filter(r => r.id !== rec.id));
-
-                                }}
-
-                                className="text-green-600 border-green-600 hover:bg-green-50"
-
-                                title={translations.addRecommendation || 'Add Recommendation'}
-
-                              >
-
-                                ➕
-
-                              </Button>
-
-                              <Button
-
-                                type="button"
-
-                                variant="outline"
-
-                                size="sm"
-
-                                onClick={() => {
-
-                                  if (window.confirm(translations.confirmRemoveClientRecommendation || 'Remove this client recommendation from the meal plan? (This will not affect the original client data)')) {
-
-                                    setClientRecommendations(prev => prev.filter(r => r.id !== rec.id));
-
-                                  }
-
-                                }}
-
-                                className="text-orange-600 border-orange-600 hover:bg-orange-50"
-
-                                title={translations.delete || 'Delete'}
-
-                              >
-
-                                ➖
-
-                              </Button>
-
-                            </div>
-
-                          </div>
-
-                          <h4 className="font-semibold text-gray-900 mb-2">
-
-                            {translations[rec.category + 'Recommendation'] || rec.title}
-
-                          </h4>
-
-                          <p className="text-gray-700 text-sm leading-relaxed">{rec.content}</p>
-
-                        </div>
-
-                      ))}
-
-                    </div>
-
-                  ) : (
-
-                    <div className="text-center py-4 text-gray-500">
-
-                      <div className="text-2xl mb-2">📋</div>
-
-                      <p className="text-sm">{translations.noClientRecommendations || 'No client recommendations found'}</p>
-
-                    </div>
-
-                  )}
-
-                </div>
-
-              )}
-
-
-
-              {/* Separator */}
-
-              {selectedClient && (recommendations.length > 0 || clientRecommendations.length > 0) && (
-
-                <Separator className="my-4" />
-
-              )}
-
-
-
-              {/* Meal Plan Recommendations Section */}
-
-              <div>
-
-                <div className="flex items-center gap-2 mb-4">
-
-                  <h3 className="text-lg font-semibold text-gray-800">
-
-                    {translations.mealPlanRecommendations || 'Meal Plan Recommendations'}
-
-                  </h3>
-
-                  <Badge variant="outline" className="bg-purple-50 border-purple-200 text-purple-700">
-
-                    {translations.mealPlanSpecific || 'Meal Plan Specific'}
-
-                  </Badge>
+                  />
 
                 </div>
 
                 
 
-            {recommendations.length > 0 ? (
+                {/* Description */}
 
-              <div className="space-y-3">
+                <div className="col-span-2 flex">
 
-                {recommendations.map((rec, index) => (
+                  <div className="relative flex-1 w-full" data-description-field="true">
 
-                  <div key={rec.id} className="bg-white rounded-lg p-4 border border-purple-200 shadow-sm">
+                    {expandedDescriptionIndex === index ? (
+                      <Textarea
 
-                    <div className="flex items-start justify-between mb-3">
+                        value={meal.description}
 
-                      <div className="flex items-center gap-2">
+                        onChange={(e) => {
+                          updateMealInPlan(index, 'description', e.target.value);
+                          // Auto-resize textarea when expanded
+                          e.target.style.height = 'auto';
+                          e.target.style.height = Math.min(e.target.scrollHeight, 300) + 'px';
+                        }}
 
-                        <Badge 
+                        onBlur={() => {
+                          // Clear any existing timeout
+                          if (blurTimeoutRef.current) {
+                            clearTimeout(blurTimeoutRef.current);
+                          }
+                          
+                          // Delay collapse to allow clicking another field to expand first
+                          blurTimeoutRef.current = setTimeout(() => {
+                            setExpandedDescriptionIndex((currentExpanded) => {
+                              // Only collapse if we're still expanded on this field
+                              return currentExpanded === index ? null : currentExpanded;
+                            });
+                          }, 150);
+                        }}
 
-                          variant="outline" 
+                        disabled={!selectedClient?.daily_target_total_calories}
 
-                          className={`${
+                        className={`text-sm resize-none flex-1 w-full transition-all duration-200 min-h-[100px] max-h-[300px] disabled:bg-gray-100 disabled:cursor-not-allowed ${!selectedTemplate && (!meal.description || meal.description.trim() === '') ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200' : ''}`}
 
-                            rec.priority === 'high' ? 'bg-red-50 border-red-200 text-red-700' :
+                        placeholder={!selectedTemplate ? (translations.required || 'Required') : (translations.mealDescriptionShort || translations.descriptionPlaceholder || 'Optional description')}
 
-                            rec.priority === 'medium' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
+                        rows={4}
 
-                            'bg-green-50 border-green-200 text-green-700'
+                        autoFocus
 
-                          }`}
+                      />
+                    ) : (
+                      <Input
 
-                        >
+                        value={meal.description}
 
-                          {rec.priority === 'high' ? '🔴' : rec.priority === 'medium' ? '🟡' : '🟢'} {translations[rec.priority + 'Priority'] || rec.priority}
+                        onMouseDown={(e) => {
+                          if (!selectedClient?.daily_target_total_calories) {
+                            e.preventDefault();
+                            return;
+                          }
+                          // Clear any pending blur timeout from previous field
+                          if (blurTimeoutRef.current) {
+                            clearTimeout(blurTimeoutRef.current);
+                            blurTimeoutRef.current = null;
+                          }
+                          
+                          // Set expanded index immediately on mouse down (before blur fires)
+                          e.preventDefault();
+                          setExpandedDescriptionIndex(index);
+                        }}
 
-                        </Badge>
+                        readOnly
 
-                        <Badge variant="outline" className="bg-purple-50 border-purple-200 text-purple-700">
+                        disabled={!selectedClient?.daily_target_total_calories}
 
-                          {translations[rec.category + 'Recommendation'] || rec.category}
+                        className={`text-sm cursor-pointer truncate disabled:bg-gray-100 disabled:cursor-not-allowed ${!selectedTemplate && (!meal.description || meal.description.trim() === '') ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200' : ''}`}
 
-                        </Badge>
+                        placeholder={!selectedTemplate ? (translations.required || 'Required') : (translations.mealDescriptionShort || translations.descriptionPlaceholder || 'Optional description')}
 
-                            <Badge variant="outline" className="bg-gray-50 border-gray-200 text-gray-600">
+                        title={meal.description || ''}
 
-                              {translations.menuPlan || 'Meal Plan'}
+                      />
+                    )}
 
-                        </Badge>
+                    {!selectedTemplate && (!meal.description || meal.description.trim() === '') && (
 
-                      </div>
+                      <span className="absolute -right-2 -top-2 flex h-3 w-3">
 
-                      <div className="flex gap-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
 
-                        <Button
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
 
-                          type="button"
+                      </span>
 
-                          variant="outline"
-
-                          size="sm"
-
-                          onClick={() => editRecommendation(rec)}
-
-                          className="text-blue-600 border-blue-600 hover:bg-blue-50"
-
-                        >
-
-                          ✏️
-
-                        </Button>
-
-                        <Button
-
-                          type="button"
-
-                          variant="outline"
-
-                          size="sm"
-
-                          onClick={() => {
-
-                            if (window.confirm(translations.confirmDeleteRecommendation || 'Are you sure you want to delete this recommendation?')) {
-
-                              deleteRecommendation(rec.id);
-
-                            }
-
-                          }}
-
-                          className="text-red-600 border-red-600 hover:bg-red-50"
-
-                        >
-
-                          🗑️
-
-                        </Button>
-
-                      </div>
-
-                    </div>
-
-                    <h4 className="font-semibold text-gray-900 mb-2">
-
-                      {translations[rec.category + 'Recommendation'] || rec.title}
-
-                    </h4>
-
-                    <p className="text-gray-700 text-sm leading-relaxed">{rec.content}</p>
+                    )}
 
                   </div>
 
-                ))}
+                </div>
 
-              </div>
+                
 
-            ) : (
+                {/* Calories */}
 
-              <div className="text-center py-8 text-gray-500">
+                <div className="col-span-2">
 
-                <div className="text-4xl mb-2">💡</div>
+                  <div className="relative">
 
-                    <p className="text-sm">{translations.noMealPlanRecommendations || 'No meal plan recommendations added yet'}</p>
+                    <Input
 
-                <p className="text-xs mt-1">{translations.addRecommendationsPrompt || 'Click "Add Recommendation" to get started'}</p>
+                      type="number"
 
-              </div>
+                      value={tempCalorieInputs[index] !== undefined ? tempCalorieInputs[index] : meal.calories}
 
-            )}
+                      onChange={(e) => handleTempCalorieInput(index, e.target.value)}
+
+                      onKeyDown={(e) => {
+
+                        if (e.key === 'Enter') {
+
+                          e.preventDefault(); // Prevent form submission
+
+                          confirmCalorieInput(index);
+
+                        } else if (e.key === 'Escape') {
+
+                          e.preventDefault(); // Prevent any default behavior
+
+                          cancelCalorieInput(index);
+
+                        }
+
+                      }}
+
+                      onBlur={() => {
+
+                        if (tempCalorieInputs[index] !== undefined) {
+
+                          confirmCalorieInput(index);
+
+                        }
+
+                      }}
+
+                      disabled={!selectedClient?.daily_target_total_calories}
+
+                      className={`text-sm disabled:bg-gray-100 disabled:cursor-not-allowed ${calorieInputErrors[index] ? 'border-red-500' : ''}`}
+
+                      placeholder="0"
+
+                    />
+
+                    {calorieInputErrors[index] && (
+
+                      <div className="absolute -bottom-6 left-0 text-xs text-red-500">
+
+                        {calorieInputErrors[index]}
+
+                      </div>
+
+                    )}
+
+                  </div>
+
+                </div>
+
+                
+
+                {/* Percentage */}
+
+                <div className="col-span-2">
+
+                  <div className="text-sm text-gray-600">
+
+                    {meal.calories_pct.toFixed(1)}%
+
+                  </div>
+
+                </div>
+
+                
+
+                {/* Lock */}
+
+                <div className="col-span-1">
+
+                  <Button
+
+                    type="button"
+
+                    variant={meal.locked ? "default" : "outline"}
+
+                    size="sm"
+
+                    onClick={() => updateMealInPlan(index, 'locked', !meal.locked)}
+
+                    disabled={!selectedClient?.daily_target_total_calories}
+
+                    className={`w-full disabled:opacity-50 disabled:cursor-not-allowed ${meal.locked ? 'bg-blue-600 hover:bg-blue-700' : 'text-blue-600 border-blue-600 hover:bg-blue-50'}`}
+
+                    title={meal.locked ? "Unlock meal" : "Lock meal"}
+
+                  >
+
+                    🔒
+
+                  </Button>
+
+                </div>
+
+                
+
+                {/* Actions */}
+
+                <div className="col-span-2">
+
+                  <div className="flex gap-1">
+
+                    <Button
+
+                      type="button"
+
+                      variant="outline"
+
+                      size="sm"
+
+                      onClick={() => moveMealInPlan(index, 'up')}
+
+                      disabled={index === 0 || !selectedClient?.daily_target_total_calories}
+
+                      className="text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+
+                      title="Move up"
+
+                    >
+
+                      <ArrowUp className="h-3 w-3" />
+
+                    </Button>
+
+                    <Button
+
+                      type="button"
+
+                      variant="outline"
+
+                      size="sm"
+
+                      onClick={() => moveMealInPlan(index, 'down')}
+
+                      disabled={index === mealPlanStructure.length - 1 || !selectedClient?.daily_target_total_calories}
+
+                      className="text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+
+                      title="Move down"
+
+                    >
+
+                      <ArrowDown className="h-3 w-3" />
+
+                    </Button>
+
+                    <Button
+
+                      type="button"
+
+                      variant="outline"
+
+                      size="sm"
+
+                      onClick={() => removeMealFromPlan(index)}
+
+                      disabled={mealPlanStructure.length <= 1 || !selectedClient?.daily_target_total_calories}
+
+                      className="text-red-600 border-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+
+                      title="Remove meal"
+
+                    >
+
+                      <X className="h-3 w-3" />
+
+                    </Button>
+
+                  </div>
+
+                </div>
 
               </div>
 
             </div>
 
-          </CardContent>
+            {/* Main Meal Macros Row */}
+            {manualAlternativesMode && (
+              <div className="px-4 py-3 bg-green-50 border-t border-green-200">
+                <div className="grid grid-cols-12 gap-2 items-center">
+                  <div className="col-span-3 text-xs font-medium text-green-700">
+                    {translations.mainMealMacros || 'Main Meal Macros'} - {meal.meal}
+                  </div>
+                  <div className="col-span-2">
+                    <div className="text-xs text-green-600 mb-1 flex items-center gap-1">
+                      {translations.protein || 'Protein'} (P)
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => toggleMainMealMacroLock(index, 'protein')}
+                        disabled={!selectedClient?.daily_target_total_calories}
+                        className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                          meal.main?.lockedMacro === 'protein'
+                            ? 'text-blue-600 hover:text-blue-700'
+                            : 'text-gray-400 hover:text-gray-600'
+                        }`}
+                        title={meal.main?.lockedMacro === 'protein' ? 'Unlock protein' : 'Lock protein'}
+                      >
+                        {meal.main?.lockedMacro === 'protein' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+                      </Button>
+                    </div>
+                    <Input
+                      type="number"
+                      value={meal.main?.protein || ''}
+                      onChange={(e) => updateMealMainMacro(index, 'protein', e.target.value)}
+                      placeholder="Protein (g)"
+                      className={`text-sm ${(() => {
+                        const validation = validateMacros(
+                          meal.main?.calories || meal.calories || 0,
+                          meal.main?.protein || 0,
+                          meal.main?.fat || 0,
+                          meal.main?.carbs || 0
+                        );
+                        return !validation.isValid ? 'border-red-500' : '';
+                      })()}`}
+                      disabled={!selectedClient?.daily_target_total_calories || meal.main?.lockedMacro === 'protein'}
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <div className="text-xs text-green-600 mb-1 flex items-center gap-1">
+                      {translations.fat || 'Fat'} (F)
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => toggleMainMealMacroLock(index, 'fat')}
+                        disabled={!selectedClient?.daily_target_total_calories}
+                        className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                          meal.main?.lockedMacro === 'fat'
+                            ? 'text-blue-600 hover:text-blue-700'
+                            : 'text-gray-400 hover:text-gray-600'
+                        }`}
+                        title={meal.main?.lockedMacro === 'fat' ? 'Unlock fat' : 'Lock fat'}
+                      >
+                        {meal.main?.lockedMacro === 'fat' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+                      </Button>
+                    </div>
+                    <Input
+                      type="number"
+                      value={meal.main?.fat || ''}
+                      onChange={(e) => updateMealMainMacro(index, 'fat', e.target.value)}
+                      placeholder="Fat (g)"
+                      className={`text-sm ${(() => {
+                        const validation = validateMacros(
+                          meal.main?.calories || meal.calories || 0,
+                          meal.main?.protein || 0,
+                          meal.main?.fat || 0,
+                          meal.main?.carbs || 0
+                        );
+                        return !validation.isValid ? 'border-red-500' : '';
+                      })()}`}
+                      disabled={!selectedClient?.daily_target_total_calories || meal.main?.lockedMacro === 'fat'}
+                    />
+                  </div>
+                  <div className="col-span-3">
+                    <div className="text-xs text-green-600 mb-1 flex items-center gap-1">
+                      {translations.carbs || 'Carbs'} (C)
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => toggleMainMealMacroLock(index, 'carbs')}
+                        disabled={!selectedClient?.daily_target_total_calories}
+                        className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                          meal.main?.lockedMacro === 'carbs'
+                            ? 'text-blue-600 hover:text-blue-700'
+                            : 'text-gray-400 hover:text-gray-600'
+                        }`}
+                        title={meal.main?.lockedMacro === 'carbs' ? 'Unlock carbs' : 'Lock carbs'}
+                      >
+                        {meal.main?.lockedMacro === 'carbs' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+                      </Button>
+                    </div>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        value={(() => {
+                          if (meal.main?.lockedMacro === 'carbs') {
+                            return meal.main?.carbs || '';
+                          }
+                          // Show calculated value, but allow editing
+                          const calculated = calculateCarbsFromMacros(
+                            meal.main?.calories || meal.calories,
+                            meal.main?.protein,
+                            meal.main?.fat
+                          );
+                          // If we have a stored carbs value, use it; otherwise use calculated
+                          return meal.main?.carbs !== undefined ? (meal.main.carbs || '') : (calculated || '');
+                        })()}
+                        onChange={(e) => updateMealMainMacro(index, 'carbs', e.target.value)}
+                        placeholder="Carbs (g)"
+                        className={`text-sm ${(() => {
+                          const validation = validateMacros(
+                            meal.main?.calories || meal.calories || 0,
+                            meal.main?.protein || 0,
+                            meal.main?.fat || 0,
+                            meal.main?.carbs || 0
+                          );
+                          return !validation.isValid ? 'border-red-500' : '';
+                        })()}`}
+                        disabled={!selectedClient?.daily_target_total_calories || meal.main?.lockedMacro === 'carbs'}
+                      />
+                      {(() => {
+                        const validation = validateMacros(
+                          meal.main?.calories || meal.calories || 0,
+                          meal.main?.protein || 0,
+                          meal.main?.fat || 0,
+                          meal.main?.carbs || 0
+                        );
+                        return !validation.isValid ? (
+                          <div className="absolute -bottom-5 left-0 text-xs text-red-600">
+                            ⚠️ {validation.error}
+                          </div>
+                        ) : null;
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Alternative Meal Input Row */}
+            {manualAlternativesMode && (
+              <div className="px-4 py-3 bg-blue-50 border-t border-blue-200">
+                <div className="grid grid-cols-12 gap-2 items-center">
+                  <div className="col-span-2">
+                    <div className="text-xs font-medium text-blue-700 mb-1">
+                      {translations.alternativeFor || 'Alternative for'} {meal.meal}
+                    </div>
+                    <div className="relative flex-1 w-full">
+                      <Textarea
+                        value={meal.alternative?.description || ''}
+                        onChange={(e) => updateMealAlternative(index, 'description', e.target.value)}
+                        disabled={!selectedClient?.daily_target_total_calories}
+                        className={`text-sm resize-none flex-1 w-full min-h-[60px] max-h-[150px] disabled:bg-gray-100 disabled:cursor-not-allowed ${!meal.alternative?.description || meal.alternative.description.trim() === '' ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200' : ''}`}
+                        placeholder={translations.alternativeMealDescription || translations.mealDescriptionShort || 'What\'s in the alternative meal'}
+                        rows={3}
+                      />
+                    </div>
+                  </div>
+                  <div className="col-span-1">
+                    <div className="text-[10px] text-blue-600 mb-1 leading-tight">
+                      {translations.caloriesLabel || 'Calories'} (C)
+                      {meal.alternative?.calories_pct !== undefined && (
+                        <span className="ml-1 text-gray-500 block">
+                          ({meal.alternative.calories_pct.toFixed(1)}%)
+                        </span>
+                      )}
+                    </div>
+                    <Input
+                      type="number"
+                      value={meal.alternative?.calories || ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        updateMealAlternative(index, 'calories', val);
+                      }}
+                      placeholder="Calories"
+                      className={`text-xs ${(() => {
+                        const validation = validateMacros(
+                          meal.alternative?.calories || 0,
+                          meal.alternative?.protein || 0,
+                          meal.alternative?.fat || 0,
+                          meal.alternative?.carbs || 0
+                        );
+                        return !validation.isValid ? 'border-red-500' : '';
+                      })()}`}
+                      disabled={!selectedClient?.daily_target_total_calories}
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <div className="text-xs text-blue-600 mb-1 flex items-center gap-1">
+                      {translations.protein || 'Protein'} (P)
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => toggleAlternativeMealMacroLock(index, 'protein')}
+                        disabled={!selectedClient?.daily_target_total_calories}
+                        className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                          meal.alternative?.lockedMacro === 'protein'
+                            ? 'text-blue-600 hover:text-blue-700'
+                            : 'text-gray-400 hover:text-gray-600'
+                        }`}
+                        title={meal.alternative?.lockedMacro === 'protein' ? 'Unlock protein' : 'Lock protein'}
+                      >
+                        {meal.alternative?.lockedMacro === 'protein' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+                      </Button>
+                    </div>
+                    <Input
+                      type="number"
+                      value={meal.alternative?.protein || ''}
+                      onChange={(e) => updateMealAlternative(index, 'protein', e.target.value)}
+                      placeholder="Protein (g)"
+                      className={`text-sm ${(() => {
+                        const validation = validateMacros(
+                          meal.alternative?.calories || 0,
+                          meal.alternative?.protein || 0,
+                          meal.alternative?.fat || 0,
+                          meal.alternative?.carbs || 0
+                        );
+                        return !validation.isValid ? 'border-red-500' : '';
+                      })()}`}
+                      disabled={!selectedClient?.daily_target_total_calories || meal.alternative?.lockedMacro === 'protein'}
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <div className="text-xs text-blue-600 mb-1 flex items-center gap-1">
+                      {translations.fat || 'Fat'} (F)
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => toggleAlternativeMealMacroLock(index, 'fat')}
+                        disabled={!selectedClient?.daily_target_total_calories}
+                        className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                          meal.alternative?.lockedMacro === 'fat'
+                            ? 'text-blue-600 hover:text-blue-700'
+                            : 'text-gray-400 hover:text-gray-600'
+                        }`}
+                        title={meal.alternative?.lockedMacro === 'fat' ? 'Unlock fat' : 'Lock fat'}
+                      >
+                        {meal.alternative?.lockedMacro === 'fat' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+                      </Button>
+                    </div>
+                    <Input
+                      type="number"
+                      value={meal.alternative?.fat || ''}
+                      onChange={(e) => updateMealAlternative(index, 'fat', e.target.value)}
+                      placeholder="Fat (g)"
+                      className={`text-sm ${(() => {
+                        const validation = validateMacros(
+                          meal.alternative?.calories || 0,
+                          meal.alternative?.protein || 0,
+                          meal.alternative?.fat || 0,
+                          meal.alternative?.carbs || 0
+                        );
+                        return !validation.isValid ? 'border-red-500' : '';
+                      })()}`}
+                      disabled={!selectedClient?.daily_target_total_calories || meal.alternative?.lockedMacro === 'fat'}
+                    />
+                  </div>
+                  <div className="col-span-3">
+                    <div className="text-xs text-blue-600 mb-1 flex items-center gap-1">
+                      {translations.carbs || 'Carbs'} (C)
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => toggleAlternativeMealMacroLock(index, 'carbs')}
+                        disabled={!selectedClient?.daily_target_total_calories}
+                        className={`p-0 h-4 w-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                          meal.alternative?.lockedMacro === 'carbs'
+                            ? 'text-blue-600 hover:text-blue-700'
+                            : 'text-gray-400 hover:text-gray-600'
+                        }`}
+                        title={meal.alternative?.lockedMacro === 'carbs' ? 'Unlock carbs' : 'Lock carbs'}
+                      >
+                        {meal.alternative?.lockedMacro === 'carbs' ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+                      </Button>
+                    </div>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        value={(() => {
+                          if (meal.alternative?.lockedMacro === 'carbs') {
+                            return meal.alternative?.carbs || '';
+                          }
+                          // Show calculated value, but allow editing
+                          const calculated = calculateCarbsFromMacros(
+                            meal.alternative?.calories,
+                            meal.alternative?.protein,
+                            meal.alternative?.fat
+                          );
+                          // If we have a stored carbs value, use it; otherwise use calculated
+                          return meal.alternative?.carbs !== undefined ? (meal.alternative.carbs || '') : (calculated || '');
+                        })()}
+                        onChange={(e) => updateMealAlternative(index, 'carbs', e.target.value)}
+                        placeholder="Carbs (g)"
+                        className={`text-sm ${(() => {
+                          const validation = validateMacros(
+                            meal.alternative?.calories || 0,
+                            meal.alternative?.protein || 0,
+                            meal.alternative?.fat || 0,
+                            meal.alternative?.carbs || 0
+                          );
+                          return !validation.isValid ? 'border-red-500' : '';
+                        })()}`}
+                        disabled={!selectedClient?.daily_target_total_calories || meal.alternative?.lockedMacro === 'carbs'}
+                      />
+                      {(() => {
+                        const validation = validateMacros(
+                          meal.alternative?.calories || 0,
+                          meal.alternative?.protein || 0,
+                          meal.alternative?.fat || 0,
+                          meal.alternative?.carbs || 0
+                        );
+                        return !validation.isValid ? (
+                          <div className="absolute -bottom-5 left-0 text-xs text-red-600">
+                            ⚠️ {validation.error}
+                          </div>
+                        ) : null;
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            </React.Fragment>
+          ))}
+
+        </div>
+
+
+
+        {/* Summary Stats */}
+
+        <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+
+          <div className="grid grid-cols-2 gap-4 text-sm">
+
+            <div>
+
+              <span className="text-gray-600">{translations.totalMeals || 'Total Meals'}: </span>
+
+              <span className="font-medium">{mealPlanStructure.length}</span>
+
+              <span className="text-xs text-gray-500 ml-2">
+
+                ({mealPlanStructure.filter(meal => meal.locked).length} {translations.locked || 'locked'})
+
+              </span>
+
+            </div>
+
+            <div>
+
+              <span className="text-gray-600">{translations.totalCalories || 'Total Calories'}: </span>
+
+              <span className="font-medium">
+
+                {mealPlanStructure.reduce((sum, meal) => sum + (meal.calories || 0), 0)} / {userTargets?.calories_per_day || userTargets?.calories || 0}
+
+              </span>
+
+            </div>
+
+            <div>
+
+              <span className="text-gray-600">{translations.lockedCalories || 'Locked Calories'}: </span>
+
+              <span className="font-medium text-blue-600">
+
+                {mealPlanStructure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0)}
+
+              </span>
+
+            </div>
+
+            <div>
+
+              <span className="text-gray-600">{translations.unlockedCalories || 'Unlocked Calories'}: </span>
+
+              <span className="font-medium text-green-600">
+
+                {mealPlanStructure.filter(meal => !meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0)}
+
+              </span>
+
+            </div>
+
+            <div>
+
+              <span className="text-gray-600">{translations.availableBudget || 'Available Budget'}: </span>
+
+              <span className="font-medium text-purple-600">
+
+                {Math.max(0, (userTargets?.calories_per_day || userTargets?.calories || 0) - mealPlanStructure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0))} kcal
+
+              </span>
+
+            </div>
+
+            <div>
+
+              <span className="text-gray-600">{translations.maxPerMeal || 'Max per Meal'}: </span>
+
+              <span className="font-medium text-orange-600">
+
+                {Math.max(0, (userTargets?.calories_per_day || userTargets?.calories || 0) - mealPlanStructure.filter(meal => meal.locked).reduce((sum, meal) => sum + (meal.calories || 0), 0))} kcal
+
+              </span>
+
+            </div>
+
+            <div>
+
+              <span className="text-gray-600">{translations.totalPercentage || 'Total Percentage'}: </span>
+
+              <span className={`font-medium ${Math.abs(mealPlanStructure.reduce((sum, meal) => sum + meal.calories_pct, 0) - 100) < 0.1 ? 'text-green-600' : 'text-red-600'}`}>
+
+                {mealPlanStructure.reduce((sum, meal) => sum + meal.calories_pct, 0).toFixed(1)}%
+
+              </span>
+
+            </div>
+
+          </div>
+
+          <p className="text-xs text-gray-500 mt-2">
+
+            {translations.mealPlanLockNote || 'Note: 🔒 Locked meals maintain their calories. When you edit a meal, that meal keeps its exact value and other unlocked meals scale to fit the remaining budget.'}
+
+          </p>
+
+          <p className="text-xs text-blue-600 mt-1">
+
+            {translations.scalingFormula || 'Formula: Scaling Factor = (Daily Target - Locked Calories - Edited Meal) ÷ Other Unlocked Total'}
+
+          </p>
+
+          
+
+          {/* Validation Status Indicator */}
+
+          {(() => {
+
+            const mealsWithDescriptions = mealPlanStructure.filter(meal => 
+
+              meal.description && meal.description.trim() !== ''
+
+            ).length;
+
+            const totalMeals = mealPlanStructure.length;
+
+            const hasTemplate = !!selectedTemplate;
+
+            const isValid = hasTemplate || mealsWithDescriptions === totalMeals;
+
+            const isPartial = !hasTemplate && mealsWithDescriptions > 0 && mealsWithDescriptions < totalMeals;
+
+            
+
+            return (
+
+              <div className={`mt-4 p-3 rounded-lg border-2 ${
+
+                isValid 
+
+                  ? 'bg-green-50 border-green-300' 
+
+                  : isPartial
+
+                  ? 'bg-amber-50 border-amber-400'
+
+                  : 'bg-red-50 border-red-300'
+
+              }`}>
+
+                <div className="flex items-center gap-2">
+
+                  <span className="text-lg">
+
+                    {isValid ? '✅' : isPartial ? '⚠️' : '❌'}
+
+                  </span>
+
+                  <div className="flex-1">
+
+                    <p className={`text-sm font-semibold ${
+
+                      isValid ? 'text-green-800' : isPartial ? 'text-amber-800' : 'text-red-800'
+
+                    }`}>
+
+                      {isValid 
+
+                        ? (hasTemplate 
+
+                          ? (translations.templateSelectedReady || `Template selected: Ready to generate!`) 
+
+                          : ((translations.allMealsFilledReady || `All ${totalMeals} meals filled: Ready to generate!`).replace('{count}', totalMeals)))
+
+                        : isPartial
+
+                        ? ((translations.partialMealsWarning || `${mealsWithDescriptions}/${totalMeals} meals filled - Complete all or select a template`).replace('{filled}', mealsWithDescriptions).replace('{total}', totalMeals))
+
+                        : (translations.noMealsFilledWarning || 'No meals filled - Fill all meals or select a template')
+
+                      }
+
+                    </p>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+            );
+
+          })()}
+
+        </div>
+
+      </div>
+
+    </CardContent>
+
+  )}
+
+</Card>
+
+)}
+
+ {/* Recommendations Section */}
+
+ {selectedClient && (
+
+<Card className="border-purple-200 bg-purple-50/30 mb-6">
+
+  <CardHeader>
+
+    <div className="flex items-center justify-between">
+
+      <div className="flex items-center gap-2 text-purple-800">
+
+        <span>💡</span>
+
+        <CardTitle>
+
+          {translations.recommendations || 'Recommendations'}
+
+          {(clientRecommendations.length > 0 || recommendations.length > 0) && (
+
+            <span className="ml-2 text-sm font-normal text-purple-600">
+
+            </span>
 
           )}
+
+        </CardTitle>
+
+      </div>
+
+      <Button
+
+        type="button"
+
+        variant="ghost"
+
+        size="sm"
+
+        onClick={() => setIsRecommendationsMinimized(!isRecommendationsMinimized)}
+
+        className="text-purple-600 hover:bg-purple-100"
+
+        title={isRecommendationsMinimized ? "Expand Recommendations" : "Minimize Recommendations"}
+
+      >
+
+        {isRecommendationsMinimized ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+
+      </Button>
+
+      <Button
+
+        type="button"
+
+        variant="outline"
+
+        size="sm"
+
+        onClick={addRecommendation}
+
+        className="text-purple-600 border-purple-600 hover:bg-purple-50"
+
+      >
+
+        <Plus className="h-4 w-4 mr-1" />
+
+        {translations.addRecommendation || 'Add Recommendation'}
+
+      </Button>
+
+    </div>
+
+    <CardDescription className="text-purple-600">
+
+      {translations.recommendationsDescription || 'Add personalized recommendations for this meal plan'}
+
+    </CardDescription>
+
+  </CardHeader>
+
+  {!isRecommendationsMinimized && (
+
+  <CardContent>
+
+    <div className="space-y-6">
+
+      {/* Client Recommendations Section */}
+
+      {selectedClient && (
+
+        <div>
+
+          <div className="flex items-center gap-2 mb-4">
+
+            <h3 className="text-lg font-semibold text-gray-800">
+
+              {translations.clientRecommendations || 'Client Recommendations'}
+
+            </h3>
+
+            <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-700">
+
+              {translations.fromDatabase || 'From Database'}
+
+            </Badge>
+
+            {loadingClientRecommendations && (
+
+              <Loader className="animate-spin h-4 w-4 text-blue-600" />
+
+            )}
+
+          </div>
+
+          
+
+          {clientRecommendations.length > 0 ? (
+
+            <div className="space-y-3">
+
+              {clientRecommendations.map((rec, index) => (
+
+                <div key={rec.id} className="bg-blue-50 rounded-lg p-4 border border-blue-200 shadow-sm">
+
+                  <div className="flex items-start justify-between mb-3">
+
+                    <div className="flex items-center gap-2">
+
+                      <Badge 
+
+                        variant="outline" 
+
+                        className={`${
+
+                          rec.priority === 'high' ? 'bg-red-50 border-red-200 text-red-700' :
+
+                          rec.priority === 'medium' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
+
+                          'bg-green-50 border-green-200 text-green-700'
+
+                        }`}
+
+                      >
+
+                        {rec.priority === 'high' ? '🔴' : rec.priority === 'medium' ? '🟡' : '🟢'} {translations[rec.priority + 'Priority'] || rec.priority}
+
+                      </Badge>
+
+                      <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-700">
+
+                        {translations[rec.category + 'Recommendation'] || rec.category}
+
+                      </Badge>
+
+                      <Badge variant="outline" className="bg-gray-50 border-gray-200 text-gray-600">
+
+                        {translations.clients || 'Client'}
+
+                      </Badge>
+
+                    </div>
+
+                    <div className="flex gap-2">
+
+                      <Button
+
+                        type="button"
+
+                        variant="outline"
+
+                        size="sm"
+
+                        onClick={() => {
+
+                          // Convert client recommendation to meal plan recommendation
+
+                          const mealPlanRec = {
+
+                            id: Date.now(),
+
+                            category: rec.category,
+
+                            title: rec.title,
+
+                            content: rec.content,
+
+                            priority: rec.priority,
+
+                            source: 'meal_plan'
+
+                          };
+
+                          setRecommendations(prev => [...prev, mealPlanRec]);
+
+                          setClientRecommendations(prev => prev.filter(r => r.id !== rec.id));
+
+                        }}
+
+                        className="text-green-600 border-green-600 hover:bg-green-50"
+
+                        title={translations.addRecommendation || 'Add Recommendation'}
+
+                      >
+
+                        ➕
+
+                      </Button>
+
+                      <Button
+
+                        type="button"
+
+                        variant="outline"
+
+                        size="sm"
+
+                        onClick={() => {
+
+                          if (window.confirm(translations.confirmRemoveClientRecommendation || 'Remove this client recommendation from the meal plan? (This will not affect the original client data)')) {
+
+                            setClientRecommendations(prev => prev.filter(r => r.id !== rec.id));
+
+                          }
+
+                        }}
+
+                        className="text-orange-600 border-orange-600 hover:bg-orange-50"
+
+                        title={translations.delete || 'Delete'}
+
+                      >
+
+                        ➖
+
+                      </Button>
+
+                    </div>
+
+                  </div>
+
+                  <h4 className="font-semibold text-gray-900 mb-2">
+
+                    {translations[rec.category + 'Recommendation'] || rec.title}
+
+                  </h4>
+
+                  <p className="text-gray-700 text-sm leading-relaxed">{rec.content}</p>
+
+                </div>
+
+              ))}
+
+            </div>
+
+          ) : (
+
+            <div className="text-center py-4 text-gray-500">
+
+              <div className="text-2xl mb-2">📋</div>
+
+              <p className="text-sm">{translations.noClientRecommendations || 'No client recommendations found'}</p>
+
+            </div>
+
+          )}
+
+        </div>
+
+      )}
+
+
+
+      {/* Separator */}
+
+      {selectedClient && (recommendations.length > 0 || clientRecommendations.length > 0) && (
+
+        <Separator className="my-4" />
+
+      )}
+
+
+
+      {/* Meal Plan Recommendations Section */}
+
+      <div>
+
+        <div className="flex items-center gap-2 mb-4">
+
+          <h3 className="text-lg font-semibold text-gray-800">
+
+            {translations.mealPlanRecommendations || 'Meal Plan Recommendations'}
+
+          </h3>
+
+          <Badge variant="outline" className="bg-purple-50 border-purple-200 text-purple-700">
+
+            {translations.mealPlanSpecific || 'Meal Plan Specific'}
+
+          </Badge>
+
+        </div>
+
+        
+
+    {recommendations.length > 0 ? (
+
+      <div className="space-y-3">
+
+        {recommendations.map((rec, index) => (
+
+          <div key={rec.id} className="bg-white rounded-lg p-4 border border-purple-200 shadow-sm">
+
+            <div className="flex items-start justify-between mb-3">
+
+              <div className="flex items-center gap-2">
+
+                <Badge 
+
+                  variant="outline" 
+
+                  className={`${
+
+                    rec.priority === 'high' ? 'bg-red-50 border-red-200 text-red-700' :
+
+                    rec.priority === 'medium' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
+
+                    'bg-green-50 border-green-200 text-green-700'
+
+                  }`}
+
+                >
+
+                  {rec.priority === 'high' ? '🔴' : rec.priority === 'medium' ? '🟡' : '🟢'} {translations[rec.priority + 'Priority'] || rec.priority}
+
+                </Badge>
+
+                <Badge variant="outline" className="bg-purple-50 border-purple-200 text-purple-700">
+
+                  {translations[rec.category + 'Recommendation'] || rec.category}
+
+                </Badge>
+
+                    <Badge variant="outline" className="bg-gray-50 border-gray-200 text-gray-600">
+
+                      {translations.menuPlan || 'Meal Plan'}
+
+                </Badge>
+
+              </div>
+
+              <div className="flex gap-2">
+
+                <Button
+
+                  type="button"
+
+                  variant="outline"
+
+                  size="sm"
+
+                  onClick={() => editRecommendation(rec)}
+
+                  className="text-blue-600 border-blue-600 hover:bg-blue-50"
+
+                >
+
+                  ✏️
+
+                </Button>
+
+                <Button
+
+                  type="button"
+
+                  variant="outline"
+
+                  size="sm"
+
+                  onClick={() => {
+
+                    if (window.confirm(translations.confirmDeleteRecommendation || 'Are you sure you want to delete this recommendation?')) {
+
+                      deleteRecommendation(rec.id);
+
+                    }
+
+                  }}
+
+                  className="text-red-600 border-red-600 hover:bg-red-50"
+
+                >
+
+                  🗑️
+
+                </Button>
+
+              </div>
+
+            </div>
+
+            <h4 className="font-semibold text-gray-900 mb-2">
+
+              {translations[rec.category + 'Recommendation'] || rec.title}
+
+            </h4>
+
+            <p className="text-gray-700 text-sm leading-relaxed">{rec.content}</p>
+
+          </div>
+
+        ))}
+
+      </div>
+
+    ) : (
+
+      <div className="text-center py-8 text-gray-500">
+
+        <div className="text-4xl mb-2">💡</div>
+
+            <p className="text-sm">{translations.noMealPlanRecommendations || 'No meal plan recommendations added yet'}</p>
+
+        <p className="text-xs mt-1">{translations.addRecommendationsPrompt || 'Click "Add Recommendation" to get started'}</p>
+
+      </div>
+
+    )}
+
+      </div>
+
+    </div>
+
+  </CardContent>
+
+  )}
+
+</Card>
+
+)}
+
+
+      {/* User Targets Display */}
+
+      {/* Menu Generation Section */}
+
+      {selectedClient && userTargets && (
+
+        <Card className="border-green-200 bg-green-50/30 mb-6">
+
+          <CardHeader>
+
+            <CardTitle className="flex items-center gap-2 text-green-800">
+
+              <span>🍽️</span>
+
+              {translations.generateMenu || 'Generate Menu'}
+
+            </CardTitle>
+
+            <CardDescription className="text-green-600">
+
+              {translations.generateMenuFor ? `${translations.generateMenuFor} ${selectedClient.full_name}` : `Generate personalized menu for ${selectedClient.full_name}`}
+
+            </CardDescription>
+
+          </CardHeader>
+
+          <CardContent>
+
+            <div className="space-y-4">
+
+              {/* Show button only when not loading */}
+
+              {!loading && (
+
+                <div className="flex flex-wrap gap-4">
+
+                  <Button
+
+                    onClick={fetchMenu}
+
+                    disabled={!selectedClient}
+
+                    className="bg-green-600 hover:bg-green-700 text-white px-6 py-3"
+
+                  >
+
+                    <span className="text-lg">🎯</span>
+
+                    {translations.generateMenu || 'Generate Menu'}
+
+                  </Button>
+
+                </div>
+
+              )}
+
+              
+
+              {/* Loading Progress Indicator */}
+
+              {loading && (
+
+                <div className="mt-6">
+
+                  <WaterBarLoading />
+
+                </div>
+
+              )}
+
+            </div>
+
+          </CardContent>
 
         </Card>
 
       )}
 
+      
+
+     
+
+
+     
 
 
       {/* Nutrition Targets Display */}

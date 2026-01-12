@@ -28,6 +28,7 @@ import {
   TrendingUp,
   Activity,
   ArrowRight,
+  ArrowLeft,
   ChefHat,
   Send
 } from 'lucide-react';
@@ -84,14 +85,16 @@ const priorityColors = {
 const { Menu, ChatConversation, ChatMessage, ChatUser } = entities;
 
 export default function DietitianProfile() {
-  const { translations, language, dir } = useLanguage();
+  const { translations, language, dir, isRTL } = useLanguage();
   const { user } = useAuth();
   const { clients, selectClient } = useClient();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [dashboardSubTab, setDashboardSubTab] = useState('messages');
   const [messages, setMessages] = useState([]);
   const [filteredMessages, setFilteredMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [filterPriority, setFilterPriority] = useState('all');
@@ -165,8 +168,21 @@ export default function DietitianProfile() {
   const PREFERENCES_PER_PAGE = 5;
 
   useEffect(() => {
-    loadCurrentUser();
-    loadMessages();
+    const loadAllData = async () => {
+      setIsInitialLoading(true);
+      try {
+        // Load all initial data in parallel
+        await Promise.all([
+          loadCurrentUser(),
+          loadMessages()
+        ]);
+      } catch (error) {
+        console.error('Error loading initial data:', error);
+        // Even if there's an error, we should still show the dashboard
+        // The dashboard loading will handle setting isInitialLoading to false
+      }
+    };
+    loadAllData();
   }, []);
 
   useEffect(() => {
@@ -175,8 +191,11 @@ export default function DietitianProfile() {
   
   // Load dashboard data when clients change (e.g., when role-based filtering is applied)
   useEffect(() => {
-    if (clients && clients.length >= 0) {
-      loadDashboardData();
+    if (clients !== null && clients !== undefined) {
+      // Clients are loaded, now load dashboard data
+      loadDashboardData().finally(() => {
+        setIsInitialLoading(false);
+      });
     }
   }, [clients]);
 
@@ -759,7 +778,18 @@ export default function DietitianProfile() {
       return false;
     }
     if (messageSearchTerm) {
-      const content = msg.content || msg.message || '';
+      let content = msg.content || msg.message || '';
+      // For assistant messages, extract response_text for searching
+      if (msg.role === 'assistant' && msg.message) {
+        try {
+          const parsed = typeof msg.message === 'string' ? JSON.parse(msg.message) : msg.message;
+          if (parsed && parsed.response_text) {
+            content = parsed.response_text;
+          }
+        } catch (e) {
+          // If parsing fails, use original content
+        }
+      }
       return content.toLowerCase().includes(messageSearchTerm.toLowerCase());
     }
     return true;
@@ -1019,11 +1049,87 @@ export default function DietitianProfile() {
     return filtered;
   };
 
+  // Show loading screen while initial data is being loaded
+  if (isInitialLoading) {
+    return (
+      <div className="container mx-auto p-6" dir={dir}>
+        <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary"></div>
+          <p className="text-lg text-gray-600">{translations.loadingData || 'Loading data...'}</p>
+          <p className="text-sm text-gray-500">{translations.loading || 'Loading...'}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto p-6 space-y-6" dir={dir}>
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={(value) => {
+        setActiveTab(value);
+        if (value === 'preferences') {
+          // Reset state and load first page with no search
+          setPreferencesPage(1);
+          setPreferencesSearchTerm('');
+          setUserPreferences([]);
+          loadUserPreferences(true, '');
+        }
+      }} className="space-y-4">
+        <TabsList className="grid w-full grid-cols-4" >
+          {isRTL ? (
+            <>
+              <TabsTrigger value="profile" className="flex items-center space-x-2">
+                <User className="h-4 w-4" />
+                <span>{translations.profileSettings || 'Profile Settings'}</span>
+              </TabsTrigger>
+              <TabsTrigger value="preferences" className="flex items-center space-x-2">
+                <Bell className="h-4 w-4" />
+                <span>{translations.userPreferences || 'User Preferences'}</span>
+              </TabsTrigger>
+              <TabsTrigger value="messages" className="flex items-center space-x-2">
+                <Megaphone className="h-4 w-4" />
+                <span>{translations.systemMessages || 'System Messages'}</span>
+                {activeMessages.length > 0 && (
+                  <Badge variant="destructive" className={isRTL ? 'mr-2' : 'ml-2'}>
+                    {activeMessages.length}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="dashboard" className="flex items-center space-x-2">
+                <LayoutDashboard className="h-4 w-4" />
+                <span>{translations.dashboard || 'Dashboard'}</span>
+              </TabsTrigger>
+            </>
+          ) : (
+            <>
+              <TabsTrigger value="dashboard" className="flex items-center space-x-2">
+                <LayoutDashboard className="h-4 w-4" />
+                <span>{translations.dashboard || 'Dashboard'}</span>
+              </TabsTrigger>
+              <TabsTrigger value="messages" className="flex items-center space-x-2">
+                <Megaphone className="h-4 w-4" />
+                <span>{translations.systemMessages || 'System Messages'}</span>
+                {activeMessages.length > 0 && (
+                  <Badge variant="destructive" className="ml-2">
+                    {activeMessages.length}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="preferences" className="flex items-center space-x-2">
+                <Bell className="h-4 w-4" />
+                <span>{translations.userPreferences || 'User Preferences'}</span>
+              </TabsTrigger>
+              <TabsTrigger value="profile" className="flex items-center space-x-2">
+                <User className="h-4 w-4" />
+                <span>{translations.profileSettings || 'Profile Settings'}</span>
+              </TabsTrigger>
+            </>
+          )}
+        </TabsList>
+
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
+      <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} justify-between`}>
+        <div className={`flex items-center ${isRTL ? 'flex-row-reverse space-x-reverse' : 'space-x-4'} space-x-4`}>
           <Avatar className="h-16 w-16">
             <AvatarFallback className="bg-gradient-to-br from-primary to-primary-lighter text-white font-semibold text-xl">
               {currentUser?.email?.[0]?.toUpperCase() || 'D'}
@@ -1036,7 +1142,7 @@ export default function DietitianProfile() {
         </div>
         <div className="flex items-center space-x-2">
           <Badge variant="outline" className="text-green-600 border-green-200">
-            <CheckCircle className="h-3 w-3 mr-1" />
+            <CheckCircle className={`h-3 w-3 ${isRTL ? 'ml-1' : 'mr-1'}`} />
             {translations.active || 'Active'}
           </Badge>
         </div>
@@ -1090,66 +1196,103 @@ export default function DietitianProfile() {
         </Card>
       </div>
 
-      {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={(value) => {
-        setActiveTab(value);
-        if (value === 'preferences') {
-          // Reset state and load first page with no search
-          setPreferencesPage(1);
-          setPreferencesSearchTerm('');
-          setUserPreferences([]);
-          loadUserPreferences(true, '');
-        }
-      }} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="dashboard" className="flex items-center space-x-2">
-            <LayoutDashboard className="h-4 w-4" />
-            <span>{translations.dashboard || 'Dashboard'}</span>
-          </TabsTrigger>
-          <TabsTrigger value="messages" className="flex items-center space-x-2">
-            <Megaphone className="h-4 w-4" />
-            <span>{translations.systemMessages || 'System Messages'}</span>
-            {activeMessages.length > 0 && (
-              <Badge variant="destructive" className="ml-2">
-                {activeMessages.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="preferences" className="flex items-center space-x-2">
-            <Bell className="h-4 w-4" />
-            <span>{translations.userPreferences || 'User Preferences'}</span>
-          </TabsTrigger>
-          <TabsTrigger value="profile" className="flex items-center space-x-2">
-            <User className="h-4 w-4" />
-            <span>{translations.profileSettings || 'Profile Settings'}</span>
-          </TabsTrigger>
-        </TabsList>
-
         {/* Dashboard Tab */}
         <TabsContent value="dashboard" className="space-y-6">
-          {/* Recent Client Messages */}
-          <Card>
+          {/* Nested Dashboard Tabs */}
+          <Tabs value={dashboardSubTab} onValueChange={setDashboardSubTab} className="space-y-4">
+          <TabsList className="grid w-full grid-cols-6" dir={isRTL ? 'rtl' : 'ltr'}>
+          {isRTL ? (
+                <>
+                  <TabsTrigger value="messages" className="flex items-center space-x-2">
+                    <MessageSquare className="h-4 w-4" />
+                    <span>{translations.recentClientMessages || 'Client Messages'}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="activity" className="flex items-center space-x-2">
+                    <Activity className="h-4 w-4" />
+                    <span>{translations.clientActivity || 'Client Activity'}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="mealPlans" className="flex items-center space-x-2">
+                    <ChefHat className="h-4 w-4" />
+                    <span>{translations.recentMealPlans || 'Meal Plans Created'}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="statusChanges" className="flex items-center space-x-2">
+                    <CheckCircle className="h-4 w-4" />
+                    <span>{translations.recentStatusChanges || 'Status Changes'}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="management" className="flex items-center space-x-2">
+                    <LayoutDashboard className="h-4 w-4" />
+                    <span>{translations.mealPlansManagement || 'Meal Plans Management'}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="weightLogs" className="flex items-center space-x-2">
+                    <TrendingUp className="h-4 w-4" />
+                    <span>{translations.recentWeightLogs || 'Weight & Body Fat Logs'}</span>
+                  </TabsTrigger>
+                </>
+              ) : (
+                <>
+                  <TabsTrigger value="messages" className="flex items-center space-x-2">
+                    <MessageSquare className="h-4 w-4" />
+                    <span>{translations.recentClientMessages || 'Client Messages'}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="activity" className="flex items-center space-x-2">
+                    <Activity className="h-4 w-4" />
+                    <span>{translations.clientActivity || 'Client Activity'}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="mealPlans" className="flex items-center space-x-2">
+                    <ChefHat className="h-4 w-4" />
+                    <span>{translations.recentMealPlans || 'Meal Plans Created'}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="statusChanges" className="flex items-center space-x-2">
+                    <CheckCircle className="h-4 w-4" />
+                    <span>{translations.recentStatusChanges || 'Status Changes'}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="management" className="flex items-center space-x-2">
+                    <LayoutDashboard className="h-4 w-4" />
+                    <span>{translations.mealPlansManagement || 'Meal Plans Management'}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="weightLogs" className="flex items-center space-x-2">
+                    <TrendingUp className="h-4 w-4" />
+                    <span>{translations.recentWeightLogs || 'Weight & Body Fat Logs'}</span>
+                  </TabsTrigger>
+                </>
+              )}
+            </TabsList>
+
+            {/* Recent Client Messages Tab */}
+            <TabsContent value="messages" className="space-y-6">
+              {/* Recent Client Messages */}
+              <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>{translations.recentClientMessages || 'Recent Client Messages'}</CardTitle>
-                  <CardDescription>{translations.latestMessagesFromAllClients || 'Latest messages from all your clients'}</CardDescription>
+              <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} justify-between`}>
+                <div className={isRTL ? 'text-right' : ''}>
+                  <CardTitle className={isRTL ? 'text-right' : ''}>{translations.recentClientMessages || 'Recent Client Messages'}</CardTitle>
+                  <CardDescription className={isRTL ? 'text-right' : ''}>
+                    {translations.showingRecentMessages || 'Showing 3 most recent messages from all your clients. Click "View Conversation" to see more messages in the chat.'}
+                  </CardDescription>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} gap-2`}>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setSectionLimits(prev => ({ ...prev, messages: prev.messages === 3 ? 5 : 3 }))}
-                    className="flex items-center gap-2"
+                    className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} gap-2`}
                   >
                     {sectionLimits.messages === 3 ? (
                       <>
-                        <ArrowRight className="h-4 w-4 -rotate-90" />
+                        {isRTL ? (
+                          <ArrowLeft className="h-4 w-4 rotate-90" />
+                        ) : (
+                          <ArrowRight className="h-4 w-4 -rotate-90" />
+                        )}
                         {translations.expand || 'Expand'}
                       </>
                     ) : (
                       <>
-                        <ArrowRight className="h-4 w-4 rotate-90" />
+                        {isRTL ? (
+                          <ArrowLeft className="h-4 w-4 -rotate-90" />
+                        ) : (
+                          <ArrowRight className="h-4 w-4 rotate-90" />
+                        )}
                         {translations.shrink || 'Shrink'}
                       </>
                     )}
@@ -1160,30 +1303,31 @@ export default function DietitianProfile() {
             <CardContent>
               {/* Filters */}
               <div className="mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${isRTL ? 'direction-rtl' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                   <div>
-                    <Label>{translations.search || 'Search'}</Label>
+                    <Label className={isRTL ? 'text-right' : ''}>{translations.search || 'Search'}</Label>
                     <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <Search className={`absolute ${isRTL ? 'right-3' : 'left-3'} top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400`} />
                       <Input
                         placeholder={translations.searchMessages || 'Search messages...'}
                         value={messageSearchTerm}
                         onChange={(e) => setMessageSearchTerm(e.target.value)}
-                        className="pl-10"
+                        className={isRTL ? "pr-10 text-right" : "pl-10"}
+                        dir={isRTL ? 'rtl' : 'ltr'}
                       />
                     </div>
                   </div>
 
                   <div>
-                    <Label>{translations.client || 'Client'}</Label>
+                    <Label className={isRTL ? 'text-right' : ''}>{translations.client || 'Client'}</Label>
                     <Select value={messageFilterClient} onValueChange={setMessageFilterClient}>
-                      <SelectTrigger>
+                      <SelectTrigger className={isRTL ? 'text-right' : ''} dir={isRTL ? 'rtl' : 'ltr'}>
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">{translations.allClients || 'All Clients'}</SelectItem>
+                      <SelectContent dir={isRTL ? 'rtl' : 'ltr'}>
+                        <SelectItem value="all" className={isRTL ? 'text-right' : ''}>{translations.allClients || 'All Clients'}</SelectItem>
                         {clients.map(client => (
-                          <SelectItem key={client.user_code} value={client.user_code}>
+                          <SelectItem key={client.user_code} value={client.user_code} className={isRTL ? 'text-right' : ''}>
                             {client.full_name}
                           </SelectItem>
                         ))}
@@ -1208,8 +1352,8 @@ export default function DietitianProfile() {
                 <>
                 <div className="space-y-4">
                   {getDisplayItems(filteredRecentMessages, 'messages').map((message, index) => (
-                    <div key={message.id || index} className="relative overflow-hidden rounded-lg bg-gradient-to-r from-white to-gray-50 border border-gray-200 p-4 hover:shadow-md transition-all duration-300">
-                      <div className="flex items-start gap-4">
+                    <div key={message.id || index} className={`relative overflow-hidden rounded-lg bg-gradient-to-r from-white to-gray-50 border border-gray-200 p-4 hover:shadow-md transition-all duration-300 ${isRTL ? 'text-right' : ''}`}>
+                      <div className={`flex items-start ${isRTL ? 'flex-row-reverse' : ''} gap-4`}>
                         <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
                           message.role === 'user' 
                             ? 'bg-gradient-to-br from-blue-500 to-indigo-600' 
@@ -1225,10 +1369,10 @@ export default function DietitianProfile() {
                             <MessageSquare className="h-5 w-5 text-white" />
                           )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <p className="font-semibold text-gray-900">
+                        <div className={`flex-1 min-w-0 ${isRTL ? 'text-right' : ''}`}>
+                          <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} justify-between mb-2`}>
+                            <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} gap-2`}>
+                              <p className={`font-semibold text-gray-900 ${isRTL ? 'text-right' : ''}`}>
                                 {getClientName(message.user_code)}
                               </p>
                               <Badge variant="outline" className="text-xs">
@@ -1237,30 +1381,48 @@ export default function DietitianProfile() {
                                  translations.assistant || 'Assistant'}
                               </Badge>
                             </div>
-                            <p className="text-xs text-gray-500">
+                            <p className={`text-xs text-gray-500 ${isRTL ? 'text-left' : ''}`}>
                               {new Date(message.created_at).toLocaleString()}
                             </p>
                           </div>
-                          <p className="text-sm text-gray-700 line-clamp-2 mb-3">
-                            {message.content || message.message || translations.messageContentNotAvailable || 'Message content not available'}
+                          <p className={`text-sm text-gray-700 line-clamp-2 mb-3 ${isRTL ? 'text-right' : ''}`}>
+                            {(() => {
+                              // For assistant messages, try to extract response_text from JSON
+                              if (message.role === 'assistant' && message.message) {
+                                try {
+                                  const parsed = typeof message.message === 'string' ? JSON.parse(message.message) : message.message;
+                                  if (parsed && parsed.response_text) {
+                                    return parsed.response_text;
+                                  }
+                                } catch (e) {
+                                  // If parsing fails, fall through to default
+                                }
+                              }
+                              // For non-assistant messages or if parsing fails, use original content
+                              return message.content || message.message || translations.messageContentNotAvailable || 'Message content not available';
+                            })()}
                           </p>
-                          <div className="flex items-center gap-2">
+                          <div className={`flex items-center ${isRTL ? 'flex-row-reverse justify-end' : 'justify-start'} gap-2`}>
                             <Button
                               size="sm"
                               variant="outline"
                               onClick={() => navigateToChat(message.user_code)}
-                              className="text-xs"
+                              className={`text-xs ${isRTL ? 'flex-row-reverse' : ''}`}
                             >
-                              <MessageSquare className="h-3 w-3 mr-1" />
+                              <MessageSquare className={`h-3 w-3 ${isRTL ? 'ml-1' : 'mr-1'}`} />
                               {translations.viewConversation || 'View Conversation'}
                             </Button>
                             <Button
                               size="sm"
                               variant="ghost"
                               onClick={() => navigateToChat(message.user_code)}
-                              className="text-xs"
+                              className={`text-xs ${isRTL ? 'flex-row-reverse' : ''}`}
                             >
-                              <ArrowRight className="h-3 w-3 mr-1" />
+                              {isRTL ? (
+                                <ArrowLeft className={`h-3 w-3 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                              ) : (
+                                <ArrowRight className={`h-3 w-3 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                              )}
                               {translations.reply || 'Reply'}
                             </Button>
                           </div>
@@ -1274,9 +1436,13 @@ export default function DietitianProfile() {
                     <Button
                       variant="outline"
                       onClick={() => loadMoreItems('messages')}
-                      className="w-full"
+                      className={`w-full ${isRTL ? 'flex-row-reverse' : ''}`}
                     >
-                      <ArrowRight className="h-4 w-4 mr-2 -rotate-90" />
+                      {isRTL ? (
+                        <ArrowLeft className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'} rotate-90`} />
+                      ) : (
+                        <ArrowRight className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'} -rotate-90`} />
+                      )}
                       {translations.loadMore || `Load More (${Math.min(5, filteredRecentMessages.length - sectionLimits.messages)} ${translations.more || 'more'})`}
                     </Button>
                   </div>
@@ -1285,30 +1451,41 @@ export default function DietitianProfile() {
               )}
             </CardContent>
           </Card>
+            </TabsContent>
 
-          {/* Client Activity */}
-          <Card>
+            {/* Client Activity Tab */}
+            <TabsContent value="activity" className="space-y-6">
+              {/* Client Activity */}
+              <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>{translations.clientActivity || 'Client Activity'}</CardTitle>
-                  <CardDescription>{translations.recentActivityMetrics || 'Recent activity metrics for your clients'}</CardDescription>
+              <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} justify-between`}>
+                <div className={isRTL ? 'text-right' : ''}>
+                  <CardTitle className={isRTL ? 'text-right' : ''}>{translations.clientActivity || 'Client Activity'}</CardTitle>
+                  <CardDescription className={isRTL ? 'text-right' : ''}>{translations.recentActivityMetrics || 'Recent activity metrics for your clients'}</CardDescription>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} gap-2`}>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setSectionLimits(prev => ({ ...prev, activity: prev.activity === 3 ? 5 : 3 }))}
-                    className="flex items-center gap-2"
+                    className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} gap-2`}
                   >
                     {sectionLimits.activity === 3 ? (
                       <>
-                        <ArrowRight className="h-4 w-4 -rotate-90" />
+                        {isRTL ? (
+                          <ArrowLeft className="h-4 w-4 rotate-90" />
+                        ) : (
+                          <ArrowRight className="h-4 w-4 -rotate-90" />
+                        )}
                         {translations.expand || 'Expand'}
                       </>
                     ) : (
                       <>
-                        <ArrowRight className="h-4 w-4 rotate-90" />
+                        {isRTL ? (
+                          <ArrowLeft className="h-4 w-4 -rotate-90" />
+                        ) : (
+                          <ArrowRight className="h-4 w-4 rotate-90" />
+                        )}
                         {translations.shrink || 'Shrink'}
                       </>
                     )}
@@ -1318,26 +1495,27 @@ export default function DietitianProfile() {
             </CardHeader>
             <CardContent>
               {/* Filters */}
-              <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className={`mb-4 grid grid-cols-1 md:grid-cols-3 gap-3 ${isRTL ? 'direction-rtl' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                 <div>
-                  <Label className="text-xs">{translations.search || 'Search'}</Label>
+                  <Label className={`text-xs ${isRTL ? 'text-right' : ''}`}>{translations.search || 'Search'}</Label>
                   <div className="relative">
-                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400" />
+                    <Search className={`absolute ${isRTL ? 'right-2' : 'left-2'} top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400`} />
                     <Input
                       placeholder={translations.searchClients || 'Search clients...'}
                       value={activitySearchTerm}
                       onChange={(e) => setActivitySearchTerm(e.target.value)}
-                      className="pl-8 h-8 text-sm"
+                      className={isRTL ? "pr-8 h-8 text-sm text-right" : "pl-8 h-8 text-sm"}
+                      dir={isRTL ? 'rtl' : 'ltr'}
                     />
                   </div>
                 </div>
                 <div>
-                  <Label className="text-xs">{translations.sortBy || 'Sort By'}</Label>
+                  <Label className={`text-xs ${isRTL ? 'text-right' : ''}`}>{translations.sortBy || 'Sort By'}</Label>
                   <Select value={activitySortBy} onValueChange={setActivitySortBy}>
-                    <SelectTrigger className="h-8 text-sm">
+                    <SelectTrigger className={`h-8 text-sm ${isRTL ? 'text-right' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent dir={isRTL ? 'rtl' : 'ltr'}>
                       <SelectItem value="lastActivity">{translations.lastActivity || 'Last Activity'}</SelectItem>
                       <SelectItem value="client">{translations.client || 'Client Name'}</SelectItem>
                       <SelectItem value="mealPlans">{translations.mealPlans || 'Meal Plans'}</SelectItem>
@@ -1346,12 +1524,12 @@ export default function DietitianProfile() {
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-xs">{translations.order || 'Order'}</Label>
+                  <Label className={`text-xs ${isRTL ? 'text-right' : ''}`}>{translations.order || 'Order'}</Label>
                   <Select value={activitySortOrder} onValueChange={setActivitySortOrder}>
-                    <SelectTrigger className="h-8 text-sm">
+                    <SelectTrigger className={`h-8 text-sm ${isRTL ? 'text-right' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent dir={isRTL ? 'rtl' : 'ltr'}>
                       <SelectItem value="desc">{translations.descending || 'Descending'}</SelectItem>
                       <SelectItem value="asc">{translations.ascending || 'Ascending'}</SelectItem>
                     </SelectContent>
@@ -1367,50 +1545,50 @@ export default function DietitianProfile() {
               ) : (
                 <>
                   <div className="overflow-x-auto">
-                    <Table>
+                    <Table dir={isRTL ? 'rtl' : 'ltr'}>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>{translations.client || 'Client'}</TableHead>
-                          <TableHead>{translations.mealPlans || 'Meal Plans'}</TableHead>
-                          <TableHead>{translations.messages || 'Messages'}</TableHead>
-                          <TableHead>{translations.lastActivity || 'Last Activity'}</TableHead>
-                          <TableHead className="text-right">{translations.actions || 'Actions'}</TableHead>
+                          <TableHead className={isRTL ? 'text-right' : ''}>{translations.client || 'Client'}</TableHead>
+                          <TableHead className={isRTL ? 'text-right' : ''}>{translations.mealPlans || 'Meal Plans'}</TableHead>
+                          <TableHead className={isRTL ? 'text-right' : ''}>{translations.messages || 'Messages'}</TableHead>
+                          <TableHead className={isRTL ? 'text-right' : ''}>{translations.lastActivity || 'Last Activity'}</TableHead>
+                          <TableHead className={isRTL ? 'text-left' : 'text-right'}>{translations.actions || 'Actions'}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {getDisplayItems(getFilteredAndSortedActivity(), 'activity').map((activity) => (
                           <TableRow key={activity.user_code} className="hover:bg-gray-50">
-                            <TableCell className="font-medium">
-                              <div className="flex items-center gap-2">
+                            <TableCell className={`font-medium ${isRTL ? 'text-right' : ''}`}>
+                              <div className={`flex items-center ${isRTL ? 'flex-row-reverse justify-end' : ''} gap-2`}>
                                 <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
                                   <User className="h-4 w-4 text-primary" />
                                 </div>
-                                {getClientName(activity.user_code)}
+                                <span className={isRTL ? 'text-right' : ''}>{getClientName(activity.user_code)}</span>
                               </div>
                             </TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                                <ChefHat className="h-3 w-3 mr-1" />
+                            <TableCell className={isRTL ? 'text-right' : ''}>
+                              <Badge variant="outline" className={`bg-green-50 text-green-700 border-green-200 inline-flex items-center ${isRTL ? 'flex-row-reverse' : ''}`}>
+                                <ChefHat className={`h-3 w-3 ${isRTL ? 'ml-1' : 'mr-1'}`} />
                                 {activity.menus}
                               </Badge>
                             </TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                                <MessageSquare className="h-3 w-3 mr-1" />
+                            <TableCell className={isRTL ? 'text-right' : ''}>
+                              <Badge variant="outline" className={`bg-blue-50 text-blue-700 border-blue-200 inline-flex items-center ${isRTL ? 'flex-row-reverse' : ''}`}>
+                                <MessageSquare className={`h-3 w-3 ${isRTL ? 'ml-1' : 'mr-1'}`} />
                                 {activity.messages}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-sm text-gray-600">
+                            <TableCell className={`text-sm text-gray-600 ${isRTL ? 'text-right' : ''}`}>
                               {new Date(activity.lastActivity).toLocaleDateString()}
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className={isRTL ? 'text-left' : 'text-right'}>
                               <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => navigateToChat(activity.user_code)}
-                                className="text-blue-600 hover:text-blue-700"
+                                className={`text-blue-600 hover:text-blue-700 ${isRTL ? 'flex-row-reverse' : ''}`}
                               >
-                                <MessageSquare className="h-4 w-4 mr-1" />
+                                <MessageSquare className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
                                 {translations.viewDetails || 'View Details'}
                               </Button>
                             </TableCell>
@@ -1424,9 +1602,13 @@ export default function DietitianProfile() {
                       <Button
                         variant="outline"
                         onClick={() => loadMoreItems('activity')}
-                        className="w-full"
+                        className={`w-full ${isRTL ? 'flex-row-reverse' : ''}`}
                       >
-                      <ArrowRight className="h-4 w-4 mr-2 -rotate-90" />
+                      {isRTL ? (
+                        <ArrowLeft className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'} rotate-90`} />
+                      ) : (
+                        <ArrowRight className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'} -rotate-90`} />
+                      )}
                       {translations.loadMore || `Load More (${Math.min(5, getFilteredAndSortedActivity().length - sectionLimits.activity)} ${translations.more || 'more'})`}
                       </Button>
                     </div>
@@ -1435,30 +1617,41 @@ export default function DietitianProfile() {
               )}
             </CardContent>
           </Card>
+            </TabsContent>
 
-          {/* Recent Meal Plans Created */}
-          <Card>
+            {/* Recent Meal Plans Created Tab */}
+            <TabsContent value="mealPlans" className="space-y-6">
+              {/* Recent Meal Plans Created */}
+              <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>{translations.recentMealPlans || 'Recent Meal Plans Created'}</CardTitle>
-                  <CardDescription>{translations.latestMealPlansCreated || 'Latest meal plans created for all clients'}</CardDescription>
+              <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} justify-between`}>
+                <div className={isRTL ? 'text-right' : ''}>
+                  <CardTitle className={isRTL ? 'text-right' : ''}>{translations.recentMealPlans || 'Recent Meal Plans Created'}</CardTitle>
+                  <CardDescription className={isRTL ? 'text-right' : ''}>{translations.latestMealPlansCreated || 'Latest meal plans created for all clients'}</CardDescription>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} gap-2`}>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setSectionLimits(prev => ({ ...prev, mealPlans: prev.mealPlans === 3 ? 5 : 3 }))}
-                    className="flex items-center gap-2"
+                    className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} gap-2`}
                   >
                     {sectionLimits.mealPlans === 3 ? (
                       <>
-                        <ArrowRight className="h-4 w-4 -rotate-90" />
+                        {isRTL ? (
+                          <ArrowLeft className="h-4 w-4 rotate-90" />
+                        ) : (
+                          <ArrowRight className="h-4 w-4 -rotate-90" />
+                        )}
                         {translations.expand || 'Expand'}
                       </>
                     ) : (
                       <>
-                        <ArrowRight className="h-4 w-4 rotate-90" />
+                        {isRTL ? (
+                          <ArrowLeft className="h-4 w-4 -rotate-90" />
+                        ) : (
+                          <ArrowRight className="h-4 w-4 rotate-90" />
+                        )}
                         {translations.shrink || 'Shrink'}
                       </>
                     )}
@@ -1468,56 +1661,57 @@ export default function DietitianProfile() {
             </CardHeader>
             <CardContent>
               {/* Filters */}
-              <div className="mb-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className={`mb-4 grid grid-cols-1 md:grid-cols-4 gap-3 ${isRTL ? 'direction-rtl' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                 <div>
-                  <Label className="text-xs">{translations.search || 'Search'}</Label>
+                  <Label className={`text-xs ${isRTL ? 'text-right' : ''}`}>{translations.search || 'Search'}</Label>
                   <div className="relative">
-                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400" />
+                    <Search className={`absolute ${isRTL ? 'right-2' : 'left-2'} top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400`} />
                     <Input
                       placeholder={translations.searchMealPlans || 'Search...'}
                       value={recentMealPlansSearchTerm}
                       onChange={(e) => setRecentMealPlansSearchTerm(e.target.value)}
-                      className="pl-8 h-8 text-sm"
+                      className={isRTL ? "pr-8 h-8 text-sm text-right" : "pl-8 h-8 text-sm"}
+                      dir={isRTL ? 'rtl' : 'ltr'}
                     />
                   </div>
                 </div>
                 <div>
-                  <Label className="text-xs">{translations.status || 'Status'}</Label>
+                  <Label className={`text-xs ${isRTL ? 'text-right' : ''}`}>{translations.status || 'Status'}</Label>
                   <Select value={recentMealPlansStatusFilter} onValueChange={setRecentMealPlansStatusFilter}>
-                    <SelectTrigger className="h-8 text-sm">
+                    <SelectTrigger className={`h-8 text-sm ${isRTL ? 'text-right' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{translations.allStatus || 'All'}</SelectItem>
-                      <SelectItem value="active">{translations.active || 'Active'}</SelectItem>
-                      <SelectItem value="draft">{translations.draft || 'Draft'}</SelectItem>
-                      <SelectItem value="expired">{translations.expired || 'Expired'}</SelectItem>
+                    <SelectContent dir={isRTL ? 'rtl' : 'ltr'}>
+                      <SelectItem value="all" className={isRTL ? 'text-right' : ''}>{translations.allStatus || 'All'}</SelectItem>
+                      <SelectItem value="active" className={isRTL ? 'text-right' : ''}>{translations.active || 'Active'}</SelectItem>
+                      <SelectItem value="draft" className={isRTL ? 'text-right' : ''}>{translations.draft || 'Draft'}</SelectItem>
+                      <SelectItem value="expired" className={isRTL ? 'text-right' : ''}>{translations.expired || 'Expired'}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-xs">{translations.sortBy || 'Sort By'}</Label>
+                  <Label className={`text-xs ${isRTL ? 'text-right' : ''}`}>{translations.sortBy || 'Sort By'}</Label>
                   <Select value={recentMealPlansSortBy} onValueChange={setRecentMealPlansSortBy}>
-                    <SelectTrigger className="h-8 text-sm">
+                    <SelectTrigger className={`h-8 text-sm ${isRTL ? 'text-right' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="created_at">{translations.dateCreated || 'Date Created'}</SelectItem>
-                      <SelectItem value="name">{translations.mealPlanName || 'Name'}</SelectItem>
-                      <SelectItem value="client">{translations.client || 'Client'}</SelectItem>
-                      <SelectItem value="calories">{translations.calories || 'Calories'}</SelectItem>
+                    <SelectContent dir={isRTL ? 'rtl' : 'ltr'}>
+                      <SelectItem value="created_at" className={isRTL ? 'text-right' : ''}>{translations.dateCreated || 'Date Created'}</SelectItem>
+                      <SelectItem value="name" className={isRTL ? 'text-right' : ''}>{translations.mealPlanName || 'Name'}</SelectItem>
+                      <SelectItem value="client" className={isRTL ? 'text-right' : ''}>{translations.client || 'Client'}</SelectItem>
+                      <SelectItem value="calories" className={isRTL ? 'text-right' : ''}>{translations.calories || 'Calories'}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-xs">{translations.order || 'Order'}</Label>
+                  <Label className={`text-xs ${isRTL ? 'text-right' : ''}`}>{translations.order || 'Order'}</Label>
                   <Select value={recentMealPlansSortOrder} onValueChange={setRecentMealPlansSortOrder}>
-                    <SelectTrigger className="h-8 text-sm">
+                    <SelectTrigger className={`h-8 text-sm ${isRTL ? 'text-right' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="desc">{translations.descending || 'Descending'}</SelectItem>
-                      <SelectItem value="asc">{translations.ascending || 'Ascending'}</SelectItem>
+                    <SelectContent dir={isRTL ? 'rtl' : 'ltr'}>
+                      <SelectItem value="desc" className={isRTL ? 'text-right' : ''}>{translations.descending || 'Descending'}</SelectItem>
+                      <SelectItem value="asc" className={isRTL ? 'text-right' : ''}>{translations.ascending || 'Ascending'}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1531,59 +1725,118 @@ export default function DietitianProfile() {
               ) : (
                 <>
                   <div className="overflow-x-auto">
-                    <Table>
+                    <Table dir={isRTL ? 'rtl' : 'ltr'}>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>{translations.client || 'Client'}</TableHead>
-                          <TableHead>{translations.mealPlanName || 'Meal Plan Name'}</TableHead>
-                          <TableHead>{translations.calories || 'Calories'}</TableHead>
-                          <TableHead>{translations.status || 'Status'}</TableHead>
-                          <TableHead>{translations.created || 'Created'}</TableHead>
-                          <TableHead className="text-right">{translations.actions || 'Actions'}</TableHead>
+                          {isRTL ? (
+                            <>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.client || 'Client'}</TableHead>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.mealPlanName || 'Meal Plan Name'}</TableHead>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.calories || 'Calories'}</TableHead>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.status || 'Status'}</TableHead>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.created || 'Created'}</TableHead>
+                              <TableHead className={isRTL ? 'text-left' : 'text-right'}>{translations.actions || 'Actions'}</TableHead>
+                            </>
+                          ) : (
+                            <>
+                              <TableHead>{translations.client || 'Client'}</TableHead>
+                              <TableHead>{translations.mealPlanName || 'Meal Plan Name'}</TableHead>
+                              <TableHead>{translations.calories || 'Calories'}</TableHead>
+                              <TableHead>{translations.status || 'Status'}</TableHead>
+                              <TableHead>{translations.created || 'Created'}</TableHead>
+                              <TableHead className="text-right">{translations.actions || 'Actions'}</TableHead>
+                            </>
+                          )}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {getDisplayItems(getFilteredAndSortedRecentMealPlans(), 'mealPlans').map((plan) => (
                           <TableRow key={plan.id} className="hover:bg-gray-50">
-                            <TableCell className="font-medium">
-                              <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
-                                  <User className="h-4 w-4 text-primary" />
-                                </div>
-                                {getClientName(plan.user_code)}
-                              </div>
-                            </TableCell>
-                            <TableCell className="font-medium">
-                              {plan.meal_plan_name || plan.name || translations.unnamedPlan || 'Unnamed Plan'}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
-                                {plan.daily_total_calories || plan.total_calories || 0} kcal
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Badge className={
-                                plan.status === 'active' ? 'bg-green-100 text-green-700' :
-                                plan.status === 'draft' ? 'bg-gray-100 text-gray-700' :
-                                'bg-blue-100 text-blue-700'
-                              }>
-                                {plan.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-sm text-gray-600">
-                              {new Date(plan.created_at).toLocaleDateString()}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => navigateToMenuView(plan.user_code, plan.id)}
-                                className="text-blue-600 hover:text-blue-700"
-                              >
-                                <Eye className="h-4 w-4 mr-1" />
-                                {translations.view || 'View'}
-                              </Button>
-                            </TableCell>
+                            {isRTL ? (
+                              <>
+                                <TableCell className={`font-medium ${isRTL ? 'text-right' : ''}`}>
+                                  <div className={`flex items-center ${isRTL ? 'flex-row-reverse justify-end' : ''} gap-2`}>
+                                    <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
+                                      <User className="h-4 w-4 text-primary" />
+                                    </div>
+                                    <span className={isRTL ? 'text-right' : ''}>{getClientName(plan.user_code)}</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell className={`font-medium ${isRTL ? 'text-right' : ''}`}>
+                                  {plan.meal_plan_name || plan.name || translations.unnamedPlan || 'Unnamed Plan'}
+                                </TableCell>
+                                <TableCell className={isRTL ? 'text-right' : ''}>
+                                  <Badge variant="outline" className={`bg-orange-50 text-orange-700 border-orange-200 ${isRTL ? 'inline-flex items-center' : ''}`}>
+                                    {plan.daily_total_calories || plan.total_calories || 0} kcal
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className={isRTL ? 'text-right' : ''}>
+                                  <Badge className={
+                                    plan.status === 'active' ? 'bg-green-100 text-green-700' :
+                                    plan.status === 'draft' ? 'bg-gray-100 text-gray-700' :
+                                    'bg-blue-100 text-blue-700'
+                                  }>
+                                    {plan.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className={`text-sm text-gray-600 ${isRTL ? 'text-right' : ''}`}>
+                                  {new Date(plan.created_at).toLocaleDateString()}
+                                </TableCell>
+                                <TableCell className={isRTL ? 'text-left' : 'text-right'}>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => navigateToMenuView(plan.user_code, plan.id)}
+                                    className={`text-blue-600 hover:text-blue-700 ${isRTL ? 'flex-row-reverse' : ''}`}
+                                  >
+                                    <Eye className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                                    {translations.view || 'View'}
+                                  </Button>
+                                </TableCell>
+                              </>
+                            ) : (
+                              <>
+                                <TableCell className="font-medium">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
+                                      <User className="h-4 w-4 text-primary" />
+                                    </div>
+                                    {getClientName(plan.user_code)}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="font-medium">
+                                  {plan.meal_plan_name || plan.name || translations.unnamedPlan || 'Unnamed Plan'}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
+                                    {plan.daily_total_calories || plan.total_calories || 0} kcal
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge className={
+                                    plan.status === 'active' ? 'bg-green-100 text-green-700' :
+                                    plan.status === 'draft' ? 'bg-gray-100 text-gray-700' :
+                                    'bg-blue-100 text-blue-700'
+                                  }>
+                                    {plan.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-sm text-gray-600">
+                                  {new Date(plan.created_at).toLocaleDateString()}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => navigateToMenuView(plan.user_code, plan.id)}
+                                    className="text-blue-600 hover:text-blue-700"
+                                  >
+                                    <Eye className="h-4 w-4 mr-1" />
+                                    {translations.view || 'View'}
+                                  </Button>
+                                </TableCell>
+                              </>
+                            )}
                           </TableRow>
                         ))}
                       </TableBody>
@@ -1594,9 +1847,13 @@ export default function DietitianProfile() {
                       <Button
                         variant="outline"
                         onClick={() => loadMoreItems('mealPlans')}
-                        className="w-full"
+                        className={`w-full ${isRTL ? 'flex-row-reverse' : ''}`}
                       >
-                        <ArrowRight className="h-4 w-4 mr-2 -rotate-90" />
+                        {isRTL ? (
+                          <ArrowLeft className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'} rotate-90`} />
+                        ) : (
+                          <ArrowRight className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'} -rotate-90`} />
+                        )}
                         {translations.loadMore || `Load More (${Math.min(5, getFilteredAndSortedRecentMealPlans().length - sectionLimits.mealPlans)} ${translations.more || 'more'})`}
                       </Button>
                     </div>
@@ -1605,30 +1862,41 @@ export default function DietitianProfile() {
               )}
             </CardContent>
           </Card>
+            </TabsContent>
 
-          {/* Recent Status Changes */}
-          <Card>
+            {/* Recent Status Changes Tab */}
+            <TabsContent value="statusChanges" className="space-y-6">
+              {/* Recent Status Changes */}
+              <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>{translations.recentStatusChanges || 'Recent Status Changes'}</CardTitle>
-                  <CardDescription>{translations.allRecentStatusChanges || 'All meal plan status changes (activated, expired, drafted, etc.)'}</CardDescription>
+              <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} justify-between`}>
+                <div className={isRTL ? 'text-right' : ''}>
+                  <CardTitle className={isRTL ? 'text-right' : ''}>{translations.recentStatusChanges || 'Recent Status Changes'}</CardTitle>
+                  <CardDescription className={isRTL ? 'text-right' : ''}>{translations.allRecentStatusChanges || 'All meal plan status changes (activated, expired, drafted, etc.)'}</CardDescription>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} gap-2`}>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setSectionLimits(prev => ({ ...prev, statusChanges: prev.statusChanges === 3 ? 5 : 3 }))}
-                    className="flex items-center gap-2"
+                    className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} gap-2`}
                   >
                     {sectionLimits.statusChanges === 3 ? (
                       <>
-                        <ArrowRight className="h-4 w-4 -rotate-90" />
+                        {isRTL ? (
+                          <ArrowLeft className="h-4 w-4 rotate-90" />
+                        ) : (
+                          <ArrowRight className="h-4 w-4 -rotate-90" />
+                        )}
                         {translations.expand || 'Expand'}
                       </>
                     ) : (
                       <>
-                        <ArrowRight className="h-4 w-4 rotate-90" />
+                        {isRTL ? (
+                          <ArrowLeft className="h-4 w-4 -rotate-90" />
+                        ) : (
+                          <ArrowRight className="h-4 w-4 rotate-90" />
+                        )}
                         {translations.shrink || 'Shrink'}
                       </>
                     )}
@@ -1638,56 +1906,57 @@ export default function DietitianProfile() {
             </CardHeader>
             <CardContent>
               {/* Filters */}
-              <div className="mb-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className={`mb-4 grid grid-cols-1 md:grid-cols-4 gap-3 ${isRTL ? 'direction-rtl' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                 <div>
-                  <Label className="text-xs">{translations.search || 'Search'}</Label>
+                  <Label className={`text-xs ${isRTL ? 'text-right' : ''}`}>{translations.search || 'Search'}</Label>
                   <div className="relative">
-                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400" />
+                    <Search className={`absolute ${isRTL ? 'right-2' : 'left-2'} top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400`} />
                     <Input
                       placeholder={translations.searchMealPlans || 'Search...'}
                       value={statusChangesSearchTerm}
                       onChange={(e) => setStatusChangesSearchTerm(e.target.value)}
-                      className="pl-8 h-8 text-sm"
+                      className={isRTL ? "pr-8 h-8 text-sm text-right" : "pl-8 h-8 text-sm"}
+                      dir={isRTL ? 'rtl' : 'ltr'}
                     />
                   </div>
                 </div>
                 <div>
-                  <Label className="text-xs">{translations.status || 'Status'}</Label>
+                  <Label className={`text-xs ${isRTL ? 'text-right' : ''}`}>{translations.status || 'Status'}</Label>
                   <Select value={statusChangesFilter} onValueChange={setStatusChangesFilter}>
-                    <SelectTrigger className="h-8 text-sm">
+                    <SelectTrigger className={`h-8 text-sm ${isRTL ? 'text-right' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{translations.allStatus || 'All'}</SelectItem>
-                      <SelectItem value="active">{translations.active || 'Active'}</SelectItem>
-                      <SelectItem value="draft">{translations.draft || 'Draft'}</SelectItem>
-                      <SelectItem value="expired">{translations.expired || 'Expired'}</SelectItem>
+                    <SelectContent dir={isRTL ? 'rtl' : 'ltr'}>
+                      <SelectItem value="all" className={isRTL ? 'text-right' : ''}>{translations.allStatus || 'All'}</SelectItem>
+                      <SelectItem value="active" className={isRTL ? 'text-right' : ''}>{translations.active || 'Active'}</SelectItem>
+                      <SelectItem value="draft" className={isRTL ? 'text-right' : ''}>{translations.draft || 'Draft'}</SelectItem>
+                      <SelectItem value="expired" className={isRTL ? 'text-right' : ''}>{translations.expired || 'Expired'}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-xs">{translations.sortBy || 'Sort By'}</Label>
+                  <Label className={`text-xs ${isRTL ? 'text-right' : ''}`}>{translations.sortBy || 'Sort By'}</Label>
                   <Select value={statusChangesSortBy} onValueChange={setStatusChangesSortBy}>
-                    <SelectTrigger className="h-8 text-sm">
+                    <SelectTrigger className={`h-8 text-sm ${isRTL ? 'text-right' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="updated_at">{translations.lastUpdated || 'Last Updated'}</SelectItem>
-                      <SelectItem value="name">{translations.mealPlanName || 'Name'}</SelectItem>
-                      <SelectItem value="client">{translations.client || 'Client'}</SelectItem>
-                      <SelectItem value="status">{translations.status || 'Status'}</SelectItem>
+                    <SelectContent dir={isRTL ? 'rtl' : 'ltr'}>
+                      <SelectItem value="updated_at" className={isRTL ? 'text-right' : ''}>{translations.lastUpdated || 'Last Updated'}</SelectItem>
+                      <SelectItem value="name" className={isRTL ? 'text-right' : ''}>{translations.mealPlanName || 'Name'}</SelectItem>
+                      <SelectItem value="client" className={isRTL ? 'text-right' : ''}>{translations.client || 'Client'}</SelectItem>
+                      <SelectItem value="status" className={isRTL ? 'text-right' : ''}>{translations.status || 'Status'}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-xs">{translations.order || 'Order'}</Label>
+                  <Label className={`text-xs ${isRTL ? 'text-right' : ''}`}>{translations.order || 'Order'}</Label>
                   <Select value={statusChangesSortOrder} onValueChange={setStatusChangesSortOrder}>
-                    <SelectTrigger className="h-8 text-sm">
+                    <SelectTrigger className={`h-8 text-sm ${isRTL ? 'text-right' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="desc">{translations.descending || 'Descending'}</SelectItem>
-                      <SelectItem value="asc">{translations.ascending || 'Ascending'}</SelectItem>
+                    <SelectContent dir={isRTL ? 'rtl' : 'ltr'}>
+                      <SelectItem value="desc" className={isRTL ? 'text-right' : ''}>{translations.descending || 'Descending'}</SelectItem>
+                      <SelectItem value="asc" className={isRTL ? 'text-right' : ''}>{translations.ascending || 'Ascending'}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1711,27 +1980,18 @@ export default function DietitianProfile() {
                     const colors = statusColors[plan.status] || statusColors.default;
                     
                     return (
-                      <div key={plan.id} className={`relative overflow-hidden rounded-lg bg-gradient-to-r ${colors.bg} border ${colors.border} p-4 hover:shadow-md transition-all duration-300`}>
-                        <div className="flex items-center gap-4">
+                      <div key={plan.id} className={`relative overflow-hidden rounded-lg bg-gradient-to-r ${colors.bg} border ${colors.border} p-4 hover:shadow-md transition-all duration-300 ${isRTL ? 'text-right' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
+                        <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} gap-4`}>
                           <div className={`w-12 h-12 bg-gradient-to-br ${colors.icon} rounded-lg flex items-center justify-center flex-shrink-0`}>
                             <CheckCircle className="h-6 w-6 text-white" />
                           </div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <p className="font-semibold text-gray-900">
-                                {getClientName(plan.user_code)}
-                              </p>
-                              <Badge className={colors.badge}>
-                                {plan.status}
-                              </Badge>
-                              <Badge variant="outline" className="bg-white">
-                                {plan.daily_total_calories || plan.total_calories || 0} kcal
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-gray-700">
+                          <div className={`flex-1 ${isRTL ? 'text-right' : ''}`}>
+                          <div className={`flex items-center ${isRTL ? 'flex-row-reverse justify-start' : 'justify-start'} gap-2 mb-1`}>
+                          </div>
+                            <p className={`text-sm text-gray-700 ${isRTL ? 'text-right' : ''}`}>
                               {plan.meal_plan_name || plan.name || translations.unnamedPlan || 'Unnamed Plan'}
                             </p>
-                            <p className="text-xs text-gray-500 mt-1">
+                            <p className={`text-xs text-gray-500 mt-1 ${isRTL ? 'text-right' : ''}`}>
                               {translations.lastUpdate || 'Last Update'}: {new Date(plan.updated_at || plan.created_at).toLocaleString()}
                             </p>
                           </div>
@@ -1739,8 +1999,9 @@ export default function DietitianProfile() {
                             variant="outline"
                             size="sm"
                             onClick={() => navigateToMenuView(plan.user_code, plan.id)}
+                            className={isRTL ? 'flex-row-reverse' : ''}
                           >
-                            <Eye className="h-4 w-4 mr-1" />
+                            <Eye className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
                             {translations.view || 'View'}
                           </Button>
                         </div>
@@ -1753,9 +2014,13 @@ export default function DietitianProfile() {
                     <Button
                       variant="outline"
                       onClick={() => loadMoreItems('statusChanges')}
-                      className="w-full"
+                      className={`w-full ${isRTL ? 'flex-row-reverse' : ''}`}
                     >
-                      <ArrowRight className="h-4 w-4 mr-2 -rotate-90" />
+                      {isRTL ? (
+                        <ArrowLeft className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'} rotate-90`} />
+                      ) : (
+                        <ArrowRight className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'} -rotate-90`} />
+                      )}
                       {translations.loadMore || `Load More (${Math.min(5, getFilteredAndSortedStatusChanges().length - sectionLimits.statusChanges)} ${translations.more || 'more'})`}
                     </Button>
                   </div>
@@ -1764,30 +2029,41 @@ export default function DietitianProfile() {
               )}
             </CardContent>
           </Card>
+            </TabsContent>
 
-          {/* Comprehensive Meal Plans Management */}
-          <Card>
+            {/* Meal Plans Management Tab */}
+            <TabsContent value="management" className="space-y-6">
+              {/* Comprehensive Meal Plans Management */}
+              <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>{translations.mealPlansManagement || 'Meal Plans Management'}</CardTitle>
-                  <CardDescription>{translations.manageAllMealPlans || 'View, filter, and manage all meal plans across all clients'}</CardDescription>
+              <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} justify-between`}>
+                <div className={isRTL ? 'text-right' : ''}>
+                  <CardTitle className={isRTL ? 'text-right' : ''}>{translations.mealPlansManagement || 'Meal Plans Management'}</CardTitle>
+                  <CardDescription className={isRTL ? 'text-right' : ''}>{translations.manageAllMealPlans || 'View, filter, and manage all meal plans across all clients'}</CardDescription>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} gap-2`}>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setSectionLimits(prev => ({ ...prev, mealPlansManagement: prev.mealPlansManagement === 10 ? 25 : 10 }))}
-                    className="flex items-center gap-2"
+                    className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} gap-2`}
                   >
                     {sectionLimits.mealPlansManagement === 10 ? (
                       <>
-                        <ArrowRight className="h-4 w-4 -rotate-90" />
+                        {isRTL ? (
+                          <ArrowLeft className="h-4 w-4 rotate-90" />
+                        ) : (
+                          <ArrowRight className="h-4 w-4 -rotate-90" />
+                        )}
                         {translations.expand || 'Expand'}
                       </>
                     ) : (
                       <>
-                        <ArrowRight className="h-4 w-4 rotate-90" />
+                        {isRTL ? (
+                          <ArrowLeft className="h-4 w-4 -rotate-90" />
+                        ) : (
+                          <ArrowRight className="h-4 w-4 rotate-90" />
+                        )}
                         {translations.shrink || 'Shrink'}
                       </>
                     )}
@@ -1798,61 +2074,62 @@ export default function DietitianProfile() {
             <CardContent>
               {/* Filters and Search */}
               <div className="mb-6 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className={`grid grid-cols-1 md:grid-cols-4 gap-4 ${isRTL ? 'direction-rtl' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                   <div>
-                    <Label>{translations.search || 'Search'}</Label>
+                    <Label className={`${isRTL ? 'text-right' : ''}`}>{translations.search || 'Search'}</Label>
                     <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <Search className={`absolute ${isRTL ? 'right-3' : 'left-3'} top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400`} />
                       <Input
                         placeholder={translations.searchMealPlans || 'Search meal plans or clients...'}
                         value={mealPlansSearchTerm}
                         onChange={(e) => setMealPlansSearchTerm(e.target.value)}
-                        className="pl-10"
+                        className={isRTL ? "pr-10 text-right" : "pl-10"}
+                        dir={isRTL ? 'rtl' : 'ltr'}
                       />
                     </div>
                   </div>
 
                   <div>
-                    <Label>{translations.status || 'Status'}</Label>
+                    <Label className={`${isRTL ? 'text-right' : ''}`}>{translations.status || 'Status'}</Label>
                     <Select value={mealPlansFilter} onValueChange={setMealPlansFilter}>
-                      <SelectTrigger>
+                      <SelectTrigger className={isRTL ? 'text-right' : ''} dir={isRTL ? 'rtl' : 'ltr'}>
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">{translations.allStatus || 'All Status'}</SelectItem>
-                        <SelectItem value="active">{translations.active || 'Active'}</SelectItem>
-                        <SelectItem value="draft">{translations.draft || 'Draft'}</SelectItem>
-                        <SelectItem value="expired">{translations.expired || 'Expired'}</SelectItem>
-                        <SelectItem value="inactive">{translations.inactive || 'Inactive'}</SelectItem>
+                      <SelectContent dir={isRTL ? 'rtl' : 'ltr'}>
+                        <SelectItem value="all" className={isRTL ? 'text-right' : ''}>{translations.allStatus || 'All Status'}</SelectItem>
+                        <SelectItem value="active" className={isRTL ? 'text-right' : ''}>{translations.active || 'Active'}</SelectItem>
+                        <SelectItem value="draft" className={isRTL ? 'text-right' : ''}>{translations.draft || 'Draft'}</SelectItem>
+                        <SelectItem value="expired" className={isRTL ? 'text-right' : ''}>{translations.expired || 'Expired'}</SelectItem>
+                        <SelectItem value="inactive" className={isRTL ? 'text-right' : ''}>{translations.inactive || 'Inactive'}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
                   <div>
-                    <Label>{translations.sortBy || 'Sort By'}</Label>
+                    <Label className={`${isRTL ? 'text-right' : ''}`}>{translations.sortBy || 'Sort By'}</Label>
                     <Select value={mealPlansSortBy} onValueChange={setMealPlansSortBy}>
-                      <SelectTrigger>
+                      <SelectTrigger className={isRTL ? 'text-right' : ''} dir={isRTL ? 'rtl' : 'ltr'}>
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="created_at">{translations.dateCreated || 'Date Created'}</SelectItem>
-                        <SelectItem value="name">{translations.mealPlanName || 'Meal Plan Name'}</SelectItem>
-                        <SelectItem value="client">{translations.client || 'Client'}</SelectItem>
-                        <SelectItem value="calories">{translations.calories || 'Calories'}</SelectItem>
-                        <SelectItem value="status">{translations.status || 'Status'}</SelectItem>
+                      <SelectContent dir={isRTL ? 'rtl' : 'ltr'}>
+                        <SelectItem value="created_at" className={isRTL ? 'text-right' : ''}>{translations.dateCreated || 'Date Created'}</SelectItem>
+                        <SelectItem value="name" className={isRTL ? 'text-right' : ''}>{translations.mealPlanName || 'Meal Plan Name'}</SelectItem>
+                        <SelectItem value="client" className={isRTL ? 'text-right' : ''}>{translations.client || 'Client'}</SelectItem>
+                        <SelectItem value="calories" className={isRTL ? 'text-right' : ''}>{translations.calories || 'Calories'}</SelectItem>
+                        <SelectItem value="status" className={isRTL ? 'text-right' : ''}>{translations.status || 'Status'}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
                   <div>
-                    <Label>{translations.order || 'Order'}</Label>
+                    <Label className={`${isRTL ? 'text-right' : ''}`}>{translations.order || 'Order'}</Label>
                     <Select value={mealPlansSortOrder} onValueChange={setMealPlansSortOrder}>
-                      <SelectTrigger>
+                      <SelectTrigger className={isRTL ? 'text-right' : ''} dir={isRTL ? 'rtl' : 'ltr'}>
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="desc">{translations.descending || 'Descending'}</SelectItem>
-                        <SelectItem value="asc">{translations.ascending || 'Ascending'}</SelectItem>
+                      <SelectContent dir={isRTL ? 'rtl' : 'ltr'}>
+                        <SelectItem value="desc" className={isRTL ? 'text-right' : ''}>{translations.descending || 'Descending'}</SelectItem>
+                        <SelectItem value="asc" className={isRTL ? 'text-right' : ''}>{translations.ascending || 'Ascending'}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1868,84 +2145,168 @@ export default function DietitianProfile() {
               ) : (
                 <>
                   <div className="overflow-x-auto">
-                    <Table>
+                    <Table dir={isRTL ? 'rtl' : 'ltr'}>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>{translations.client || 'Client'}</TableHead>
-                          <TableHead>{translations.mealPlanName || 'Meal Plan Name'}</TableHead>
-                          <TableHead>{translations.calories || 'Calories'}</TableHead>
-                          <TableHead>{translations.status || 'Status'}</TableHead>
-                          <TableHead>{translations.created || 'Created'}</TableHead>
-                          <TableHead>{translations.lastUpdated || 'Last Updated'}</TableHead>
-                          <TableHead>{translations.activeUntil || 'Active Until'}</TableHead>
-                          <TableHead className="text-right">{translations.actions || 'Actions'}</TableHead>
+                          {isRTL ? (
+                            <>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.client || 'Client'}</TableHead>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.mealPlanName || 'Meal Plan Name'}</TableHead>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.calories || 'Calories'}</TableHead>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.status || 'Status'}</TableHead>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.created || 'Created'}</TableHead>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.lastUpdated || 'Last Updated'}</TableHead>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.activeUntil || 'Active Until'}</TableHead>
+                              <TableHead className={isRTL ? 'text-left' : 'text-right'}>{translations.actions || 'Actions'}</TableHead>
+                            </>
+                          ) : (
+                            <>
+                              <TableHead>{translations.client || 'Client'}</TableHead>
+                              <TableHead>{translations.mealPlanName || 'Meal Plan Name'}</TableHead>
+                              <TableHead>{translations.calories || 'Calories'}</TableHead>
+                              <TableHead>{translations.status || 'Status'}</TableHead>
+                              <TableHead>{translations.created || 'Created'}</TableHead>
+                              <TableHead>{translations.lastUpdated || 'Last Updated'}</TableHead>
+                              <TableHead>{translations.activeUntil || 'Active Until'}</TableHead>
+                              <TableHead className="text-right">{translations.actions || 'Actions'}</TableHead>
+                            </>
+                          )}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {getFilteredAndSortedMealPlans().map((plan) => (
                           <TableRow key={plan.id} className="hover:bg-gray-50">
-                            <TableCell className="font-medium">
-                              <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
-                                  <User className="h-4 w-4 text-primary" />
-                                </div>
-                                {getClientName(plan.user_code)}
-                              </div>
-                            </TableCell>
-                            <TableCell className="font-medium">
-                              {plan.meal_plan_name || plan.name || translations.unnamedPlan || 'Unnamed Plan'}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
-                                {plan.daily_total_calories || plan.total_calories || 0} kcal
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Badge className={
-                                plan.status === 'active' ? 'bg-green-100 text-green-700' :
-                                plan.status === 'draft' ? 'bg-gray-100 text-gray-700' :
-                                plan.status === 'expired' ? 'bg-red-100 text-red-700' :
-                                'bg-blue-100 text-blue-700'
-                              }>
-                                {plan.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-sm text-gray-600">
-                              {new Date(plan.created_at).toLocaleDateString()}
-                            </TableCell>
-                            <TableCell className="text-sm text-gray-600">
-                              {plan.updated_at ? new Date(plan.updated_at).toLocaleDateString() : '-'}
-                            </TableCell>
-                            <TableCell className="text-sm text-gray-600">
-                              {plan.active_until ? (
-                                <div className="flex items-center gap-1">
-                                  <Calendar className="h-3 w-3" />
-                                  {new Date(plan.active_until).toLocaleDateString()}
-                                </div>
-                              ) : (
-                                '-'
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-2">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => navigateToMenuView(plan.user_code, plan.id)}
-                                  className="text-blue-600 hover:text-blue-700"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => navigateToChat(plan.user_code)}
-                                  className="text-green-600 hover:text-green-700"
-                                >
-                                  <MessageSquare className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
+                            {isRTL ? (
+                              <>
+                                <TableCell className={`font-medium ${isRTL ? 'text-right' : ''}`}>
+                                  <div className={`flex items-center ${isRTL ? 'flex-row-reverse justify-end' : ''} gap-2`}>
+                                    <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
+                                      <User className="h-4 w-4 text-primary" />
+                                    </div>
+                                    <span className={isRTL ? 'text-right' : ''}>{getClientName(plan.user_code)}</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell className={`font-medium ${isRTL ? 'text-right' : ''}`}>
+                                  {plan.meal_plan_name || plan.name || translations.unnamedPlan || 'Unnamed Plan'}
+                                </TableCell>
+                                <TableCell className={isRTL ? 'text-right' : ''}>
+                                  <Badge variant="outline" className={`bg-orange-50 text-orange-700 border-orange-200 inline-flex items-center ${isRTL ? 'flex-row-reverse' : ''}`}>
+                                    {plan.daily_total_calories || plan.total_calories || 0} kcal
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className={isRTL ? 'text-right' : ''}>
+                                  <Badge className={
+                                    plan.status === 'active' ? 'bg-green-100 text-green-700' :
+                                    plan.status === 'draft' ? 'bg-gray-100 text-gray-700' :
+                                    plan.status === 'expired' ? 'bg-red-100 text-red-700' :
+                                    'bg-blue-100 text-blue-700'
+                                  }>
+                                    {plan.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className={`text-sm text-gray-600 ${isRTL ? 'text-right' : ''}`}>
+                                  {new Date(plan.created_at).toLocaleDateString()}
+                                </TableCell>
+                                <TableCell className={`text-sm text-gray-600 ${isRTL ? 'text-right' : ''}`}>
+                                  {plan.updated_at ? new Date(plan.updated_at).toLocaleDateString() : '-'}
+                                </TableCell>
+                                <TableCell className={`text-sm text-gray-600 ${isRTL ? 'text-right' : ''}`}>
+                                  {plan.active_until ? (
+                                    <div className={`flex items-center ${isRTL ? 'flex-row-reverse justify-end' : ''} gap-1`}>
+                                      <Calendar className="h-3 w-3" />
+                                      {new Date(plan.active_until).toLocaleDateString()}
+                                    </div>
+                                  ) : (
+                                    '-'
+                                  )}
+                                </TableCell>
+                                <TableCell className={isRTL ? 'text-left' : 'text-right'}>
+                                  <div className={`flex ${isRTL ? 'justify-start' : 'justify-end'} gap-2`}>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => navigateToMenuView(plan.user_code, plan.id)}
+                                      className="text-blue-600 hover:text-blue-700"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => navigateToChat(plan.user_code)}
+                                      className="text-green-600 hover:text-green-700"
+                                    >
+                                      <MessageSquare className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </>
+                            ) : (
+                              <>
+                                <TableCell className="font-medium">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
+                                      <User className="h-4 w-4 text-primary" />
+                                    </div>
+                                    {getClientName(plan.user_code)}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="font-medium">
+                                  {plan.meal_plan_name || plan.name || translations.unnamedPlan || 'Unnamed Plan'}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
+                                    {plan.daily_total_calories || plan.total_calories || 0} kcal
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge className={
+                                    plan.status === 'active' ? 'bg-green-100 text-green-700' :
+                                    plan.status === 'draft' ? 'bg-gray-100 text-gray-700' :
+                                    plan.status === 'expired' ? 'bg-red-100 text-red-700' :
+                                    'bg-blue-100 text-blue-700'
+                                  }>
+                                    {plan.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-sm text-gray-600">
+                                  {new Date(plan.created_at).toLocaleDateString()}
+                                </TableCell>
+                                <TableCell className="text-sm text-gray-600">
+                                  {plan.updated_at ? new Date(plan.updated_at).toLocaleDateString() : '-'}
+                                </TableCell>
+                                <TableCell className="text-sm text-gray-600">
+                                  {plan.active_until ? (
+                                    <div className="flex items-center gap-1">
+                                      <Calendar className="h-3 w-3" />
+                                      {new Date(plan.active_until).toLocaleDateString()}
+                                    </div>
+                                  ) : (
+                                    '-'
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex justify-end gap-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => navigateToMenuView(plan.user_code, plan.id)}
+                                      className="text-blue-600 hover:text-blue-700"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => navigateToChat(plan.user_code)}
+                                      className="text-green-600 hover:text-green-700"
+                                    >
+                                      <MessageSquare className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </>
+                            )}
                           </TableRow>
                         ))}
                       </TableBody>
@@ -1953,7 +2314,7 @@ export default function DietitianProfile() {
                   </div>
                   
                   {/* Results Summary */}
-                  <div className="mt-4 text-sm text-gray-600 text-center">
+                  <div className={`mt-4 text-sm text-gray-600 text-center ${isRTL ? 'text-right' : ''}`}>
                     {translations.showingResults || 'Showing'} {getFilteredAndSortedMealPlans().length} {translations.of || 'of'} {recentMealPlans.length} {translations.mealPlans || 'meal plans'}
                     {mealPlansFilter !== 'all' && (
                       <span className="ml-2">
@@ -1965,30 +2326,41 @@ export default function DietitianProfile() {
               )}
             </CardContent>
           </Card>
+            </TabsContent>
 
-          {/* Recent Weight Logs */}
-          <Card>
+            {/* Recent Weight Logs Tab */}
+            <TabsContent value="weightLogs" className="space-y-6">
+              {/* Recent Weight Logs */}
+              <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>{translations.recentWeightLogs || 'Recent Weight & Body Fat Logs'}</CardTitle>
-                  <CardDescription>{translations.latestWeightLogsFromClients || 'Latest weight and body fat measurements from all clients'}</CardDescription>
+              <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} justify-between`}>
+                <div className={isRTL ? 'text-right' : ''}>
+                  <CardTitle className={isRTL ? 'text-right' : ''}>{translations.recentWeightLogs || 'Recent Weight & Body Fat Logs'}</CardTitle>
+                  <CardDescription className={isRTL ? 'text-right' : ''}>{translations.latestWeightLogsFromClients || 'Latest weight and body fat measurements from all clients'}</CardDescription>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} gap-2`}>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setSectionLimits(prev => ({ ...prev, weightLogs: prev.weightLogs === 3 ? 5 : 3 }))}
-                    className="flex items-center gap-2"
+                    className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} gap-2`}
                   >
                     {sectionLimits.weightLogs === 3 ? (
                       <>
-                        <ArrowRight className="h-4 w-4 -rotate-90" />
+                        {isRTL ? (
+                          <ArrowLeft className="h-4 w-4 rotate-90" />
+                        ) : (
+                          <ArrowRight className="h-4 w-4 -rotate-90" />
+                        )}
                         {translations.expand || 'Expand'}
                       </>
                     ) : (
                       <>
-                        <ArrowRight className="h-4 w-4 rotate-90" />
+                        {isRTL ? (
+                          <ArrowLeft className="h-4 w-4 -rotate-90" />
+                        ) : (
+                          <ArrowRight className="h-4 w-4 rotate-90" />
+                        )}
                         {translations.shrink || 'Shrink'}
                       </>
                     )}
@@ -1998,42 +2370,43 @@ export default function DietitianProfile() {
             </CardHeader>
             <CardContent>
               {/* Filters */}
-              <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className={`mb-4 grid grid-cols-1 md:grid-cols-3 gap-3 ${isRTL ? 'direction-rtl' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                 <div>
-                  <Label className="text-xs">{translations.search || 'Search'}</Label>
+                  <Label className={`text-xs ${isRTL ? 'text-right' : ''}`}>{translations.search || 'Search'}</Label>
                   <div className="relative">
-                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400" />
+                    <Search className={`absolute ${isRTL ? 'right-2' : 'left-2'} top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400`} />
                     <Input
                       placeholder={translations.searchClients || 'Search clients...'}
                       value={weightLogsSearchTerm}
                       onChange={(e) => setWeightLogsSearchTerm(e.target.value)}
-                      className="pl-8 h-8 text-sm"
+                      className={isRTL ? "pr-8 h-8 text-sm text-right" : "pl-8 h-8 text-sm"}
+                      dir={isRTL ? 'rtl' : 'ltr'}
                     />
                   </div>
                 </div>
                 <div>
-                  <Label className="text-xs">{translations.sortBy || 'Sort By'}</Label>
+                  <Label className={`text-xs ${isRTL ? 'text-right' : ''}`}>{translations.sortBy || 'Sort By'}</Label>
                   <Select value={weightLogsSortBy} onValueChange={setWeightLogsSortBy}>
-                    <SelectTrigger className="h-8 text-sm">
+                    <SelectTrigger className={`h-8 text-sm ${isRTL ? 'text-right' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="measurement_date">{translations.date || 'Date'}</SelectItem>
-                      <SelectItem value="client">{translations.client || 'Client'}</SelectItem>
-                      <SelectItem value="weight">{translations.weight || 'Weight'}</SelectItem>
-                      <SelectItem value="bodyFat">{translations.bodyFat || 'Body Fat'}</SelectItem>
+                    <SelectContent dir={isRTL ? 'rtl' : 'ltr'}>
+                      <SelectItem value="measurement_date" className={isRTL ? 'text-right' : ''}>{translations.date || 'Date'}</SelectItem>
+                      <SelectItem value="client" className={isRTL ? 'text-right' : ''}>{translations.client || 'Client'}</SelectItem>
+                      <SelectItem value="weight" className={isRTL ? 'text-right' : ''}>{translations.weight || 'Weight'}</SelectItem>
+                      <SelectItem value="bodyFat" className={isRTL ? 'text-right' : ''}>{translations.bodyFat || 'Body Fat'}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-xs">{translations.order || 'Order'}</Label>
+                  <Label className={`text-xs ${isRTL ? 'text-right' : ''}`}>{translations.order || 'Order'}</Label>
                   <Select value={weightLogsSortOrder} onValueChange={setWeightLogsSortOrder}>
-                    <SelectTrigger className="h-8 text-sm">
+                    <SelectTrigger className={`h-8 text-sm ${isRTL ? 'text-right' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="desc">{translations.descending || 'Descending'}</SelectItem>
-                      <SelectItem value="asc">{translations.ascending || 'Ascending'}</SelectItem>
+                    <SelectContent dir={isRTL ? 'rtl' : 'ltr'}>
+                      <SelectItem value="desc" className={isRTL ? 'text-right' : ''}>{translations.descending || 'Descending'}</SelectItem>
+                      <SelectItem value="asc" className={isRTL ? 'text-right' : ''}>{translations.ascending || 'Ascending'}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -2047,47 +2420,94 @@ export default function DietitianProfile() {
               ) : (
                 <>
                   <div className="overflow-x-auto">
-                    <Table>
+                    <Table dir={isRTL ? 'rtl' : 'ltr'}>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>{translations.client || 'Client'}</TableHead>
-                          <TableHead>{translations.weight || 'Weight (kg)'}</TableHead>
-                          <TableHead>{translations.bodyFat || 'Body Fat %'}</TableHead>
-                          <TableHead>{translations.logDate || 'Log Date'}</TableHead>
-                          <TableHead>{translations.notes || 'Notes'}</TableHead>
+                          {isRTL ? (
+                            <>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.client || 'Client'}</TableHead>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.weight || 'Weight (kg)'}</TableHead>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.bodyFat || 'Body Fat %'}</TableHead>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.logDate || 'Log Date'}</TableHead>
+                              <TableHead className={isRTL ? 'text-right' : ''}>{translations.notes || 'Notes'}</TableHead>
+                            </>
+                          ) : (
+                            <>
+                              <TableHead>{translations.client || 'Client'}</TableHead>
+                              <TableHead>{translations.weight || 'Weight (kg)'}</TableHead>
+                              <TableHead>{translations.bodyFat || 'Body Fat %'}</TableHead>
+                              <TableHead>{translations.logDate || 'Log Date'}</TableHead>
+                              <TableHead>{translations.notes || 'Notes'}</TableHead>
+                            </>
+                          )}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {getDisplayItems(getFilteredAndSortedWeightLogs(), 'weightLogs').map((log) => (
                           <TableRow key={log.id} className="hover:bg-gray-50">
-                            <TableCell className="font-medium">
-                              <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
-                                  <User className="h-4 w-4 text-purple-600" />
-                                </div>
-                                {getClientName(log.user_code)}
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                                {log.weight_kg} kg
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              {log.body_fat_percentage ? (
-                                <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
-                                  {log.body_fat_percentage}%
-                                </Badge>
-                              ) : (
-                                <span className="text-gray-400 text-sm">-</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-sm text-gray-600">
-                              {new Date(log.measurement_date).toLocaleDateString()}
-                            </TableCell>
-                            <TableCell className="text-sm text-gray-600 max-w-xs truncate">
-                              {log.notes || '-'}
-                            </TableCell>
+                            {isRTL ? (
+                              <>
+                                <TableCell className={`font-medium ${isRTL ? 'text-right' : ''}`}>
+                                  <div className={`flex items-center ${isRTL ? 'flex-row-reverse justify-end' : ''} gap-2`}>
+                                    <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
+                                      <User className="h-4 w-4 text-purple-600" />
+                                    </div>
+                                    <span className={isRTL ? 'text-right' : ''}>{getClientName(log.user_code)}</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell className={isRTL ? 'text-right' : ''}>
+                                  <Badge variant="outline" className={`bg-blue-50 text-blue-700 border-blue-200 inline-flex items-center ${isRTL ? 'flex-row-reverse' : ''}`}>
+                                    {log.weight_kg} kg
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className={isRTL ? 'text-right' : ''}>
+                                  {log.body_fat_percentage ? (
+                                    <Badge variant="outline" className={`bg-orange-50 text-orange-700 border-orange-200 inline-flex items-center ${isRTL ? 'flex-row-reverse' : ''}`}>
+                                      {log.body_fat_percentage}%
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-gray-400 text-sm">-</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className={`text-sm text-gray-600 ${isRTL ? 'text-right' : ''}`}>
+                                  {new Date(log.measurement_date).toLocaleDateString()}
+                                </TableCell>
+                                <TableCell className={`text-sm text-gray-600 max-w-xs truncate ${isRTL ? 'text-right' : ''}`}>
+                                  {log.notes || '-'}
+                                </TableCell>
+                              </>
+                            ) : (
+                              <>
+                                <TableCell className="font-medium">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
+                                      <User className="h-4 w-4 text-purple-600" />
+                                    </div>
+                                    {getClientName(log.user_code)}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                                    {log.weight_kg} kg
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  {log.body_fat_percentage ? (
+                                    <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
+                                      {log.body_fat_percentage}%
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-gray-400 text-sm">-</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-sm text-gray-600">
+                                  {new Date(log.measurement_date).toLocaleDateString()}
+                                </TableCell>
+                                <TableCell className="text-sm text-gray-600 max-w-xs truncate">
+                                  {log.notes || '-'}
+                                </TableCell>
+                              </>
+                            )}
                           </TableRow>
                         ))}
                       </TableBody>
@@ -2098,9 +2518,13 @@ export default function DietitianProfile() {
                       <Button
                         variant="outline"
                         onClick={() => loadMoreItems('weightLogs')}
-                        className="w-full"
+                        className={`w-full ${isRTL ? 'flex-row-reverse' : ''}`}
                       >
-                        <ArrowRight className="h-4 w-4 mr-2 -rotate-90" />
+                        {isRTL ? (
+                          <ArrowLeft className="h-4 w-4 ml-2 rotate-90" />
+                        ) : (
+                          <ArrowRight className="h-4 w-4 mr-2 -rotate-90" />
+                        )}
                         {translations.loadMore || `Load More (${Math.min(5, getFilteredAndSortedWeightLogs().length - sectionLimits.weightLogs)} ${translations.more || 'more'})`}
                       </Button>
                     </div>
@@ -2109,6 +2533,8 @@ export default function DietitianProfile() {
               )}
             </CardContent>
           </Card>
+            </TabsContent>
+          </Tabs>
         </TabsContent>
 
         {/* System Messages Tab */}

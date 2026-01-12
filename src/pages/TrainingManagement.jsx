@@ -261,6 +261,7 @@ const TrainingManagement = () => {
   const [trainingPlans, setTrainingPlans] = useState([]);
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [isCreatePlanDialogOpen, setIsCreatePlanDialogOpen] = useState(false);
+  const [clientSearchTerm, setClientSearchTerm] = useState('');
   const [planFormData, setPlanFormData] = useState({
     user_code: '',
     plan_name: '',
@@ -1396,7 +1397,7 @@ const TrainingManagement = () => {
         </Alert>
       )}
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4" dir={isRTL ? 'rtl' : 'ltr'}>
         <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="plans" className="flex items-center gap-2">
             <Target className="h-4 w-4" />
@@ -1787,10 +1788,47 @@ const TrainingManagement = () => {
             </Dialog>
           </div>
 
+          {/* Client Search */}
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-4">
+                <div className="flex-1 relative">
+                  <Search className={`absolute ${isRTL ? 'right-3' : 'left-3'} top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400`} />
+                  <Input
+                    placeholder={translations.searchClients || 'Search clients...'}
+                    value={clientSearchTerm}
+                    onChange={(e) => setClientSearchTerm(e.target.value)}
+                    className={isRTL ? "pr-10" : "pl-10"}
+                    dir={isRTL ? 'rtl' : 'ltr'}
+                  />
+                </div>
+                {clientSearchTerm && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setClientSearchTerm('')}
+                  >
+                    {translations.clear || 'Clear'}
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Training Plans Table */}
           <Card>
             <CardContent className="pt-6">
-              {trainingPlans.length === 0 ? (
+              {(() => {
+                // Filter training plans based on client search
+                const filteredPlans = clientSearchTerm
+                  ? trainingPlans.filter(plan => {
+                      const clientName = getClientName(plan.user_code).toLowerCase();
+                      const searchLower = clientSearchTerm.toLowerCase();
+                      return clientName.includes(searchLower) || plan.user_code.toLowerCase().includes(searchLower);
+                    })
+                  : trainingPlans;
+
+                return filteredPlans.length === 0 ? (
                 <div className="text-center py-12">
                   <Dumbbell className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                   <p className="text-muted-foreground">{translations.noTrainingPlansYet || 'No training plans yet. Create one to get started!'}</p>
@@ -1823,7 +1861,7 @@ const TrainingManagement = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {trainingPlans.map((plan) => (
+                    {filteredPlans.map((plan) => (
                       <TableRow key={plan.id}>
                         <TableCell
                           className={cn(
@@ -1927,7 +1965,8 @@ const TrainingManagement = () => {
                     ))}
                   </TableBody>
                 </Table>
-              )}
+                );
+              })()}
             </CardContent>
           </Card>
         </TabsContent>

@@ -32,6 +32,60 @@ def handle_error(error, operation="Operation"):
     return jsonify({"error": str(error)}), 500
 
 
+def sanitize_for_serialization(obj, seen=None):
+    """
+    Recursively sanitize an object to remove circular references.
+    Returns a clean copy that can be safely serialized to JSON.
+    """
+    if seen is None:
+        seen = set()
+    
+    # Handle None
+    if obj is None:
+        return None
+    
+    # Handle primitives
+    if not isinstance(obj, (dict, list)):
+        # Handle datetime objects
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return obj
+    
+    # Check for circular reference
+    obj_id = id(obj)
+    if obj_id in seen:
+        return "[Circular Reference]"
+    
+    seen.add(obj_id)
+    
+    try:
+        # Handle dictionaries
+        if isinstance(obj, dict):
+            sanitized = {}
+            for key, value in obj.items():
+                # Skip change_log to prevent circular references
+                if key == 'change_log':
+                    continue
+                try:
+                    sanitized[key] = sanitize_for_serialization(value, seen)
+                except Exception:
+                    sanitized[key] = "[Error serializing]"
+            seen.remove(obj_id)
+            return sanitized
+        
+        # Handle lists
+        if isinstance(obj, list):
+            sanitized = [sanitize_for_serialization(item, seen) for item in obj]
+            seen.remove(obj_id)
+            return sanitized
+    except Exception:
+        seen.discard(obj_id)
+        return "[Error serializing]"
+    
+    seen.discard(obj_id)
+    return obj
+
+
 # ============================================================================
 # MEAL PLANS AND SCHEMAS (Menu entity)
 # ============================================================================
@@ -223,11 +277,15 @@ def update_meal_plan(meal_plan_id):
             .execute()
         
         change_log = existing_menu.data.get('change_log', []) if existing_menu.data else []
+        
+        # Create a sanitized copy of data for the change log to avoid circular references
+        log_details = sanitize_for_serialization(data)
+        
         log_entry = {
             "timestamp": datetime.utcnow().isoformat(),
             "actor_id": data.get('dietitian_id', 'system'),
             "action": "UPDATED",
-            "details": data
+            "details": log_details
         }
         change_log.append(log_entry)
         data['change_log'] = change_log
