@@ -373,12 +373,14 @@ def get_chat_user(user_code):
             # Convert comma-separated string to list
             fields = [f.strip() for f in fields.split(',')]
         
-        query = supabase.table('chat_users').eq('user_code', user_code)
-        
+        # Select must be called first to get a query builder that supports filtering
         if fields == '*':
-            query = query.select('*')
+            query = supabase.table('chat_users').select('*')
         else:
-            query = query.select(','.join(fields))
+            query = supabase.table('chat_users').select(','.join(fields))
+        
+        # Then apply the filter
+        query = query.eq('user_code', user_code)
         
         result = query.single().execute()
         

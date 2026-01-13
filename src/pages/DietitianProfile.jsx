@@ -813,6 +813,16 @@ export default function DietitianProfile() {
       return false;
     }
     if (messageSearchTerm) {
+      const searchValue = messageSearchTerm.toLowerCase();
+      
+      // Check if message has image or audio topic - match against photo/voice
+      if (msg.topic === 'image') {
+        return 'photo'.includes(searchValue) || 'image'.includes(searchValue);
+      }
+      if (msg.topic === 'audio') {
+        return 'voice'.includes(searchValue) || 'audio'.includes(searchValue);
+      }
+      
       let content = msg.content || msg.message || '';
       // For assistant messages, extract response_text for searching
       if (msg.role === 'assistant' && msg.message) {
@@ -825,7 +835,7 @@ export default function DietitianProfile() {
           // If parsing fails, use original content
         }
       }
-      return content.toLowerCase().includes(messageSearchTerm.toLowerCase());
+      return content.toLowerCase().includes(searchValue);
     }
     return true;
   });
@@ -1432,6 +1442,14 @@ export default function DietitianProfile() {
                           </div>
                           <p className={`text-sm text-gray-700 line-clamp-2 mb-3 ${isRTL ? 'text-right' : ''}`}>
                             {(() => {
+                              // Check if message has image or audio topic
+                              if (message.topic === 'image') {
+                                return translations.photo || 'Photo';
+                              }
+                              if (message.topic === 'audio') {
+                                return translations.voice || 'Voice';
+                              }
+                              
                               // For assistant messages, try to extract response_text from JSON
                               if (message.role === 'assistant' && message.message) {
                                 try {
