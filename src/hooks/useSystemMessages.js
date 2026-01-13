@@ -1,6 +1,32 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 
+// Helper function for API calls
+const getBackendUrl = () => {
+  return import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net';
+};
+
+const apiCall = async (endpoint, options = {}) => {
+  const url = `${getBackendUrl()}/api/db${endpoint}`;
+  const defaultOptions = {
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  };
+  
+  const response = await fetch(url, { ...defaultOptions, ...options });
+  const result = await response.json().catch(() => ({}));
+  
+  if (!response.ok) {
+    const message = result?.error || `API Error: ${response.status} ${response.statusText}`;
+    throw new Error(message);
+  }
+  
+  return result;
+};
+
 /**
  * Custom hook to fetch and track system messages
  * Returns the count of unread active system messages (all priorities)
@@ -13,6 +39,7 @@ export function useSystemMessages() {
     fetchUnreadCount();
 
     // Set up real-time subscription for system messages
+    // Note: Real-time subscriptions still use Supabase directly as they require WebSocket connection
     const subscription = supabase
       .channel('system_messages_changes')
       .on(
@@ -47,17 +74,12 @@ export function useSystemMessages() {
         return;
       }
 
-      // Fetch active messages - either broadcast (directed_to IS NULL) or directed to current user
-      const { data, error } = await supabase
-        .from('system_messages')
-        .select('id, start_date, end_date, priority, directed_to')
-        .eq('is_active', true)
-        .or(`directed_to.is.null,directed_to.eq.${user.id}`);
-
-      if (error) {
-        console.error('Supabase query error:', error);
-        throw error;
-      }
+      // Fetch active messages via API - either broadcast (directed_to IS NULL) or directed to current user
+      const params = new URLSearchParams({
+        user_id: user.id
+      });
+      
+      const data = await apiCall(`/system-messages/active-for-user?${params.toString()}`);
 
       // Filter by date range in JavaScript (more reliable than complex SQL)
       const activeMessages = (data || []).filter(msg => {

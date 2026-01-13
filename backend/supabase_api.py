@@ -340,12 +340,22 @@ def create_chat_user():
 
 @supabase_bp.route('/chat-users', methods=['GET'])
 def list_chat_users():
-    """List all chat users"""
+    """List all chat users with optional field selection"""
     try:
-        result = supabase.table('chat_users')\
-            .select('*')\
-            .order('full_name')\
-            .execute()
+        # Support field selection via query parameter
+        fields = request.args.get('fields', '*')
+        if fields != '*':
+            # Convert comma-separated string to list
+            fields = [f.strip() for f in fields.split(',')]
+        
+        query = supabase.table('chat_users')
+        
+        if fields == '*':
+            query = query.select('*')
+        else:
+            query = query.select(','.join(fields))
+        
+        result = query.order('full_name').execute()
         
         return jsonify(result.data if result.data else []), 200
         
@@ -355,13 +365,22 @@ def list_chat_users():
 
 @supabase_bp.route('/chat-users/<user_code>', methods=['GET'])
 def get_chat_user(user_code):
-    """Get a chat user by user_code"""
+    """Get a chat user by user_code with optional field selection"""
     try:
-        result = supabase.table('chat_users')\
-            .select('*')\
-            .eq('user_code', user_code)\
-            .single()\
-            .execute()
+        # Support field selection via query parameter
+        fields = request.args.get('fields', '*')
+        if fields != '*':
+            # Convert comma-separated string to list
+            fields = [f.strip() for f in fields.split(',')]
+        
+        query = supabase.table('chat_users').eq('user_code', user_code)
+        
+        if fields == '*':
+            query = query.select('*')
+        else:
+            query = query.select(','.join(fields))
+        
+        result = query.single().execute()
         
         return jsonify(result.data if result.data else {}), 200
         
@@ -696,12 +715,28 @@ def get_weight_logs_by_user_code(user_code):
 
 @supabase_bp.route('/weight-logs', methods=['GET'])
 def list_weight_logs():
-    """List all weight logs"""
+    """List weight logs with optional filtering by user_code array"""
     try:
-        result = supabase.table('weight_logs')\
-            .select('*')\
-            .order('measurement_date', desc=True)\
-            .execute()
+        user_code = request.args.get('user_code')
+        user_codes = request.args.getlist('user_code')  # Support multiple user codes
+        
+        query = supabase.table('weight_logs').select('*')
+        
+        if user_code:
+            query = query.eq('user_code', user_code)
+        elif user_codes and len(user_codes) > 0:
+            query = query.in_('user_code', user_codes)
+        
+        # Support limit
+        limit = request.args.get('limit')
+        if limit:
+            try:
+                limit = int(limit)
+                query = query.limit(limit)
+            except ValueError:
+                pass
+        
+        result = query.order('measurement_date', desc=True).execute()
         
         return jsonify(result.data if result.data else []), 200
         
@@ -1106,12 +1141,22 @@ def delete_queue_by_user_code(user_code):
 
 @supabase_bp.route('/chat-conversations', methods=['GET'])
 def list_chat_conversations():
-    """List all chat conversations"""
+    """List all chat conversations with optional field selection"""
     try:
-        result = supabase.table('chat_conversations')\
-            .select('*')\
-            .order('started_at', desc=True)\
-            .execute()
+        # Support field selection via query parameter
+        fields = request.args.get('fields', '*')
+        if fields != '*':
+            # Convert comma-separated string to list
+            fields = [f.strip() for f in fields.split(',')]
+        
+        query = supabase.table('chat_conversations')
+        
+        if fields == '*':
+            query = query.select('*')
+        else:
+            query = query.select(','.join(fields))
+        
+        result = query.order('started_at', desc=True).execute()
         
         return jsonify(result.data if result.data else []), 200
         
@@ -1850,6 +1895,263 @@ def update_system_message(message_id):
         return handle_error(e, "Update system message")
 
 
+@supabase_bp.route('/system-messages/active-for-user', methods=['GET'])
+def get_active_messages_for_user():
+    """Get active system messages visible to a user (broadcast or directed to user)"""
+    try:
+        user_id = request.args.get('user_id')
+        
+        if not user_id:
+            return jsonify([]), 200
+        
+        # Get active messages that are either broadcast (directed_to IS NULL) or directed to the user
+        # Select only the fields needed for counting: id, start_date, end_date, priority, directed_to
+        result = supabase.table('system_messages')\
+            .select('id, start_date, end_date, priority, directed_to')\
+            .eq('is_active', True)\
+            .execute()
+        
+        all_messages = result.data if result.data else []
+        
+        # Filter messages: broadcast (directed_to is None) or directed to user
+        filtered_messages = []
+        for message in all_messages:
+            directed_to = message.get('directed_to')
+            if not directed_to or directed_to == user_id:
+                filtered_messages.append(message)
+        
+        return jsonify(filtered_messages), 200
+        
+    except Exception as e:
+        return handle_error(e, "Get active messages for user")
+
+
+@supabase_bp.route('/system-messages/urgent', methods=['GET'])
+def get_urgent_system_messages():
+    """Get urgent system messages with visibility filtering"""
+    try:
+        # Get current user from request (should be passed from frontend)
+        user_id = request.args.get('user_id')
+        user_role = request.args.get('user_role')
+        user_company_id = request.args.get('user_company_id')
+        
+        # Get all urgent active messages
+        result = supabase.table('system_messages')\
+            .select('*')\
+            .eq('is_active', True)\
+            .eq('priority', 'urgent')\
+            .order('created_at', desc=True)\
+            .execute()
+        
+        all_urgent_messages = result.data if result.data else []
+        
+        # If sys_admin, return all messages
+        if user_role == 'sys_admin':
+            return jsonify(all_urgent_messages), 200
+        
+        # For non-sys_admin users, apply visibility filtering
+        if not user_id:
+            return jsonify([]), 200
+        
+        # Get all profiles for company-based filtering
+        try:
+            profiles_result = supabase.table('profiles')\
+                .select('id, role, company_id')\
+                .execute()
+            
+            all_profiles = profiles_result.data if profiles_result.data else []
+            
+            # Create maps for quick lookup
+            profile_map = {}
+            company_managers_map = {}
+            
+            for profile in all_profiles:
+                profile_map[profile['id']] = profile
+                
+                if profile.get('role') == 'company_manager' and profile.get('company_id'):
+                    company_id = profile['company_id']
+                    if company_id not in company_managers_map:
+                        company_managers_map[company_id] = []
+                    company_managers_map[company_id].append(profile['id'])
+            
+            # Filter messages based on visibility rules
+            filtered_messages = []
+            for message in all_urgent_messages:
+                # Check if this is a personalized meal plan request by title
+                is_meal_plan_request = (
+                    message.get('title') == 'בקשה לתוכנית תזונה מותאמת' or 
+                    message.get('title') == 'Request for Personalized Meal Plan'
+                )
+                
+                # For non-meal-plan-request messages, use simple filtering
+                if not is_meal_plan_request:
+                    # Broadcast messages: visible to everyone
+                    if not message.get('directed_to'):
+                        filtered_messages.append(message)
+                        continue
+                    # Message directed to current user: always visible
+                    if message.get('directed_to') == user_id:
+                        filtered_messages.append(message)
+                    continue
+                
+                # For meal plan request messages, apply company-based visibility rules
+                # Message directed to current user: always visible
+                if message.get('directed_to') == user_id:
+                    filtered_messages.append(message)
+                    continue
+                
+                # If no directed_to, don't show (meal plan requests should always be directed)
+                if not message.get('directed_to'):
+                    continue
+                
+                # Get the target profile
+                target_profile = profile_map.get(message.get('directed_to'))
+                if not target_profile:
+                    continue
+                
+                # Show to company managers in the same company as the target
+                if (user_role == 'company_manager' and 
+                    target_profile.get('company_id') and 
+                    user_company_id == target_profile.get('company_id')):
+                    filtered_messages.append(message)
+            
+            return jsonify(filtered_messages), 200
+            
+        except Exception as profiles_error:
+            # Fallback to basic filtering if profiles table is not available
+            logger.warning(f'Could not fetch profiles, falling back to basic filtering: {str(profiles_error)}')
+            
+            # Basic filtering: show broadcast messages or messages directed to user
+            filtered_messages = []
+            for message in all_urgent_messages:
+                if not message.get('directed_to') or message.get('directed_to') == user_id:
+                    filtered_messages.append(message)
+            
+            return jsonify(filtered_messages), 200
+        
+    except Exception as e:
+        return handle_error(e, "Get urgent system messages")
+
+
+@supabase_bp.route('/system-messages/for-dietitian', methods=['GET'])
+def get_system_messages_for_dietitian():
+    """Get all system messages with visibility filtering for dietitian profile"""
+    try:
+        # Get current user from request (should be passed from frontend)
+        user_id = request.args.get('user_id')
+        user_role = request.args.get('user_role')
+        user_company_id = request.args.get('user_company_id')
+        
+        # Get all messages
+        result = supabase.table('system_messages')\
+            .select('*')\
+            .order('created_at', desc=True)\
+            .execute()
+        
+        all_messages = result.data if result.data else []
+        
+        # If sys_admin, return all messages
+        if user_role == 'sys_admin':
+            return jsonify(all_messages), 200
+        
+        # For non-sys_admin users, apply visibility filtering
+        if not user_id:
+            return jsonify([]), 200
+        
+        # Get all profiles for company-based filtering
+        try:
+            profiles_result = supabase.table('profiles')\
+                .select('id, role, company_id')\
+                .execute()
+            
+            all_profiles = profiles_result.data if profiles_result.data else []
+            
+            # Create maps for quick lookup
+            profile_map = {}
+            company_managers_map = {}
+            
+            for profile in all_profiles:
+                profile_map[profile['id']] = profile
+                
+                if profile.get('role') == 'company_manager' and profile.get('company_id'):
+                    company_id = profile['company_id']
+                    if company_id not in company_managers_map:
+                        company_managers_map[company_id] = []
+                    company_managers_map[company_id].append(profile['id'])
+            
+            # Filter messages based on visibility rules
+            filtered_messages = []
+            for message in all_messages:
+                # Check if this is a personalized meal plan request by title
+                is_meal_plan_request = (
+                    message.get('title') == 'בקשה לתוכנית תזונה מותאמת' or 
+                    message.get('title') == 'Request for Personalized Meal Plan'
+                )
+                
+                # For non-meal-plan-request messages, use simple filtering
+                if not is_meal_plan_request:
+                    # Broadcast messages: visible to everyone
+                    if not message.get('directed_to'):
+                        filtered_messages.append(message)
+                        continue
+                    # Message directed to current user: always visible
+                    if message.get('directed_to') == user_id:
+                        filtered_messages.append(message)
+                    continue
+                
+                # For meal plan request messages, apply company-based visibility rules
+                # Message directed to current user: always visible
+                if message.get('directed_to') == user_id:
+                    filtered_messages.append(message)
+                    continue
+                
+                # If no directed_to, don't show (meal plan requests should always be directed)
+                if not message.get('directed_to'):
+                    continue
+                
+                # Get the target profile
+                target_profile = profile_map.get(message.get('directed_to'))
+                if not target_profile:
+                    continue
+                
+                # Show to company managers in the same company as the target
+                if (user_role == 'company_manager' and 
+                    target_profile.get('company_id') and 
+                    user_company_id == target_profile.get('company_id')):
+                    filtered_messages.append(message)
+            
+            return jsonify(filtered_messages), 200
+            
+        except Exception as profiles_error:
+            # Fallback to basic filtering if profiles table is not available
+            logger.warning(f'Could not fetch profiles, falling back to basic filtering: {str(profiles_error)}')
+            
+            # Basic filtering: show broadcast messages or messages directed to user
+            filtered_messages = []
+            for message in all_messages:
+                if not message.get('directed_to') or message.get('directed_to') == user_id:
+                    filtered_messages.append(message)
+            
+            return jsonify(filtered_messages), 200
+        
+    except Exception as e:
+        return handle_error(e, "Get system messages for dietitian")
+
+
+@supabase_bp.route('/profiles/basic', methods=['GET'])
+def get_profiles_basic():
+    """Get basic profile information (id, role, company_id)"""
+    try:
+        result = supabase.table('profiles')\
+            .select('id, role, company_id')\
+            .execute()
+        
+        return jsonify(result.data if result.data else []), 200
+        
+    except Exception as e:
+        return handle_error(e, "Get profiles basic")
+
+
 # ============================================================================
 # USER MESSAGE PREFERENCES
 # ============================================================================
@@ -1872,14 +2174,19 @@ def get_user_message_preferences():
         count_result = query.execute()
         total_count = count_result.count if hasattr(count_result, 'count') else len(count_result.data or [])
         
-        # Get data with pagination
+        # Get data with pagination (support both from/to and offset/limit)
+        from_param = request.args.get('from', type=int)
+        to_param = request.args.get('to', type=int)
         limit = request.args.get('limit', type=int)
         offset = request.args.get('offset', type=int)
         
-        if limit:
+        if from_param is not None and to_param is not None:
+            # Use from/to range
+            query = query.range(from_param, to_param)
+        elif limit:
             query = query.limit(limit)
-        if offset:
-            query = query.range(offset, offset + (limit or 1000) - 1)
+            if offset:
+                query = query.range(offset, offset + limit - 1)
         
         query = query.order('user_code', desc=False)
         result = query.execute()
@@ -1910,6 +2217,90 @@ def update_user_message_preference(preference_id):
         
     except Exception as e:
         return handle_error(e, "Update user message preference")
+
+
+# ============================================================================
+# SCHEDULED REMINDERS
+# ============================================================================
+
+@supabase_bp.route('/scheduled-reminders', methods=['POST'])
+def create_scheduled_reminders():
+    """Create scheduled reminders (supports bulk insert)"""
+    try:
+        data = request.json
+        
+        # Support both single object and array
+        if isinstance(data, dict):
+            data = [data]
+        
+        result = supabase.table('scheduled_reminders')\
+            .insert(data)\
+            .execute()
+        
+        return jsonify(result.data if result.data else []), 201
+        
+    except Exception as e:
+        return handle_error(e, "Create scheduled reminders")
+
+
+@supabase_bp.route('/scheduled-reminders', methods=['GET'])
+def list_scheduled_reminders():
+    """List scheduled reminders with optional filtering"""
+    try:
+        user_code = request.args.get('user_code')
+        status = request.args.get('status')
+        plan_type = request.args.get('plan_type')
+        plan_id = request.args.get('plan_id')
+        
+        query = supabase.table('scheduled_reminders').select('*')
+        
+        if user_code:
+            query = query.eq('user_code', user_code)
+        if status:
+            query = query.eq('status', status)
+        if plan_type:
+            query = query.eq('plan_type', plan_type)
+        if plan_id:
+            query = query.eq('plan_id', plan_id)
+        
+        result = query.order('scheduled_date', desc=False).execute()
+        
+        return jsonify(result.data if result.data else []), 200
+        
+    except Exception as e:
+        return handle_error(e, "List scheduled reminders")
+
+
+@supabase_bp.route('/scheduled-reminders/<reminder_id>', methods=['PUT'])
+def update_scheduled_reminder(reminder_id):
+    """Update a scheduled reminder"""
+    try:
+        data = request.json
+        
+        result = supabase.table('scheduled_reminders')\
+            .update(data)\
+            .eq('id', reminder_id)\
+            .execute()
+        
+        return jsonify(result.data[0] if result.data else {}), 200
+        
+    except Exception as e:
+        return handle_error(e, "Update scheduled reminder")
+
+
+@supabase_bp.route('/scheduled-reminders/<reminder_id>', methods=['DELETE'])
+def delete_scheduled_reminder(reminder_id):
+    """Delete a scheduled reminder"""
+    try:
+        supabase.table('scheduled_reminders')\
+            .delete()\
+            .eq('id', reminder_id)\
+            .execute()
+        
+        return jsonify({"success": True}), 200
+        
+    except Exception as e:
+        return handle_error(e, "Delete scheduled reminder")
 
 
 # ============================================================================

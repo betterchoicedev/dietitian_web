@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, ChatMessage, ChatConversation } from '@/api/entities';
+import { Menu, ChatMessage, ChatConversation, WeightLogs } from '@/api/entities';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useClient } from '@/contexts/ClientContext';
 import { Button } from '@/components/ui/button';
@@ -57,6 +57,7 @@ export default function Dashboard() {
   const [recentMenus, setRecentMenus] = useState([]);
   const [recentChats, setRecentChats] = useState([]);
   const [recentMessages, setRecentMessages] = useState([]);
+  const [weightLogs, setWeightLogs] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -74,6 +75,7 @@ export default function Dashboard() {
       setRecentMenus([]);
       setRecentChats([]);
       setRecentMessages([]);
+      setWeightLogs([]);
     }
   }, [selectedUserCode]);
 
@@ -94,8 +96,39 @@ export default function Dashboard() {
       const activeMenus = userMenus.filter(menu => menu.status === 'active');
       const totalMenus = userMenus.length;
       
-      // Calculate weight change (placeholder - would need weight history table)
-      const weightChange = 0; // TODO: Implement weight tracking
+      // Load weight logs and calculate weight change
+      console.log('⚖️ Loading weight logs for user...');
+      let weightChange = 0;
+      let userWeightLogs = [];
+      try {
+        userWeightLogs = await WeightLogs.getByUserCode(selectedUserCode);
+        console.log('✅ Weight logs loaded:', userWeightLogs?.length || 0, 'records');
+        
+        // Calculate weight change: most recent vs oldest (or first entry)
+        if (userWeightLogs && userWeightLogs.length > 0) {
+          // Sort by measurement_date descending (most recent first)
+          const sortedLogs = [...userWeightLogs].sort((a, b) => {
+            const dateA = new Date(a.measurement_date || a.created_at);
+            const dateB = new Date(b.measurement_date || b.created_at);
+            return dateB - dateA;
+          });
+          
+          const mostRecent = sortedLogs[0];
+          const oldest = sortedLogs[sortedLogs.length - 1];
+          
+          if (mostRecent.weight_kg && oldest.weight_kg) {
+            weightChange = parseFloat((mostRecent.weight_kg - oldest.weight_kg).toFixed(2));
+          }
+          
+          // Store recent weight logs (last 5)
+          setWeightLogs(sortedLogs.slice(0, 5));
+        } else {
+          setWeightLogs([]);
+        }
+      } catch (weightError) {
+        console.warn('⚠️ Error loading weight logs:', weightError);
+        setWeightLogs([]);
+      }
 
       setStats({
         totalMenus,
@@ -140,7 +173,7 @@ export default function Dashboard() {
       // Activity from menus and messages
       const allActivity = [
         ...userMenus.map(m => ({ ...m, type: 'meal plan' }))
-      ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 8);
+      ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 2);
       
       setRecentActivity(allActivity);
 
@@ -158,6 +191,7 @@ export default function Dashboard() {
       setRecentMenus([]);
       setRecentChats([]);
       setRecentMessages([]);
+      setWeightLogs([]);
     } finally {
       setIsLoading(false);
     }
@@ -346,6 +380,10 @@ export default function Dashboard() {
                         : 'N/A'
                     }</span>
                   </div>
+                  <div className="flex justify-between items-center p-2 bg-white/50 rounded-lg">
+                    <span className="font-semibold text-slate-700">{translations.goal || 'Goal'}:</span>
+                    <span className="font-bold text-red-600">{selectedClient.goal || 'N/A'}</span>
+                  </div>
                 </div>
               </div>
 
@@ -359,16 +397,16 @@ export default function Dashboard() {
                 </h4>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between items-center p-2 bg-white/50 rounded-lg">
-                    <span className="font-semibold text-slate-700">{translations.base_daily_total_calories || 'Daily Calories'}:</span>
-                    <span className="font-bold text-orange-600">{selectedClient.base_daily_total_calories || 'N/A'} kcal</span>
+                    <span className="font-semibold text-slate-700">{translations.targetCalories || 'Target Calories'}:</span>
+                    <span className="font-bold text-orange-600">{selectedClient.daily_target_total_calories || 'N/A'} kcal</span>
+                  </div>
+                  <div className="flex justify-between items-center p-2 bg-white/50 rounded-lg">
+                    <span className="font-semibold text-slate-700">{translations.bmrCalories || 'BMR Calories'}:</span>
+                    <span className="font-bold text-emerald-600">{selectedClient.base_daily_total_calories || 'N/A'} kcal</span>
                   </div>
                   <div className="flex justify-between items-center p-2 bg-white/50 rounded-lg">
                     <span className="font-semibold text-slate-700">{translations.numberOfMeals || 'Meals'}:</span>
                     <span className="font-bold text-slate-800">{selectedClient.number_of_meals || 'N/A'}</span>
-                  </div>
-                  <div className="flex justify-between items-center p-2 bg-white/50 rounded-lg">
-                    <span className="font-semibold text-slate-700">{translations.goal || 'Goal'}:</span>
-                    <span className="font-bold text-red-600">{selectedClient.goal || 'N/A'}</span>
                   </div>
                   <div className="flex justify-between items-center p-2 bg-white/50 rounded-lg">
                     <span className="font-semibold text-slate-700">{translations.activityLevel || 'Activity'}:</span>
@@ -539,30 +577,59 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Client Preferences */}
+                {/* Meal Plan Structure */}
                 <div className="space-y-3 p-3 bg-white/60 backdrop-blur-sm rounded-lg border border-white/20">
                   <h5 className="font-bold text-slate-800 flex items-center gap-2">
                     <div className="w-5 h-5 bg-gradient-to-br from-pink-500 to-rose-600 rounded-lg flex items-center justify-center">
-                      <Heart className="h-2 w-2 text-white" />
+                      <Utensils className="h-2 w-2 text-white" />
                     </div>
-                    {translations.clientPreferences || 'Client Preferences'}
+                    {translations.mealPlanStructure || 'Meal Plan Structure'}
                   </h5>
-                  <div className="space-y-1 text-sm">
-                    <div className="p-2 bg-white/50 rounded-lg">
-                      <span className="font-semibold text-slate-700">{translations.preferences || 'Preferences'}:</span>
-                      <p className="font-bold text-slate-800 mt-1 text-xs">{
-                        selectedClient.client_preference ? 
-                          (typeof selectedClient.client_preference === 'object' ? 
-                            Object.entries(selectedClient.client_preference).map(([key, value]) => {
-                              if (Array.isArray(value)) {
-                                return value.join(', ');
-                              }
-                              return value;
-                            }).join(', ') : 
-                            selectedClient.client_preference) : 
-                          'None specified'
-                      }</p>
-                    </div>
+                  <div className="space-y-2 text-sm max-h-64 overflow-y-auto">
+                    {(() => {
+                      const mealPlanStructure = selectedClient.meal_plan_structure;
+                      if (!mealPlanStructure || !Array.isArray(mealPlanStructure) || mealPlanStructure.length === 0) {
+                        return (
+                          <div className="p-2 bg-white/50 rounded-lg text-center">
+                            <p className="text-slate-600 text-xs">{translations.noMealPlanStructure || 'No meal plan structure available'}</p>
+                          </div>
+                        );
+                      }
+                      
+                      // Handle both string (JSON) and object formats
+                      let meals = mealPlanStructure;
+                      if (typeof mealPlanStructure === 'string') {
+                        try {
+                          meals = JSON.parse(mealPlanStructure);
+                        } catch (e) {
+                          console.error('Error parsing meal_plan_structure:', e);
+                          return (
+                            <div className="p-2 bg-white/50 rounded-lg text-center">
+                              <p className="text-slate-600 text-xs">{translations.invalidMealPlanStructure || 'Invalid meal plan structure'}</p>
+                            </div>
+                          );
+                        }
+                      }
+                      
+                      return meals.map((mealItem, index) => (
+                        <div key={index} className="p-2 bg-white/50 rounded-lg border border-white/30">
+                          <div className="flex items-start justify-between gap-2 mb-1">
+                            <span className="font-bold text-slate-800 text-xs">{mealItem.meal || `Meal ${index + 1}`}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-orange-600 text-xs">{mealItem.calories || 0} {translations.kcal || 'kcal'}</span>
+                              {mealItem.calories_pct && (
+                                <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                                  {mealItem.calories_pct}%
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {mealItem.description && (
+                            <p className="text-xs text-slate-600 leading-relaxed mt-1">{mealItem.description}</p>
+                          )}
+                        </div>
+                      ));
+                    })()}
                   </div>
                 </div>
               </div>
@@ -692,7 +759,7 @@ export default function Dashboard() {
               
               <div className="space-y-3">
                 {recentActivity.length > 0 ? (
-                  recentActivity.map((item, index) => (
+                  recentActivity.slice(0, 2).map((item, index) => (
                     <div key={index} className="relative overflow-hidden rounded-xl bg-white/60 backdrop-blur-sm border border-white/20 p-3 hover:bg-white/80 transition-all duration-300 group">
                       <div className="flex items-center gap-3">
                         <div className={`w-10 h-10 bg-gradient-to-br ${
@@ -735,7 +802,7 @@ export default function Dashboard() {
 
       {/* Premium Summary Cards - Only show when client is selected */}
       {selectedUserCode && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-green-50/90 to-emerald-50/80 backdrop-blur-2xl border border-green-200/50 shadow-lg">
             {/* Animated background */}
             <div className="absolute inset-0 bg-gradient-to-r from-green-500/5 via-emerald-500/5 to-teal-500/5"></div>
@@ -843,7 +910,25 @@ export default function Dashboard() {
                             </p>
                           </div>
                           <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
-                            {message.content || message.message || 'Message content not available'}
+                            {(() => {
+                              if (message.role === 'assistant') {
+                                const messageText = message.content || message.message || '';
+                                // Check if message is JSON with response_text
+                                if (messageText.trim().startsWith('{')) {
+                                  try {
+                                    const parsedData = JSON.parse(messageText);
+                                    if (parsedData.response_text) {
+                                      return parsedData.response_text;
+                                    }
+                                  } catch (e) {
+                                    // Not valid JSON, use original message text
+                                    console.log('Message is not JSON, using original text');
+                                  }
+                                }
+                                return messageText || 'Message content not available';
+                              }
+                              return message.content || message.message || 'Message content not available';
+                            })()}
                           </p>
                         </div>
                       </div>
@@ -868,6 +953,88 @@ export default function Dashboard() {
                     <Button className="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-semibold px-4 py-2 rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 text-sm">
                       <MessageSquare className="h-3 w-3 mr-2" />
                       {translations.startFirstChat || 'Start Your First Chat'}
+                    </Button>
+                  </Link>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Weight Logs */}
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-purple-50/90 to-pink-50/80 backdrop-blur-2xl border border-purple-200/50 shadow-lg">
+            {/* Animated background */}
+            <div className="absolute inset-0 bg-gradient-to-r from-purple-500/5 via-pink-500/5 to-rose-500/5"></div>
+            <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-br from-purple-400/10 to-pink-400/10 rounded-full blur-3xl"></div>
+            
+            <div className="relative z-10 p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl flex items-center justify-center shadow-lg">
+                  <Scale className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold bg-gradient-to-r from-slate-800 to-purple-600 bg-clip-text text-transparent">
+                    {translations.weightLogs || 'Weight Logs'}
+                  </h2>
+                  <p className="text-slate-600 font-medium text-sm">{translations.weightTrackingHistory || 'Weight tracking history'}</p>
+                </div>
+              </div>
+              
+              {weightLogs.length > 0 ? (
+                <div className="space-y-3">
+                  {weightLogs.slice(0, 5).map((log, index) => (
+                    <div key={log.id || index} className="relative overflow-hidden rounded-xl bg-white/60 backdrop-blur-sm border border-white/20 p-3 hover:bg-white/80 transition-all duration-300">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-bold text-slate-800 text-sm">
+                              {log.weight_kg ? `${log.weight_kg} kg` : 'N/A'}
+                            </span>
+                            {log.body_fat_percentage && (
+                              <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                                {log.body_fat_percentage}% BF
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-600">
+                            {log.measurement_date 
+                              ? new Date(log.measurement_date).toLocaleDateString() 
+                              : (log.created_at ? new Date(log.created_at).toLocaleDateString() : 'N/A')}
+                          </p>
+                          {log.waist_circumference_cm && (
+                            <p className="text-xs text-slate-500 mt-1">
+                              Waist: {log.waist_circumference_cm} cm
+                            </p>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          {log.measurement_method && (
+                            <Badge variant="outline" className="text-xs">
+                              {log.measurement_method}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="text-center pt-3">
+                    <Link to={createPageUrl('weight-logs')}>
+                      <Button className="bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white font-semibold px-4 py-2 rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 text-sm">
+                        {translations.viewAllWeightLogs || 'View All Weight Logs'}
+                        <ArrowUpRight className="h-3 w-3 ml-2" />
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="w-12 h-12 bg-gradient-to-br from-purple-300 to-pink-400 rounded-xl flex items-center justify-center mx-auto mb-3">
+                    <Scale className="h-6 w-6 text-white" />
+                  </div>
+                  <p className="text-purple-700 font-bold text-base mb-2">{translations.noWeightLogs || 'No weight logs yet'}</p>
+                  <Link to={createPageUrl('weight-logs')}>
+                    <Button className="bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white font-semibold px-4 py-2 rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 text-sm">
+                      <Plus className="h-3 w-3 mr-2" />
+                      {translations.addFirstWeightLog || 'Add Your First Weight Log'}
                     </Button>
                   </Link>
                 </div>

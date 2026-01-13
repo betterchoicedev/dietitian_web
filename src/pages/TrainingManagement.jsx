@@ -6,6 +6,32 @@ import { ExerciseLibrary, TrainingPlanTemplates } from '@/api/entities';
 import { getMyProfile, getCompanyProfileIds } from '@/utils/auth';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
+
+// API helper functions
+const getBackendUrl = () => {
+  return import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000';
+};
+
+const apiCall = async (endpoint, options = {}) => {
+  const url = `${getBackendUrl()}/api/db${endpoint}`;
+  const defaultOptions = {
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  };
+  
+  const response = await fetch(url, { ...defaultOptions, ...options });
+  const result = await response.json().catch(() => ({}));
+  
+  if (!response.ok) {
+    const message = result?.error || `API Error: ${response.status} ${response.statusText}`;
+    throw new Error(message);
+  }
+  
+  return result;
+};
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -60,13 +86,14 @@ const createWeeklyTrainingPlanReminders = async (userCode, trainingPlanId, activ
     }
 
     // Get client data including phone_number and telegram_chat_id
-    const { data: clientData, error: clientError } = await supabase
-      .from('chat_users')
-      .select('phone_number, telegram_chat_id, id')
-      .eq('user_code', userCode)
-      .single();
-    
-    if (clientError || !clientData) {
+    try {
+      const clientData = await apiCall(`/chat-users/${userCode}?fields=phone_number,telegram_chat_id,id`);
+      
+      if (!clientData) {
+        console.error('Error fetching client data for reminders: No data returned');
+        return;
+      }
+    } catch (clientError) {
       console.error('Error fetching client data for reminders:', clientError);
       return;
     }
@@ -172,15 +199,10 @@ const createWeeklyTrainingPlanReminders = async (userCode, trainingPlanId, activ
     }
     
     // Insert all reminders in batch
-    const { data, error } = await supabase
-      .from('scheduled_reminders')
-      .insert(reminders)
-      .select();
-    
-    if (error) {
-      console.error('Error creating weekly reminders:', error);
-      throw error;
-    }
+    const data = await apiCall('/scheduled-reminders', {
+      method: 'POST',
+      body: JSON.stringify(reminders)
+    });
     
     console.log(`✅ Created ${reminders.length} weekly reminders successfully:`, data);
     return data;

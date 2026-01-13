@@ -297,15 +297,30 @@ export default function Layout() {
 
       // Create an image to convert SVG to canvas
       const img = new Image();
-      const qrDisplaySize = 180; // QR code size
-      const canvasWidth = 500;
-      const canvasHeight = 650;
-      const padding = 50;
       
-      // Brand colors from landing page
-      const tealGreen = '#14B8A6'; // Bright teal-green for brand name
-      const darkTeal = '#0D9488'; // Darker teal
-      const darkBlue = '#0F172A'; // Dark blue-black
+      // High DPI scaling for crisp images
+      const devicePixelRatio = window.devicePixelRatio || 2;
+      const scale = Math.max(devicePixelRatio, 2); // Minimum 2x for quality
+      
+      // Base dimensions
+      const baseQrDisplaySize = 300; // Increased base size for better quality
+      const baseCanvasWidth = 800;
+      const baseCanvasHeight = 1000;
+      const basePadding = 80;
+      
+      // Scaled dimensions for high DPI
+      const qrDisplaySize = baseQrDisplaySize * scale;
+      const canvasWidth = baseCanvasWidth * scale;
+      const canvasHeight = baseCanvasHeight * scale;
+      const padding = basePadding * scale;
+      
+      // Brand colors from emerald/green palette
+      const emerald500 = '#10B981'; // emerald-500 - Bright emerald for brand name
+      const emerald600 = '#059669'; // emerald-600 - Medium emerald
+      const emerald700 = '#047857'; // emerald-700 - Dark emerald
+      const emerald800 = '#065f46'; // emerald-800 - Very dark emerald
+      const emerald950 = '#022c22'; // emerald-950 - Darkest emerald
+      const emerald50 = '#ecfdf5'; // emerald-50 - Light background
       const white = '#FFFFFF';
       
       img.onload = async () => {
@@ -315,45 +330,49 @@ export default function Layout() {
           canvas.height = canvasHeight;
           const ctx = canvas.getContext('2d');
           
-          // Draw gradient background (teal-green to dark blue)
-          const gradient = ctx.createLinearGradient(0, 0, 0, canvasHeight);
-          gradient.addColorStop(0, darkTeal);
-          gradient.addColorStop(0.5, '#0F4C5C');
-          gradient.addColorStop(1, darkBlue);
-          ctx.fillStyle = gradient;
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          // Enable high-quality image smoothing
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           
-          // Add brand name at top with teal-green color
-          ctx.fillStyle = tealGreen;
-          ctx.font = 'bold 36px Inter, system-ui, sans-serif';
+          // Draw gradient background (emerald gradient)
+          const gradient = ctx.createLinearGradient(0, 0, 0, canvasHeight);
+          gradient.addColorStop(0, emerald600);
+          gradient.addColorStop(0.5, emerald700);
+          gradient.addColorStop(1, emerald950);
+          ctx.fillStyle = gradient;
+          ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+          
+          // Add brand name at top with emerald color
+          ctx.fillStyle = emerald500;
+          ctx.font = `bold ${54 * scale}px Inter, system-ui, sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
-          ctx.fillText('BetterChoice AI', canvasWidth / 2, 40);
+          ctx.fillText('BetterChoice AI', canvasWidth / 2, 60 * scale);
           
           // Add main heading in white
           ctx.fillStyle = white;
-          ctx.font = 'bold 28px Inter, system-ui, sans-serif';
-          ctx.fillText('Sign Up', canvasWidth / 2, 90);
+          ctx.font = `bold ${42 * scale}px Inter, system-ui, sans-serif`;
+          ctx.fillText('Sign Up', canvasWidth / 2, 135 * scale);
           
           // Add subtitle
-          ctx.font = '18px Inter, system-ui, sans-serif';
+          ctx.font = `${27 * scale}px Inter, system-ui, sans-serif`;
           ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-          ctx.fillText('Scan to get started', canvasWidth / 2, 125);
+          ctx.fillText('Scan to get started', canvasWidth / 2, 190 * scale);
           
-          // Draw white rounded rectangle for QR code area with shadow effect
-          const whiteAreaY = 170;
+          // Draw emerald-50 rounded rectangle for QR code area with shadow effect
+          const whiteAreaY = 255 * scale;
           const whiteAreaHeight = qrDisplaySize + (padding * 2);
           const whiteAreaWidth = qrDisplaySize + (padding * 2);
           const whiteAreaX = (canvasWidth - whiteAreaWidth) / 2;
-          const borderRadius = 20;
+          const borderRadius = 30 * scale;
           
           // Shadow
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-          ctx.shadowBlur = 20;
+          ctx.shadowColor = 'rgba(5, 150, 105, 0.3)';
+          ctx.shadowBlur = 30 * scale;
           ctx.shadowOffsetX = 0;
-          ctx.shadowOffsetY = 10;
+          ctx.shadowOffsetY = 15 * scale;
           
-          ctx.fillStyle = white;
+          ctx.fillStyle = emerald50;
           ctx.beginPath();
           ctx.moveTo(whiteAreaX + borderRadius, whiteAreaY);
           ctx.arcTo(whiteAreaX + whiteAreaWidth, whiteAreaY, whiteAreaX + whiteAreaWidth, whiteAreaY + borderRadius, borderRadius);
@@ -369,7 +388,7 @@ export default function Layout() {
           ctx.shadowOffsetX = 0;
           ctx.shadowOffsetY = 0;
           
-          // Draw the QR code in the center of white area
+          // Draw the QR code in the center at high resolution
           const qrX = whiteAreaX + padding;
           const qrY = whiteAreaY + padding;
           ctx.drawImage(img, qrX, qrY, qrDisplaySize, qrDisplaySize);
@@ -377,9 +396,8 @@ export default function Layout() {
           // Add footer text
           ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
           ctx.font = '16px Inter, system-ui, sans-serif';
-          ctx.fillText('betterchoice.one', canvasWidth / 2, whiteAreaY + whiteAreaHeight + 40);
           
-          // Convert canvas to blob and copy
+          // Convert canvas to blob with high quality
           canvas.toBlob(async (blob) => {
             try {
               if (!blob) {
@@ -402,7 +420,7 @@ export default function Layout() {
             } finally {
               URL.revokeObjectURL(url);
             }
-          }, 'image/png');
+          }, 'image/png', 1.0); // Maximum quality (1.0)
         } catch (err) {
           console.error('❌ Failed to process QR code image:', err);
           toast({

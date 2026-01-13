@@ -7,6 +7,32 @@ import { EventBus } from '@/utils/EventBus';
 import { useNavigate } from 'react-router-dom';
 import { entities } from '@/api/client';
 import { getMyProfile, getCompanyProfileIds } from '@/utils/auth';
+
+// API helper functions
+const getBackendUrl = () => {
+  return import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net';
+};
+
+const apiCall = async (endpoint, options = {}) => {
+  const url = `${getBackendUrl()}/api/db${endpoint}`;
+  const defaultOptions = {
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  };
+  
+  const response = await fetch(url, { ...defaultOptions, ...options });
+  const result = await response.json().catch(() => ({}));
+  
+  if (!response.ok) {
+    const message = result?.error || `API Error: ${response.status} ${response.statusText}`;
+    throw new Error(message);
+  }
+  
+  return result;
+};
 import { 
   Search,
   AlertCircle,
@@ -30,7 +56,8 @@ import {
   ArrowRight,
   ArrowLeft,
   ChefHat,
-  Send
+  Send,
+  RefreshCw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -83,6 +110,60 @@ const priorityColors = {
 };
 
 const { Menu, ChatConversation, ChatMessage, ChatUser } = entities;
+
+// Cache utilities
+const CACHE_PREFIX = 'dietitian_profile_';
+const CACHE_DURATION = 60 * 60 * 1000; // 1 hour in milliseconds
+
+const getCacheKey = (key) => `${CACHE_PREFIX}${key}`;
+
+const getCachedData = (key) => {
+  try {
+    const cacheKey = getCacheKey(key);
+    const cached = localStorage.getItem(cacheKey);
+    if (!cached) return null;
+    
+    const { data, timestamp } = JSON.parse(cached);
+    const now = Date.now();
+    
+    // Check if cache is still valid (within 1 hour)
+    if (now - timestamp > CACHE_DURATION) {
+      localStorage.removeItem(cacheKey);
+      return null;
+    }
+    
+    return data;
+  } catch (error) {
+    console.error('Error reading cache:', error);
+    return null;
+  }
+};
+
+const setCachedData = (key, data) => {
+  try {
+    const cacheKey = getCacheKey(key);
+    const cacheData = {
+      data,
+      timestamp: Date.now()
+    };
+    localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+  } catch (error) {
+    console.error('Error setting cache:', error);
+  }
+};
+
+const clearAllCache = () => {
+  try {
+    const keys = Object.keys(localStorage);
+    keys.forEach(key => {
+      if (key.startsWith(CACHE_PREFIX)) {
+        localStorage.removeItem(key);
+      }
+    });
+  } catch (error) {
+    console.error('Error clearing cache:', error);
+  }
+};
 
 export default function DietitianProfile() {
   const { translations, language, dir, isRTL } = useLanguage();
@@ -166,15 +247,48 @@ export default function DietitianProfile() {
   const [preferencesTotal, setPreferencesTotal] = useState(0);
   const [hasMorePreferences, setHasMorePreferences] = useState(true);
   const PREFERENCES_PER_PAGE = 5;
+  
+  // Refresh state
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Refresh function to clear cache and reload all data
+  const refreshAllData = async () => {
+    setIsRefreshing(true);
+    try {
+      // Clear all cache
+      clearAllCache();
+      console.log('🔄 Cache cleared, refreshing all data...');
+      
+      // Reload all data with force refresh
+      await Promise.all([
+        loadCurrentUser(),
+        loadMessages(true), // force refresh
+        loadDashboardData(true) // force refresh
+      ]);
+      
+      // If on preferences tab, refresh preferences too
+      if (activeTab === 'preferences') {
+        setPreferencesPage(1);
+        await loadUserPreferences(true, preferencesSearchTerm);
+      }
+      
+      console.log('✅ All data refreshed successfully');
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+      alert(translations.failedToRefreshData || 'Failed to refresh data');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     const loadAllData = async () => {
       setIsInitialLoading(true);
       try {
-        // Load all initial data in parallel
+        // Load all initial data in parallel (will use cache if available)
         await Promise.all([
           loadCurrentUser(),
-          loadMessages()
+          loadMessages(false) // use cache
         ]);
       } catch (error) {
         console.error('Error loading initial data:', error);
@@ -192,8 +306,8 @@ export default function DietitianProfile() {
   // Load dashboard data when clients change (e.g., when role-based filtering is applied)
   useEffect(() => {
     if (clients !== null && clients !== undefined) {
-      // Clients are loaded, now load dashboard data
-      loadDashboardData().finally(() => {
+      // Clients are loaded, now load dashboard data (will use cache if available)
+      loadDashboardData(false).finally(() => {
         setIsInitialLoading(false);
       });
     }
@@ -204,9 +318,20 @@ export default function DietitianProfile() {
     setCurrentUser(user);
   };
 
-  const loadMessages = async () => {
+  const loadMessages = async (forceRefresh = false) => {
     try {
       setIsLoading(true);
+      
+      // Check cache first (unless force refresh)
+      if (!forceRefresh) {
+        const cachedMessages = getCachedData('messages');
+        if (cachedMessages) {
+          console.log('📦 Using cached messages');
+          setMessages(cachedMessages);
+          setIsLoading(false);
+          return;
+        }
+      }
       
       // Get current user ID and profile
       const { data: { user } } = await supabase.auth.getUser();
@@ -219,116 +344,15 @@ export default function DietitianProfile() {
       const myProfile = await getMyProfile();
       console.log('👤 Current user profile:', { id: myProfile.id, role: myProfile.role, company_id: myProfile.company_id });
 
-      // If sys_admin, show all messages
-      if (myProfile.role === 'sys_admin') {
-        const { data, error } = await supabase
-          .from('system_messages')
-          .select('*')
-          .order('created_at', { ascending: false });
+      // Use API endpoint that handles all the complex filtering logic
+      const messagesData = await apiCall(
+        `/system-messages/for-dietitian?user_id=${myProfile.id}&user_role=${myProfile.role}&user_company_id=${myProfile.company_id || ''}`
+      );
 
-        if (error) throw error;
-        setMessages(data || []);
-        return;
-      }
-
-      // For non-sys_admin users, fetch all messages and filter based on company rules
-      const { data: allMessages, error } = await supabase
-        .from('system_messages')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      // Get all profiles to determine roles and company relationships
-      const { data: allProfiles, error: profilesError } = await supabase
-        .from('profiles')
-        .select('id, role, company_id');
-
-      if (profilesError) {
-        console.warn('⚠️ Could not fetch profiles, falling back to basic filtering:', profilesError);
-        // Fallback to basic filtering if profiles table is not available
-        const { data: basicMessages, error: basicError } = await supabase
-          .from('system_messages')
-          .select('*')
-          .or(`directed_to.is.null,directed_to.eq.${user.id}`)
-          .order('created_at', { ascending: false });
-        
-        if (basicError) throw basicError;
-        setMessages(basicMessages || []);
-        return;
-      }
-
-      // Create maps for quick lookup
-      const profileMap = {};
-      const companyManagersMap = {}; // company_id -> [manager_ids]
-      const employeeToManagerMap = {}; // employee_id -> manager_id
-
-      allProfiles?.forEach(profile => {
-        profileMap[profile.id] = profile;
-        
-        if (profile.role === 'company_manager' && profile.company_id) {
-          if (!companyManagersMap[profile.company_id]) {
-            companyManagersMap[profile.company_id] = [];
-          }
-          companyManagersMap[profile.company_id].push(profile.id);
-        }
-      });
-
-      // Build employee to manager mapping
-      allProfiles?.forEach(profile => {
-        if (profile.role === 'employee' && profile.company_id) {
-          const managers = companyManagersMap[profile.company_id] || [];
-          if (managers.length > 0) {
-            employeeToManagerMap[profile.id] = managers[0]; // Use first manager
-          }
-        }
-      });
-
-      // Filter messages based on visibility rules
-      const visibleMessages = (allMessages || []).filter(message => {
-        // Check if this is a personalized meal plan request by title
-        const isMealPlanRequest = message.title === 'בקשה לתוכנית תזונה מותאמת' || 
-                                   message.title === 'Request for Personalized Meal Plan';
-        
-        // For non-meal-plan-request messages, use simple filtering
-        if (!isMealPlanRequest) {
-          // Broadcast messages: visible to everyone
-          if (!message.directed_to) {
-            return true;
-          }
-          // Message directed to current user: always visible
-          return message.directed_to === myProfile.id;
-        }
-
-        // For meal plan request messages, apply company-based visibility rules
-        // Message directed to current user: always visible
-        if (message.directed_to === myProfile.id) {
-          return true;
-        }
-
-        // If no directed_to, don't show (meal plan requests should always be directed)
-        if (!message.directed_to) {
-          return false;
-        }
-
-        // Get the target profile
-        const targetProfile = profileMap[message.directed_to];
-        if (!targetProfile) {
-          return false;
-        }
-
-        // Show to company managers in the same company as the target
-        if (myProfile.role === 'company_manager' && 
-            targetProfile.company_id && 
-            myProfile.company_id === targetProfile.company_id) {
-          return true;
-        }
-
-        return false;
-      });
-
-      console.log('📨 Filtered messages:', visibleMessages.length, 'of', allMessages?.length || 0);
-      setMessages(visibleMessages);
+      console.log('📨 Filtered messages:', messagesData.length);
+      setMessages(messagesData);
+      // Cache the messages
+      setCachedData('messages', messagesData);
     } catch (error) {
       console.error('Error loading messages:', error);
       alert(translations.failedToLoadMessages || 'Failed to load messages');
@@ -360,14 +384,8 @@ export default function DietitianProfile() {
         return;
       }
       
-      // Build query - only show preferences for visible clients
-      let query = supabase
-        .from('user_message_preferences')
-        .select('*', { count: 'exact' })
-        .in('user_code', visibleUserCodes)
-        .order('user_code', { ascending: true });
-      
       // Apply search filter if present
+      let finalUserCodes = visibleUserCodes;
       if (actualSearchTerm && actualSearchTerm.trim()) {
         const searchValue = actualSearchTerm.trim().toLowerCase();
         
@@ -381,18 +399,23 @@ export default function DietitianProfile() {
         
         // If we found matching user codes, filter by them
         if (matchingUserCodes.length > 0) {
-          query = query.in('user_code', matchingUserCodes);
+          finalUserCodes = matchingUserCodes;
         } else {
           // If no matches found, search will return empty
-          query = query.in('user_code', ['_no_match_']);
+          finalUserCodes = [];
         }
       }
       
-      query = query.range(from, to);
+      // Build query parameters for API call
+      const params = new URLSearchParams();
+      finalUserCodes.forEach(code => params.append('user_code', code));
+      params.append('from', from);
+      params.append('to', to);
       
-      const { data, error, count } = await query;
+      const result = await apiCall(`/user-message-preferences?${params.toString()}`);
       
-      if (error) throw error;
+      const data = result.data || [];
+      const count = result.count || 0;
       
       if (reset) {
         setUserPreferences(data || []);
@@ -425,12 +448,10 @@ export default function DietitianProfile() {
   const saveUserPreference = async (preference) => {
     try {
       setIsSavingPreference(true);
-      const { error } = await supabase
-        .from('user_message_preferences')
-        .update(preference)
-        .eq('id', preference.id);
-      
-      if (error) throw error;
+      await apiCall(`/user-message-preferences/${preference.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(preference)
+      });
       
       // Update the preference in the local state instead of reloading all
       setUserPreferences(prev => 
@@ -446,9 +467,29 @@ export default function DietitianProfile() {
     }
   };
 
-  const loadDashboardData = async () => {
+  const loadDashboardData = async (forceRefresh = false) => {
     try {
       console.log('🔄 Loading dietitian dashboard data...');
+      
+      // Check cache first (unless force refresh)
+      if (!forceRefresh) {
+        const cachedDashboard = getCachedData('dashboard');
+        if (cachedDashboard) {
+          console.log('📦 Using cached dashboard data');
+          setRecentMealPlans(cachedDashboard.recentMealPlans || []);
+          setRecentlyActivatedPlans(cachedDashboard.recentlyActivatedPlans || []);
+          setRecentMessages(cachedDashboard.recentMessages || []);
+          setClientActivity(cachedDashboard.clientActivity || []);
+          setRecentWeightLogs(cachedDashboard.recentWeightLogs || []);
+          setDashboardStats(cachedDashboard.dashboardStats || {
+            totalClients: 0,
+            activeMealPlans: 0,
+            totalMessages: 0,
+            recentActivity: 0
+          });
+          return;
+        }
+      }
       
       // Get list of user codes that this dietitian can see (already filtered by role in ClientContext)
       const visibleUserCodes = clients.map(client => client.user_code);
@@ -489,28 +530,13 @@ export default function DietitianProfile() {
       
       // Load recent messages from all conversations
       console.log('🔍 Loading conversations...');
-      const { data: conversationsData, error: convError } = await supabase
-        .from('chat_conversations')
-        .select('id, user_id, started_at')
-        .order('started_at', { ascending: false });
-      
-      if (convError) {
-        console.error('❌ Error loading conversations:', convError);
-        throw convError;
-      }
+      const conversationsData = await apiCall('/chat-conversations?fields=id,user_id,started_at');
       
       console.log('✅ Conversations loaded:', conversationsData?.length || 0, 'records');
       
       // Load user data separately to avoid foreign key conflicts
       console.log('🔍 Loading user data...');
-      const { data: usersData, error: usersError } = await supabase
-        .from('chat_users')
-        .select('id, user_code, full_name');
-      
-      if (usersError) {
-        console.error('❌ Error loading users:', usersError);
-        throw usersError;
-      }
+      const usersData = await apiCall('/chat-users?fields=id,user_code,full_name');
       
       // Create a map of user_id to user data
       const userMap = {};
@@ -590,17 +616,16 @@ export default function DietitianProfile() {
       // Skip chat activity section - removed per user request
       
       // Load recent weight logs ONLY for visible clients
+      let weightLogsData = [];
       try {
-        const { data: weightLogs, error: weightError } = await supabase
-          .from('weight_logs')
-          .select('*')
-          .in('user_code', visibleUserCodes)
-          .order('measurement_date', { ascending: false })
-          .limit(50); // Load more but not all
+        const params = new URLSearchParams();
+        visibleUserCodes.forEach(code => params.append('user_code', code));
+        params.append('limit', '50');
         
-        if (weightError) throw weightError;
-        console.log('📊 Weight logs loaded for visible clients:', weightLogs?.length || 0);
-        setRecentWeightLogs(weightLogs || []);
+        const weightLogs = await apiCall(`/weight-logs?${params.toString()}`);
+        weightLogsData = weightLogs || [];
+        console.log('📊 Weight logs loaded for visible clients:', weightLogsData.length);
+        setRecentWeightLogs(weightLogsData);
       } catch (weightError) {
         console.warn('Error loading weight logs:', weightError);
         setRecentWeightLogs([]);
@@ -649,12 +674,24 @@ export default function DietitianProfile() {
       setClientActivity(activityArray);
       
       // Update stats (using visible/filtered data)
-      setDashboardStats({
+      const stats = {
         totalClients: clients.length,
         activeMealPlans: activeMealPlans.length,
         totalMessages: visibleMessages.length,
         recentActivity: activityArray.length
-      });
+      };
+      setDashboardStats(stats);
+      
+      // Cache the dashboard data
+      const dashboardData = {
+        recentMealPlans: recentPlans,
+        recentlyActivatedPlans: statusChanges,
+        recentMessages: sortedMessages,
+        clientActivity: activityArray,
+        recentWeightLogs: weightLogsData,
+        dashboardStats: stats
+      };
+      setCachedData('dashboard', dashboardData);
       
       console.log('✅ Dashboard data loaded successfully');
     } catch (error) {
@@ -697,12 +734,10 @@ export default function DietitianProfile() {
 
   const toggleActive = async (message) => {
     try {
-      const { error } = await supabase
-        .from('system_messages')
-        .update({ is_active: !message.is_active })
-        .eq('id', message.id);
-
-      if (error) throw error;
+      await apiCall(`/system-messages/${message.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ is_active: !message.is_active })
+      });
       await loadMessages();
       // Notify other components that system messages were updated
       EventBus.emit('systemMessagesUpdated');
@@ -1140,7 +1175,17 @@ export default function DietitianProfile() {
             <p className="text-gray-600">{currentUser?.email}</p>
           </div>
         </div>
-        <div className="flex items-center space-x-2">
+        <div className={`flex items-center ${isRTL ? 'flex-row-reverse space-x-reverse' : 'space-x-2'} space-x-2`}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={refreshAllData}
+            disabled={isRefreshing || isInitialLoading}
+            className={`flex items-center ${isRTL ? 'flex-row-reverse' : ''} gap-2`}
+          >
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''} ${isRTL ? 'ml-1' : 'mr-1'}`} />
+            {isRefreshing ? (translations.refreshing || 'Refreshing...') : (translations.refresh || 'Refresh Data')}
+          </Button>
           <Badge variant="outline" className="text-green-600 border-green-200">
             <CheckCircle className={`h-3 w-3 ${isRTL ? 'ml-1' : 'mr-1'}`} />
             {translations.active || 'Active'}
