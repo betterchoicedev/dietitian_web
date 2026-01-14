@@ -1,30 +1,22 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 
-// Helper function for API calls
-const getBackendUrl = () => {
-  return import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net';
-};
-
-const apiCall = async (endpoint, options = {}) => {
-  const url = `${getBackendUrl()}/api/db${endpoint}`;
-  const defaultOptions = {
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  };
+// Helper function to get active system messages for a user
+const getActiveMessagesForUser = async (user_id) => {
+  // Get all active messages (only fields needed for counting)
+  const { data: allMessages, error } = await supabase
+    .from('system_messages')
+    .select('id, start_date, end_date, priority, directed_to')
+    .eq('is_active', true);
   
-  const response = await fetch(url, { ...defaultOptions, ...options });
-  const result = await response.json().catch(() => ({}));
+  if (error) throw error;
+  if (!allMessages) return [];
   
-  if (!response.ok) {
-    const message = result?.error || `API Error: ${response.status} ${response.statusText}`;
-    throw new Error(message);
-  }
-  
-  return result;
+  // Filter messages: broadcast (directed_to IS NULL) or directed to user
+  return allMessages.filter(msg => {
+    const directed_to = msg.directed_to;
+    return !directed_to || directed_to === user_id;
+  });
 };
 
 /**
@@ -74,12 +66,8 @@ export function useSystemMessages() {
         return;
       }
 
-      // Fetch active messages via API - either broadcast (directed_to IS NULL) or directed to current user
-      const params = new URLSearchParams({
-        user_id: user.id
-      });
-      
-      const data = await apiCall(`/system-messages/active-for-user?${params.toString()}`);
+      // Fetch active messages - either broadcast (directed_to IS NULL) or directed to current user
+      const data = await getActiveMessagesForUser(user.id);
 
       // Filter by date range in JavaScript (more reliable than complex SQL)
       const activeMessages = (data || []).filter(msg => {

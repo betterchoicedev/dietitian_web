@@ -2,30 +2,96 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/contexts/LanguageContext';
 
-// Helper function for API calls
-const getBackendUrl = () => {
-  return import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net';
-};
-
-const apiCall = async (endpoint, options = {}) => {
-  const url = `${getBackendUrl()}/api/db${endpoint}`;
-  const defaultOptions = {
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  };
+// Helper function to get urgent system messages with visibility filtering
+const getUrgentSystemMessages = async (user_id, user_role, user_company_id) => {
+  // Get all urgent active messages
+  const { data: allUrgentMessages, error: messagesError } = await supabase
+    .from('system_messages')
+    .select('*')
+    .eq('is_active', true)
+    .eq('priority', 'urgent')
+    .order('created_at', { ascending: false });
   
-  const response = await fetch(url, { ...defaultOptions, ...options });
-  const result = await response.json().catch(() => ({}));
+  if (messagesError) throw messagesError;
+  if (!allUrgentMessages) return [];
   
-  if (!response.ok) {
-    const message = result?.error || `API Error: ${response.status} ${response.statusText}`;
-    throw new Error(message);
+  // If sys_admin, return all messages
+  if (user_role === 'sys_admin') {
+    return allUrgentMessages;
   }
   
-  return result;
+  // For non-sys_admin users, apply visibility filtering
+  if (!user_id) return [];
+  
+  // Get all profiles for company-based filtering
+  const { data: allProfiles, error: profilesError } = await supabase
+    .from('profiles')
+    .select('id, role, company_id');
+  
+  if (profilesError) {
+    console.warn('Could not fetch profiles, falling back to basic filtering:', profilesError);
+    // Fallback to basic filtering
+    return allUrgentMessages.filter(msg => 
+      !msg.directed_to || msg.directed_to === user_id
+    );
+  }
+  
+  // Create maps for quick lookup
+  const profileMap = {};
+  for (const profile of allProfiles || []) {
+    profileMap[profile.id] = profile;
+  }
+  
+  // Filter messages based on visibility rules
+  const filteredMessages = [];
+  for (const message of allUrgentMessages) {
+    // Check if this is a personalized meal plan request by title
+    const isMealPlanRequest = (
+      message.title === 'בקשה לתוכנית תזונה מותאמת' || 
+      message.title === 'Request for Personalized Meal Plan'
+    );
+    
+    // For non-meal-plan-request messages, use simple filtering
+    if (!isMealPlanRequest) {
+      // Broadcast messages: visible to everyone
+      if (!message.directed_to) {
+        filteredMessages.push(message);
+        continue;
+      }
+      // Message directed to current user: always visible
+      if (message.directed_to === user_id) {
+        filteredMessages.push(message);
+      }
+      continue;
+    }
+    
+    // For meal plan request messages, apply company-based visibility rules
+    // Message directed to current user: always visible
+    if (message.directed_to === user_id) {
+      filteredMessages.push(message);
+      continue;
+    }
+    
+    // If no directed_to, don't show (meal plan requests should always be directed)
+    if (!message.directed_to) {
+      continue;
+    }
+    
+    // Get the target profile
+    const targetProfile = profileMap[message.directed_to];
+    if (!targetProfile) {
+      continue;
+    }
+    
+    // Show to company managers in the same company as the target
+    if (user_role === 'company_manager' && 
+        targetProfile.company_id && 
+        user_company_id === targetProfile.company_id) {
+      filteredMessages.push(message);
+    }
+  }
+  
+  return filteredMessages;
 };
 import {
   Dialog,
@@ -132,14 +198,12 @@ export default function SystemMessageModal() {
       const myProfile = await getMyProfile();
       console.log('👤 Current user profile:', { id: myProfile.id, role: myProfile.role, company_id: myProfile.company_id });
 
-      // Call API endpoint for urgent messages with visibility filtering
-      const params = new URLSearchParams({
-        user_id: myProfile.id,
-        user_role: myProfile.role || '',
-        user_company_id: myProfile.company_id || ''
-      });
-      
-      const allUrgentMessages = await apiCall(`/system-messages/urgent?${params.toString()}`);
+      // Get urgent messages with visibility filtering
+      const allUrgentMessages = await getUrgentSystemMessages(
+        myProfile.id,
+        myProfile.role || '',
+        myProfile.company_id || ''
+      );
 
       // Filter by date range in JavaScript (more reliable than complex SQL)
       const activeUrgentMessages = allUrgentMessages.filter(msg => {

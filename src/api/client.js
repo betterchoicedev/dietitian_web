@@ -1,31 +1,12 @@
 // Local API client implementation
-// Note: All Supabase calls have been replaced with backend API calls
+// All API calls now use direct Supabase calls
 
-// Helper function to get backend URL
-const getBackendUrl = () => {
-  return import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net';
-};
+import { supabase } from '@/lib/supabase';
 
-// Helper function for API calls
-const apiCall = async (endpoint, options = {}) => {
-  const url = `${getBackendUrl()}/api/db${endpoint}`;
-  const defaultOptions = {
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  };
-  
-  const response = await fetch(url, { ...defaultOptions, ...options });
-  const result = await response.json().catch(() => ({}));
-  
-  if (!response.ok) {
-    const message = result?.error || `API Error: ${response.status} ${response.statusText}`;
-    throw new Error(message);
-  }
-  
-  return result;
+// Helper function to handle Supabase errors
+const handleSupabaseError = (error, operation) => {
+  console.error(`❌ Error in ${operation}:`, error);
+  throw new Error(error.message || `Failed to ${operation}`);
 };
 
 // Mock data for local development
@@ -128,87 +109,190 @@ export const entities = {
       const normalized = { ...data, status: data?.status || 'draft' };
       console.log('🏪 Menu.create called with data:', JSON.stringify(normalized, null, 2));
       try {
-        const result = await apiCall('/meal-plans', {
-          method: 'POST',
-          body: JSON.stringify(normalized),
-        });
+        // Check if active menu exists (backend logic)
+        if (normalized.user_code && normalized.status === 'active') {
+          const { data: existing, error: checkError } = await supabase
+            .from('meal_plans_and_schemas')
+            .select('id')
+            .eq('user_code', normalized.user_code)
+            .eq('record_type', 'meal_plan')
+            .eq('status', 'active');
+          
+          if (checkError) throw checkError;
+          if (existing && existing.length > 0) {
+            throw new Error('Cannot create menu: this user already has an active menu. Please deactivate the existing active menu first.');
+          }
+        }
+        
+        // Add change log entry
+        const log_entry = {
+          timestamp: new Date().toISOString(),
+          actor_id: normalized.dietitian_id || 'system',
+          action: 'CREATED',
+          details: {
+            record_type: normalized.record_type,
+            meal_plan_name: normalized.meal_plan_name
+          }
+        };
+        const change_log = normalized.change_log || [];
+        change_log.push(log_entry);
+        normalized.change_log = change_log;
+        
+        const { data: result, error } = await supabase
+          .from('meal_plans_and_schemas')
+          .insert(normalized)
+          .select()
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Menu.create successfully saved:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in Menu.create:', err);
-        throw err;
+        handleSupabaseError(err, 'Menu.create');
       }
     },
     get: async (id) => {
       try {
         console.log('🔍 Getting menu with id:', id);
-        const result = await apiCall(`/meal-plans/${id}`);
+        const { data: result, error } = await supabase
+          .from('meal_plans_and_schemas')
+          .select('*')
+          .eq('id', id)
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Retrieved menu:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in Menu.get:', err);
-        throw err;
+        handleSupabaseError(err, 'Menu.get');
       }
     },
     list: async () => {
       try {
         console.log('📋 Getting all menus');
-        const result = await apiCall('/meal-plans');
+        const { data: result, error } = await supabase
+          .from('meal_plans_and_schemas')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        if (error) throw error;
         console.log('✅ Retrieved menus:', result?.length || 0, 'records');
         return result || [];
       } catch (err) {
-        console.error('❌ Error in Menu.list:', err);
-        throw err;
+        handleSupabaseError(err, 'Menu.list');
       }
     },
     filter: async (query, orderBy = 'created_at') => {
       try {
         console.log('🔍 Filtering menus with query:', query);
-        const result = await apiCall('/meal-plans/filter', {
-          method: 'POST',
-          body: JSON.stringify({ ...query, orderBy }),
-        });
+        let supabaseQuery = supabase.from('meal_plans_and_schemas').select('*');
+        
+        // Apply filters
+        for (const [key, value] of Object.entries(query)) {
+          if (value !== null && value !== undefined) {
+            if (Array.isArray(value)) {
+              if (value.length > 0) {
+                supabaseQuery = supabaseQuery.in_(key, value);
+              } else {
+                // Empty array means no results
+                return [];
+              }
+            } else {
+              supabaseQuery = supabaseQuery.eq(key, value);
+            }
+          }
+        }
+        
+        // Apply ordering
+        const orderColumn = orderBy.replace(/^-/, '');
+        const desc = orderBy.startsWith('-');
+        supabaseQuery = supabaseQuery.order(orderColumn === 'created_date' ? 'created_at' : orderColumn, { ascending: !desc });
+        
+        const { data: result, error } = await supabaseQuery;
+        if (error) throw error;
         console.log('✅ Filtered menus:', result?.length || 0, 'records');
         return result || [];
       } catch (err) {
-        console.error('❌ Error in Menu.filter:', err);
-        throw err;
+        handleSupabaseError(err, 'Menu.filter');
       }
     },
     update: async (id, data) => {
       try {
         console.log('✏️ Updating menu with id:', id, 'data:', data);
-        const result = await apiCall(`/meal-plans/${id}`, {
-          method: 'PUT',
-          body: JSON.stringify(data),
-        });
+        
+        // Get existing change log
+        const { data: existing, error: fetchError } = await supabase
+          .from('meal_plans_and_schemas')
+          .select('change_log')
+          .eq('id', id)
+          .single();
+        
+        if (fetchError) throw fetchError;
+        
+        // Add change log entry
+        const change_log = existing?.change_log || [];
+        const log_entry = {
+          timestamp: new Date().toISOString(),
+          actor_id: data.dietitian_id || 'system',
+          action: 'UPDATED',
+          details: data
+        };
+        change_log.push(log_entry);
+        data.change_log = change_log;
+        data.updated_at = new Date().toISOString();
+        
+        const { data: result, error } = await supabase
+          .from('meal_plans_and_schemas')
+          .update(data)
+          .eq('id', id)
+          .select()
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Updated menu:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in Menu.update:', err);
-        throw err;
+        handleSupabaseError(err, 'Menu.update');
       }
     },
     delete: async (id) => {
       try {
         console.log('🗑️ Deleting menu with id:', id);
-        await apiCall(`/meal-plans/${id}`, { method: 'DELETE' });
+        const { error } = await supabase
+          .from('meal_plans_and_schemas')
+          .delete()
+          .eq('id', id);
+        
+        if (error) throw error;
         console.log('✅ Deleted menu');
         return true;
       } catch (err) {
-        console.error('❌ Error in Menu.delete:', err);
-        throw err;
+        handleSupabaseError(err, 'Menu.delete');
       }
     },
     deleteByUserCode: async (user_code) => {
       try {
         console.log('🗑️ Deleting food logs for user_code:', user_code);
-        await apiCall(`/food-logs/user/${user_code}`, { method: 'DELETE' });
+        // First get user_id from chat_users
+        const { data: user, error: userError } = await supabase
+          .from('chat_users')
+          .select('id')
+          .eq('user_code', user_code)
+          .single();
+        
+        if (userError) throw userError;
+        if (!user) return true;
+        
+        const { error } = await supabase
+          .from('food_logs')
+          .delete()
+          .eq('user_id', user.id);
+        
+        if (error) throw error;
         console.log('✅ Deleted food logs for user_code:', user_code);
         return true;
       } catch (err) {
-        console.error('❌ Error in Menu.deleteByUserCode:', err);
-        throw err;
+        handleSupabaseError(err, 'Menu.deleteByUserCode');
       }
     }
   },
@@ -216,76 +300,100 @@ export const entities = {
     create: async (data) => {
       try {
         console.log('💬 Chat.create called with data:', JSON.stringify(data, null, 2));
-        const result = await apiCall('/chats', {
-          method: 'POST',
-          body: JSON.stringify(data),
-        });
+        const { data: result, error } = await supabase
+          .from('chats')
+          .insert(data)
+          .select()
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Chat created:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in Chat.create:', err);
-        throw err;
+        handleSupabaseError(err, 'Chat.create');
       }
     },
     get: async (id) => {
       try {
         console.log('🔍 Getting chat with id:', id);
-        const result = await apiCall(`/chats/${id}`);
+        const { data: result, error } = await supabase
+          .from('chats')
+          .select('*')
+          .eq('id', id)
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Retrieved chat:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in Chat.get:', err);
-        throw err;
+        handleSupabaseError(err, 'Chat.get');
       }
     },
     list: async () => {
       try {
         console.log('📋 Getting all chats');
-        const result = await apiCall('/chats');
+        const { data: result, error } = await supabase
+          .from('chats')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        if (error) throw error;
         console.log('✅ Retrieved chats:', result?.length || 0, 'records');
         return result || [];
       } catch (err) {
-        console.error('❌ Error in Chat.list:', err);
-        throw err;
+        handleSupabaseError(err, 'Chat.list');
       }
     },
     filter: async (query) => {
       try {
         console.log('🔍 Filtering chats with query:', query);
-        const result = await apiCall('/chats/filter', {
-          method: 'POST',
-          body: JSON.stringify(query),
-        });
+        let supabaseQuery = supabase.from('chats').select('*');
+        
+        for (const [key, value] of Object.entries(query)) {
+          if (value !== null && value !== undefined) {
+            supabaseQuery = supabaseQuery.eq(key, value);
+          }
+        }
+        
+        const { data: result, error } = await supabaseQuery;
+        if (error) throw error;
         console.log('✅ Filtered chats:', result?.length || 0, 'records');
         return result || [];
       } catch (err) {
-        console.error('❌ Error in Chat.filter:', err);
-        throw err;
+        handleSupabaseError(err, 'Chat.filter');
       }
     },
     update: async (id, data) => {
       try {
         console.log('✏️ Updating chat with id:', id, 'data:', data);
-        const result = await apiCall(`/chats/${id}`, {
-          method: 'PUT',
-          body: JSON.stringify(data),
-        });
+        data.updated_at = new Date().toISOString();
+        const { data: result, error } = await supabase
+          .from('chats')
+          .update(data)
+          .eq('id', id)
+          .select()
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Updated chat:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in Chat.update:', err);
-        throw err;
+        handleSupabaseError(err, 'Chat.update');
       }
     },
     delete: async (id) => {
       try {
         console.log('🗑️ Deleting chat with id:', id);
-        await apiCall(`/chats/${id}`, { method: 'DELETE' });
+        const { error } = await supabase
+          .from('chats')
+          .delete()
+          .eq('id', id);
+        
+        if (error) throw error;
         console.log('✅ Deleted chat');
         return true;
       } catch (err) {
-        console.error('❌ Error in Chat.delete:', err);
-        throw err;
+        handleSupabaseError(err, 'Chat.delete');
       }
     }
   },
@@ -293,84 +401,118 @@ export const entities = {
     create: async (data) => {
       try {
         console.log('👤 Creating new chat user with data:', JSON.stringify(data, null, 2));
-        const result = await apiCall('/chat-users', {
-          method: 'POST',
-          body: JSON.stringify(data),
-        });
+        const { data: result, error } = await supabase
+          .from('chat_users')
+          .insert(data)
+          .select()
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Chat user created:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in ChatUser.create:', err);
-        throw err;
+        handleSupabaseError(err, 'ChatUser.create');
       }
     },
-    list: async () => {
+    list: async (fields = '*') => {
       try {
         console.log('👥 Getting all chat users');
-        const result = await apiCall('/chat-users');
+        const selectFields = fields === '*' ? '*' : fields.join(',');
+        const { data: result, error } = await supabase
+          .from('chat_users')
+          .select(selectFields)
+          .order('full_name');
+        
+        if (error) throw error;
         console.log('✅ Retrieved chat users:', result?.length || 0, 'records');
         return result || [];
       } catch (err) {
-        console.error('❌ Error in ChatUser.list:', err);
-        throw err;
+        handleSupabaseError(err, 'ChatUser.list');
       }
     },
-    get: async (userCode) => {
+    get: async (userCode, fields = '*') => {
       try {
         console.log('🔍 Getting chat user with user_code:', userCode);
-        const result = await apiCall(`/chat-users/${userCode}`);
+        const selectFields = fields === '*' ? '*' : fields.join(',');
+        const { data: result, error } = await supabase
+          .from('chat_users')
+          .select(selectFields)
+          .eq('user_code', userCode)
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Retrieved chat user:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in ChatUser.get:', err);
-        throw err;
+        handleSupabaseError(err, 'ChatUser.get');
       }
     },
     getByUserCode: async (userCode) => {
       try {
         console.log('🔍 Getting chat user with user_code:', userCode);
-        const result = await apiCall(`/chat-users/${userCode}`);
+        const { data: result, error } = await supabase
+          .from('chat_users')
+          .select('*')
+          .eq('user_code', userCode)
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Retrieved chat user with full profile:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in ChatUser.getByUserCode:', err);
-        throw err;
+        handleSupabaseError(err, 'ChatUser.getByUserCode');
       }
     },
     update: async (userCode, data) => {
       try {
         console.log('✏️ Updating chat user with user_code:', userCode, 'data:', data);
-        const result = await apiCall(`/chat-users/${userCode}`, {
-          method: 'PUT',
-          body: JSON.stringify(data),
-        });
+        const { data: result, error } = await supabase
+          .from('chat_users')
+          .update(data)
+          .eq('user_code', userCode)
+          .select()
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Updated chat user:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in ChatUser.update:', err);
-        throw err;
+        handleSupabaseError(err, 'ChatUser.update');
       }
     },
     delete: async (userCode) => {
       try {
         console.log('🗑️ Deleting chat user with user_code:', userCode);
-        await apiCall(`/chat-users/${userCode}`, { method: 'DELETE' });
+        const { error } = await supabase
+          .from('chat_users')
+          .delete()
+          .eq('user_code', userCode);
+        
+        if (error) throw error;
         console.log('✅ Deleted chat user');
         return true;
       } catch (err) {
-        console.error('❌ Error in ChatUser.delete:', err);
-        throw err;
+        handleSupabaseError(err, 'ChatUser.delete');
       }
     },
     getMealPlanByUserCode: async (userCode) => {
       try {
         console.log('🍽️ Getting active meal plan for user_code:', userCode);
-        const result = await apiCall(`/chat-users/${userCode}/meal-plan`);
+        const { data: result, error } = await supabase
+          .from('meal_plans_and_schemas')
+          .select('meal_plan, daily_total_calories, macros_target, recommendations, dietary_restrictions')
+          .eq('user_code', userCode)
+          .eq('record_type', 'meal_plan')
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (error) throw error;
         console.log('✅ Retrieved active meal plan:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in ChatUser.getMealPlanByUserCode:', err);
-        throw err;
+        handleSupabaseError(err, 'ChatUser.getMealPlanByUserCode');
       }
     }
   },
@@ -378,26 +520,47 @@ export const entities = {
     list: async () => {
       try {
         console.log('📋 Fetching profiles with company info');
-        const result = await apiCall('/profiles');
+        const { data: result, error } = await supabase
+          .from('profiles')
+          .select('id, role, company_id, name, created_at, company:companies(id, name)')
+          .order('created_at', { ascending: false });
+        
+        if (error) throw error;
         console.log('✅ Retrieved profiles:', result?.length || 0, 'records');
         return result || [];
       } catch (err) {
-        console.error('❌ Error in Profiles.list:', err);
-        throw err;
+        handleSupabaseError(err, 'Profiles.list');
+      }
+    },
+    getBasic: async () => {
+      try {
+        console.log('📋 Fetching basic profile information');
+        const { data: result, error } = await supabase
+          .from('profiles')
+          .select('id, role, company_id');
+        
+        if (error) throw error;
+        console.log('✅ Retrieved basic profiles:', result?.length || 0, 'records');
+        return result || [];
+      } catch (err) {
+        handleSupabaseError(err, 'Profiles.getBasic');
       }
     },
     update: async (id, data) => {
       try {
         console.log('✏️ Updating profile:', id, 'with data:', data);
-        const result = await apiCall(`/profiles/${id}`, {
-          method: 'PUT',
-          body: JSON.stringify(data),
-        });
+        const { data: result, error } = await supabase
+          .from('profiles')
+          .update(data)
+          .eq('id', id)
+          .select()
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Updated profile:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in Profiles.update:', err);
-        throw err;
+        handleSupabaseError(err, 'Profiles.update');
       }
     }
   },
@@ -405,26 +568,33 @@ export const entities = {
     list: async () => {
       try {
         console.log('🏢 Fetching companies list');
-        const result = await apiCall('/companies');
+        const { data: result, error } = await supabase
+          .from('companies')
+          .select('id, name')
+          .order('name');
+        
+        if (error) throw error;
         console.log('✅ Retrieved companies:', result?.length || 0, 'records');
         return result || [];
       } catch (err) {
-        console.error('❌ Error in Companies.list:', err);
-        throw err;
+        handleSupabaseError(err, 'Companies.list');
       }
     },
     create: async (name) => {
       try {
         console.log('🏢 Creating company:', name);
-        const result = await apiCall('/companies', {
-          method: 'POST',
-          body: JSON.stringify({ name }),
-        });
+        if (!name) throw new Error('Company name is required');
+        const { data: result, error } = await supabase
+          .from('companies')
+          .insert({ name })
+          .select()
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Company created:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in Companies.create:', err);
-        throw err;
+        handleSupabaseError(err, 'Companies.create');
       }
     },
   },
@@ -432,74 +602,102 @@ export const entities = {
     getByUserCode: async (userCode) => {
       try {
         console.log('⚖️ Getting weight logs for user_code:', userCode);
-        const result = await apiCall(`/weight-logs/user/${userCode}`);
+        const { data: result, error } = await supabase
+          .from('weight_logs')
+          .select('*')
+          .eq('user_code', userCode)
+          .order('measurement_date');
+        
+        if (error) throw error;
         console.log('✅ Retrieved weight logs:', result?.length || 0, 'records');
         return result || [];
       } catch (err) {
-        console.error('❌ Error in WeightLogs.getByUserCode:', err);
-        throw err;
+        handleSupabaseError(err, 'WeightLogs.getByUserCode');
       }
     },
-    list: async () => {
+    list: async (userCode = null, userCodes = null, limit = null) => {
       try {
         console.log('⚖️ Getting all weight logs');
-        const result = await apiCall('/weight-logs');
+        let query = supabase.from('weight_logs').select('*');
+        
+        if (userCode) {
+          query = query.eq('user_code', userCode);
+        } else if (userCodes && Array.isArray(userCodes) && userCodes.length > 0) {
+          query = query.in_('user_code', userCodes);
+        }
+        
+        if (limit) query = query.limit(limit);
+        query = query.order('measurement_date', { ascending: false });
+        
+        const { data: result, error } = await query;
+        if (error) throw error;
         console.log('✅ Retrieved all weight logs:', result?.length || 0, 'records');
         return result || [];
       } catch (err) {
-        console.error('❌ Error in WeightLogs.list:', err);
-        throw err;
+        handleSupabaseError(err, 'WeightLogs.list');
       }
     },
     getUniqueUserCodes: async () => {
       try {
         console.log('⚖️ Getting unique user codes with weight logs');
-        const allLogs = await apiCall('/weight-logs');
+        const { data: allLogs, error } = await supabase
+          .from('weight_logs')
+          .select('user_code');
+        
+        if (error) throw error;
         const uniqueUserCodes = [...new Set(allLogs.map(item => item.user_code).filter(Boolean))];
         console.log('✅ Retrieved unique user codes with weight logs:', uniqueUserCodes);
         return uniqueUserCodes;
       } catch (err) {
-        console.error('❌ Error in WeightLogs.getUniqueUserCodes:', err);
-        throw err;
+        handleSupabaseError(err, 'WeightLogs.getUniqueUserCodes');
       }
     },
     create: async (data) => {
       try {
         console.log('⚖️ Creating weight log entry:', JSON.stringify(data, null, 2));
-        const result = await apiCall('/weight-logs', {
-          method: 'POST',
-          body: JSON.stringify(data),
-        });
+        const { data: result, error } = await supabase
+          .from('weight_logs')
+          .insert(data)
+          .select()
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Created weight log entry:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in WeightLogs.create:', err);
-        throw err;
+        handleSupabaseError(err, 'WeightLogs.create');
       }
     },
     update: async (id, data) => {
       try {
         console.log('✏️ Updating weight log entry:', id, JSON.stringify(data, null, 2));
-        const result = await apiCall(`/weight-logs/${id}`, {
-          method: 'PUT',
-          body: JSON.stringify(data),
-        });
+        const { data: result, error } = await supabase
+          .from('weight_logs')
+          .update(data)
+          .eq('id', id)
+          .select()
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Updated weight log entry:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in WeightLogs.update:', err);
-        throw err;
+        handleSupabaseError(err, 'WeightLogs.update');
       }
     },
     delete: async (id) => {
       try {
         console.log('🗑️ Deleting weight log entry:', id);
-        await apiCall(`/weight-logs/${id}`, { method: 'DELETE' });
+        const { error } = await supabase
+          .from('weight_logs')
+          .delete()
+          .eq('id', id);
+        
+        if (error) throw error;
         console.log('✅ Deleted weight log entry');
         return true;
       } catch (err) {
-        console.error('❌ Error in WeightLogs.delete:', err);
-        throw err;
+        handleSupabaseError(err, 'WeightLogs.delete');
       }
     }
   },
@@ -536,15 +734,23 @@ export const entities = {
     filter: async (query) => {
       try {
         console.log('🔍 Filtering clients with query:', query);
-        const result = await apiCall('/clients/filter', {
-          method: 'POST',
-          body: JSON.stringify(query),
-        });
+        let supabaseQuery = supabase.from('chat_users').select('*');
+        
+        if (query.dietitian_id) {
+          supabaseQuery = supabaseQuery.eq('provider_id', query.dietitian_id);
+        }
+        if (query.code) {
+          supabaseQuery = supabaseQuery.eq('user_code', query.code);
+        }
+        
+        supabaseQuery = supabaseQuery.order('full_name');
+        const { data: result, error } = await supabaseQuery;
+        
+        if (error) throw error;
         console.log('✅ Retrieved filtered clients:', result?.length || 0, 'records');
         return result || [];
       } catch (err) {
-        console.error('❌ Error in Client.filter:', err);
-        throw err;
+        handleSupabaseError(err, 'Client.filter');
       }
     },
     update: async (id, data) => {
@@ -563,23 +769,127 @@ export const entities = {
     getByUserCode: async (user_code) => {
       try {
         console.log('🍽️ Getting food logs for user_code:', user_code);
-        const result = await apiCall(`/food-logs/user/${user_code}`);
+        // First get user_id from chat_users
+        const { data: user, error: userError } = await supabase
+          .from('chat_users')
+          .select('id')
+          .eq('user_code', user_code)
+          .single();
+        
+        if (userError) throw userError;
+        if (!user) return [];
+        
+        const { data: result, error } = await supabase
+          .from('food_logs')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('log_date', { ascending: false });
+        
+        if (error) throw error;
         console.log('✅ Retrieved food logs:', result?.length || 0, 'records');
         return result || [];
       } catch (err) {
-        console.error('❌ Error in FoodLogs.getByUserCode:', err);
-        throw err;
+        handleSupabaseError(err, 'FoodLogs.getByUserCode');
       }
     },
     analyzePreferences: async (user_code) => {
       try {
         console.log('🔍 Analyzing food preferences for user_code:', user_code);
-        const result = await apiCall(`/food-logs/analyze/${user_code}`);
-        console.log('✅ Food preferences analysis completed:', result);
-        return result;
+        // Get user_id
+        const { data: user, error: userError } = await supabase
+          .from('chat_users')
+          .select('id')
+          .eq('user_code', user_code)
+          .single();
+        
+        if (userError) throw userError;
+        if (!user) return null;
+        
+        // Get food logs
+        const { data: foodLogs, error: logsError } = await supabase
+          .from('food_logs')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('log_date', { ascending: false });
+        
+        if (logsError) throw logsError;
+        if (!foodLogs || foodLogs.length === 0) return null;
+        
+        // Analyze preferences (same logic as backend)
+        const all_food_items = [];
+        for (const log of foodLogs) {
+          if (log.food_items) {
+            const items = Array.isArray(log.food_items) ? log.food_items : [log.food_items];
+            for (const item of items) {
+              if (item && item.name) {
+                all_food_items.push({
+                  name: item.name,
+                  meal_label: log.meal_label,
+                  date: log.log_date
+                });
+              }
+            }
+          }
+        }
+        
+        // Count frequencies
+        const food_frequency = {};
+        for (const item of all_food_items) {
+          const name = item.name.toLowerCase().trim();
+          food_frequency[name] = (food_frequency[name] || 0) + 1;
+        }
+        
+        // Get top 10 foods
+        const sorted_foods = Object.entries(food_frequency)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10);
+        
+        // Analyze meal patterns
+        const meal_counts = {};
+        const foods_by_meal = {};
+        
+        for (const log of foodLogs) {
+          const meal_label = log.meal_label;
+          if (meal_label) {
+            meal_counts[meal_label] = (meal_counts[meal_label] || 0) + 1;
+            
+            if (!foods_by_meal[meal_label]) {
+              foods_by_meal[meal_label] = {};
+            }
+            
+            if (log.food_items) {
+              const items = Array.isArray(log.food_items) ? log.food_items : [log.food_items];
+              for (const item of items) {
+                if (item && item.name) {
+                  const food_name = item.name.toLowerCase().trim();
+                  foods_by_meal[meal_label][food_name] = (foods_by_meal[meal_label][food_name] || 0) + 1;
+                }
+              }
+            }
+          }
+        }
+        
+        // Sort foods by meal
+        const foods_by_meal_sorted = {};
+        for (const [meal, foods] of Object.entries(foods_by_meal)) {
+          const sorted_meal_foods = Object.entries(foods)
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, count]) => ({ name, count }));
+          foods_by_meal_sorted[meal] = sorted_meal_foods;
+        }
+        
+        const preferences = {
+          frequently_consumed_foods: sorted_foods.map(([name]) => name),
+          meal_patterns: meal_counts,
+          foods_by_meal: foods_by_meal_sorted,
+          total_logs: foodLogs.length,
+          analysis_date: new Date().toISOString()
+        };
+        
+        console.log('✅ Food preferences analysis completed:', preferences);
+        return preferences;
       } catch (err) {
-        console.error('❌ Error analyzing food preferences:', err);
-        throw err;
+        handleSupabaseError(err, 'FoodLogs.analyzePreferences');
       }
     }
   },
@@ -587,47 +897,89 @@ export const entities = {
     create: async (messageData) => {
       try {
         console.log('💬 ChatMessage.create called with data:', JSON.stringify(messageData, null, 2));
-        const result = await apiCall('/chat-messages', {
-          method: 'POST',
-          body: JSON.stringify(messageData),
-        });
+        const { data: result, error } = await supabase
+          .from('chat_messages')
+          .insert(messageData)
+          .select()
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Chat message created:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in ChatMessage.create:', err);
-        throw err;
+        handleSupabaseError(err, 'ChatMessage.create');
       }
     },
     listByConversation: async (conversation_id, { limit = 20, beforeMessageId = null } = {}) => {
       try {
-        const params = new URLSearchParams({ limit: limit.toString() });
-        if (beforeMessageId) params.set('beforeMessageId', beforeMessageId);
-        const result = await apiCall(`/chat-messages/conversation/${conversation_id}?${params}`);
+        let query = supabase
+          .from('chat_messages')
+          .select('*')
+          .eq('conversation_id', conversation_id)
+          .order('created_at', { ascending: false })
+          .limit(limit);
+        
+        if (beforeMessageId) {
+          query = query.lt('id', beforeMessageId);
+        }
+        
+        const { data: result, error } = await query;
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        throw new Error(err.message);
+        handleSupabaseError(err, 'ChatMessage.listByConversation');
       }
     },
     deleteByConversation: async (conversation_id) => {
       try {
         console.log('🗑️ Deleting chat messages for conversation:', conversation_id);
-        await apiCall(`/chat-messages/conversation/${conversation_id}`, { method: 'DELETE' });
+        const { error } = await supabase
+          .from('chat_messages')
+          .delete()
+          .eq('conversation_id', conversation_id);
+        
+        if (error) throw error;
         console.log('✅ Deleted chat messages for conversation:', conversation_id);
         return true;
       } catch (err) {
-        console.error('❌ Error in ChatMessage.deleteByConversation:', err);
-        throw err;
+        handleSupabaseError(err, 'ChatMessage.deleteByConversation');
       }
     },
     deleteByUserCode: async (user_code) => {
       try {
         console.log('🗑️ Deleting chat messages for user_code:', user_code);
-        await apiCall(`/chat-messages/user/${user_code}`, { method: 'DELETE' });
+        // Get user_id
+        const { data: user, error: userError } = await supabase
+          .from('chat_users')
+          .select('id')
+          .eq('user_code', user_code)
+          .single();
+        
+        if (userError) throw userError;
+        if (!user) return true;
+        
+        // Get conversations
+        const { data: conversations, error: convError } = await supabase
+          .from('chat_conversations')
+          .select('id')
+          .eq('user_id', user.id);
+        
+        if (convError) throw convError;
+        if (!conversations || conversations.length === 0) return true;
+        
+        const conversation_ids = conversations.map(c => c.id);
+        
+        // Delete messages
+        const { error } = await supabase
+          .from('chat_messages')
+          .delete()
+          .in_('conversation_id', conversation_ids);
+        
+        if (error) throw error;
         console.log('✅ Deleted chat messages for user_code:', user_code);
         return true;
       } catch (err) {
-        console.error('❌ Error in ChatMessage.deleteByUserCode:', err);
-        throw err;
+        handleSupabaseError(err, 'ChatMessage.deleteByUserCode');
       }
     },
   },
@@ -639,158 +991,279 @@ export const entities = {
         if (!queueData.conversation_id || !queueData.client_id || !queueData.dietitian_id) {
           throw new Error('Missing required fields: conversation_id, client_id, and dietitian_id are required');
         }
-        const result = await apiCall('/message-queue', {
-          method: 'POST',
-          body: JSON.stringify(queueData),
-        });
+        const { data: result, error } = await supabase
+          .from('message_queue')
+          .insert(queueData)
+          .select()
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Message added to queue:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in MessageQueue.addToQueue:', err);
-        throw err;
+        handleSupabaseError(err, 'MessageQueue.addToQueue');
       }
     },
     getPendingForUser: async (userCode) => {
       try {
         console.log('📬 Getting pending messages for user:', userCode);
-        const result = await apiCall(`/message-queue/user/${userCode}`);
+        const { data: result, error } = await supabase
+          .from('message_queue')
+          .select('*')
+          .eq('user_code', userCode)
+          .order('created_at', { ascending: false });
+        
+        if (error) throw error;
         const pending = (result || []).filter(msg => msg.status === 'pending');
         console.log('✅ Retrieved pending messages from queue:', pending.length, 'records');
         return pending;
       } catch (err) {
-        console.error('❌ Error in MessageQueue.getPendingForUser:', err);
-        throw err;
+        handleSupabaseError(err, 'MessageQueue.getPendingForUser');
       }
     },
     getPendingForClient: async (clientId) => {
       try {
         console.log('📬 Getting pending messages for client ID:', clientId);
-        const result = await apiCall(`/message-queue/client/${clientId}`);
+        const { data: result, error } = await supabase
+          .from('message_queue')
+          .select('*')
+          .eq('client_id', clientId)
+          .eq('status', 'pending')
+          .order('priority', { ascending: false })
+          .order('created_at');
+        
+        if (error) throw error;
         console.log('✅ Retrieved pending messages for client:', result?.length || 0, 'records');
         return result || [];
       } catch (err) {
-        console.error('❌ Error in MessageQueue.getPendingForClient:', err);
-        throw err;
+        handleSupabaseError(err, 'MessageQueue.getPendingForClient');
       }
     },
     getByDietitian: async (dietitianId, { status = null, limit = 100, offset = 0 } = {}) => {
       try {
         console.log('📬 Getting messages by dietitian:', dietitianId);
-        const params = new URLSearchParams({ limit: limit.toString(), offset: offset.toString() });
-        if (status) params.set('status', status);
-        const result = await apiCall(`/message-queue/dietitian/${dietitianId}?${params}`);
+        let query = supabase
+          .from('message_queue')
+          .select('*')
+          .eq('dietitian_id', dietitianId)
+          .order('created_at', { ascending: false })
+          .range(offset, offset + limit - 1);
+        
+        if (status) query = query.eq('status', status);
+        
+        const { data: result, error } = await query;
+        if (error) throw error;
         console.log('✅ Retrieved messages by dietitian:', result?.length || 0, 'records');
         return result || [];
       } catch (err) {
-        console.error('❌ Error in MessageQueue.getByDietitian:', err);
-        throw err;
+        handleSupabaseError(err, 'MessageQueue.getByDietitian');
       }
     },
     updateStatus: async (messageId, status, additionalData = {}) => {
       try {
         console.log('📬 Updating message status:', messageId, 'to:', status);
-        const result = await apiCall(`/message-queue/${messageId}`, {
-          method: 'PUT',
-          body: JSON.stringify({ status, ...additionalData }),
-        });
+        const updateData = {
+          status,
+          updated_at: new Date().toISOString(),
+          ...additionalData
+        };
+        
+        if (status === 'sent') {
+          updateData.processed_at = new Date().toISOString();
+        }
+        
+        const { data: result, error } = await supabase
+          .from('message_queue')
+          .update(updateData)
+          .eq('id', messageId)
+          .select()
+          .single();
+        
+        if (error) throw error;
         console.log('✅ Message status updated in queue:', result);
         return result;
       } catch (err) {
-        console.error('❌ Error in MessageQueue.updateStatus:', err);
-        throw err;
+        handleSupabaseError(err, 'MessageQueue.updateStatus');
       }
     },
     listAll: async ({ status = null, limit = 100, offset = 0 } = {}) => {
       try {
         console.log('📬 Getting all messages from queue');
-        const params = new URLSearchParams({ limit: limit.toString(), offset: offset.toString() });
-        if (status) params.set('status', status);
-        const result = await apiCall(`/message-queue?${params}`);
+        let query = supabase
+          .from('message_queue')
+          .select('*, chat_conversations!inner(id, started_at), chat_users!inner(id, full_name, user_code)')
+          .order('priority', { ascending: false })
+          .order('created_at', { ascending: false })
+          .range(offset, offset + limit - 1);
+        
+        if (status) query = query.eq('status', status);
+        
+        const { data: result, error } = await query;
+        if (error) throw error;
         console.log('✅ Retrieved messages from queue:', result?.length || 0, 'records');
         return result || [];
       } catch (err) {
-        console.error('❌ Error in MessageQueue.listAll:', err);
-        throw err;
+        handleSupabaseError(err, 'MessageQueue.listAll');
       }
     },
     listByUserCode: async (user_code) => {
       try {
         console.log('📬 Listing queued messages for user_code:', user_code);
-        const result = await apiCall(`/message-queue/user/${user_code}`);
+        const { data: result, error } = await supabase
+          .from('message_queue')
+          .select('*')
+          .eq('user_code', user_code)
+          .order('created_at', { ascending: false });
+        
+        if (error) throw error;
         console.log('✅ Retrieved queued messages for user_code:', user_code, 'count:', result?.length || 0);
         return result || [];
       } catch (err) {
-        console.error('❌ Error in MessageQueue.listByUserCode:', err);
-        throw err;
+        handleSupabaseError(err, 'MessageQueue.listByUserCode');
       }
     },
     deleteByConversation: async (conversation_id) => {
       try {
         console.log('🗑️ Deleting queued messages for conversation:', conversation_id);
-        await apiCall(`/message-queue/conversation/${conversation_id}`, { method: 'DELETE' });
+        const { error } = await supabase
+          .from('message_queue')
+          .delete()
+          .eq('conversation_id', conversation_id);
+        
+        if (error) throw error;
         console.log('✅ Deleted queued messages for conversation:', conversation_id);
         return true;
       } catch (err) {
-        console.error('❌ Error in MessageQueue.deleteByConversation:', err);
-        throw err;
+        handleSupabaseError(err, 'MessageQueue.deleteByConversation');
       }
     },
     deleteByUserCode: async (user_code) => {
       try {
         console.log('🗑️ Deleting queued messages for user_code:', user_code);
-        await apiCall(`/message-queue/user/${user_code}`, { method: 'DELETE' });
+        const { error } = await supabase
+          .from('message_queue')
+          .delete()
+          .eq('user_code', user_code);
+        
+        if (error) throw error;
         console.log('✅ Deleted queued messages for user_code:', user_code);
         return true;
       } catch (err) {
-        console.error('❌ Error in MessageQueue.deleteByUserCode:', err);
-        throw err;
+        handleSupabaseError(err, 'MessageQueue.deleteByUserCode');
       }
     },
   },
   ChatConversation: {
+    list: async (fields = '*') => {
+      try {
+        console.log('📃 Listing all chat conversations');
+        const selectFields = fields === '*' ? '*' : fields.join(',');
+        const { data: result, error } = await supabase
+          .from('chat_conversations')
+          .select(selectFields)
+          .order('started_at', { ascending: false });
+        
+        if (error) throw error;
+        console.log('✅ Retrieved all chat conversations:', result?.length || 0, 'records');
+        return result || [];
+      } catch (err) {
+        handleSupabaseError(err, 'ChatConversation.list');
+      }
+    },
     getByUserId: async (user_id) => {
       // Note: This requires user_code, use getByUserCode instead
       throw new Error('getByUserId requires user_code. Use getByUserCode instead.');
     },
     getByUserCode: async (user_code) => {
       try {
-        const result = await apiCall(`/chat-conversations/user/${user_code}`);
+        // Get user_id from chat_users
+        const { data: user, error: userError } = await supabase
+          .from('chat_users')
+          .select('id')
+          .eq('user_code', user_code)
+          .single();
+        
+        if (userError) throw userError;
+        if (!user) return null;
+        
+        const { data: result, error } = await supabase
+          .from('chat_conversations')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('started_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (error) throw error;
         return result;
       } catch (err) {
-        throw new Error(err.message);
+        handleSupabaseError(err, 'ChatConversation.getByUserCode');
       }
     },
     listByUserCode: async (user_code) => {
       try {
         console.log('📃 Listing chat conversations for user_code:', user_code);
-        const result = await apiCall(`/chat-conversations/user/${user_code}/list`);
+        // Get user_id from chat_users
+        const { data: user, error: userError } = await supabase
+          .from('chat_users')
+          .select('id')
+          .eq('user_code', user_code)
+          .single();
+        
+        if (userError) throw userError;
+        if (!user) return [];
+        
+        const { data: result, error } = await supabase
+          .from('chat_conversations')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('started_at', { ascending: false });
+        
+        if (error) throw error;
         console.log('✅ Retrieved chat conversations for user_code:', user_code, 'count:', result?.length || 0);
         return result || [];
       } catch (err) {
-        console.error('❌ Error in ChatConversation.listByUserCode:', err);
-        throw err;
+        handleSupabaseError(err, 'ChatConversation.listByUserCode');
       }
     },
     delete: async (id) => {
       try {
         console.log('🗑️ Deleting chat conversation with id:', id);
-        await apiCall(`/chat-conversations/${id}`, { method: 'DELETE' });
+        const { error } = await supabase
+          .from('chat_conversations')
+          .delete()
+          .eq('id', id);
+        
+        if (error) throw error;
         console.log('✅ Deleted chat conversation with id:', id);
         return true;
       } catch (err) {
-        console.error('❌ Error in ChatConversation.delete:', err);
-        throw err;
+        handleSupabaseError(err, 'ChatConversation.delete');
       }
     },
     deleteByUserCode: async (user_code) => {
       try {
         console.log('🗑️ Deleting chat conversations for user_code:', user_code);
-        await apiCall(`/chat-conversations/user/${user_code}`, { method: 'DELETE' });
+        // Get user_id from chat_users
+        const { data: user, error: userError } = await supabase
+          .from('chat_users')
+          .select('id')
+          .eq('user_code', user_code)
+          .single();
+        
+        if (userError) throw userError;
+        if (!user) return true;
+        
+        const { error } = await supabase
+          .from('chat_conversations')
+          .delete()
+          .eq('user_id', user.id);
+        
+        if (error) throw error;
         console.log('✅ Deleted chat conversations for user_code:', user_code);
         return true;
       } catch (err) {
-        console.error('❌ Error in ChatConversation.deleteByUserCode:', err);
-        throw err;
+        handleSupabaseError(err, 'ChatConversation.deleteByUserCode');
       }
     }
   },
@@ -799,111 +1272,176 @@ export const entities = {
   TrainingPlans: {
     getByUserCode: async (userCode) => {
       try {
-        const result = await apiCall(`/training-plans/user/${userCode}`);
+        const { data: result, error } = await supabase
+          .from('training_plans')
+          .select('*')
+          .eq('user_code', userCode)
+          .order('created_at', { ascending: false });
+        
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        console.error('❌ Error fetching training plans:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingPlans.getByUserCode');
       }
     },
     getAll: async () => {
       try {
-        const result = await apiCall('/training-plans');
+        const { data: result, error } = await supabase
+          .from('training_plans')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        console.error('❌ Error fetching all training plans:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingPlans.getAll');
       }
     },
     getActive: async (userCode) => {
       try {
-        const result = await apiCall(`/training-plans/user/${userCode}/active`);
+        const { data: result, error } = await supabase
+          .from('training_plans')
+          .select('*')
+          .eq('user_code', userCode)
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (error) throw error;
         return result || null;
       } catch (err) {
-        console.error('❌ Error fetching active training plan:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingPlans.getActive');
       }
     },
     create: async (planData) => {
       try {
-        const result = await apiCall('/training-plans', {
-          method: 'POST',
-          body: JSON.stringify(planData),
-        });
+        // If setting as active, deactivate other plans (backend logic)
+        if (planData.status === 'active' && planData.user_code) {
+          await supabase
+            .from('training_plans')
+            .update({ status: 'archived' })
+            .eq('user_code', planData.user_code)
+            .eq('status', 'active');
+        }
+        
+        const { data: result, error } = await supabase
+          .from('training_plans')
+          .insert(planData)
+          .select()
+          .single();
+        
+        if (error) throw error;
         return result;
       } catch (err) {
-        console.error('❌ Error creating training plan:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingPlans.create');
       }
     },
     update: async (id, updates) => {
       try {
-        const result = await apiCall(`/training-plans/${id}`, {
-          method: 'PUT',
-          body: JSON.stringify(updates),
-        });
+        updates.updated_at = new Date().toISOString();
+        const { data: result, error } = await supabase
+          .from('training_plans')
+          .update(updates)
+          .eq('id', id)
+          .select()
+          .single();
+        
+        if (error) throw error;
         return result;
       } catch (err) {
-        console.error('❌ Error updating training plan:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingPlans.update');
       }
     },
     delete: async (id) => {
       try {
-        await apiCall(`/training-plans/${id}`, { method: 'DELETE' });
+        const { error } = await supabase
+          .from('training_plans')
+          .delete()
+          .eq('id', id);
+        
+        if (error) throw error;
         return true;
       } catch (err) {
-        console.error('❌ Error deleting training plan:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingPlans.delete');
       }
     },
   },
   TrainingLogs: {
     getByUserCode: async (userCode, limit = 50) => {
       try {
-        const result = await apiCall(`/training-logs/user/${userCode}?limit=${limit}`);
+        const { data: result, error } = await supabase
+          .from('training_logs')
+          .select('*')
+          .eq('user_code', userCode)
+          .order('session_date', { ascending: false })
+          .limit(limit);
+        
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        console.error('❌ Error fetching training logs:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingLogs.getByUserCode');
       }
     },
     getByDateRange: async (userCode, startDate, endDate) => {
       try {
-        const result = await apiCall(`/training-logs/user/${userCode}/range?startDate=${startDate}&endDate=${endDate}`);
+        const { data: result, error } = await supabase
+          .from('training_logs')
+          .select('*')
+          .eq('user_code', userCode)
+          .gte('session_date', startDate)
+          .lte('session_date', endDate)
+          .order('session_date', { ascending: false });
+        
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        console.error('❌ Error fetching training logs by date range:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingLogs.getByDateRange');
       }
     },
     getAll: async (limit = 100) => {
       try {
-        const result = await apiCall(`/training-logs?limit=${limit}`);
+        const { data: result, error } = await supabase
+          .from('training_logs')
+          .select('*')
+          .order('session_date', { ascending: false })
+          .limit(limit);
+        
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        console.error('❌ Error fetching all training logs:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingLogs.getAll');
       }
     },
   },
   TrainingAnalytics: {
     getByUserCode: async (userCode) => {
       try {
-        const result = await apiCall(`/training-analytics/user/${userCode}`);
+        const { data: result, error } = await supabase
+          .from('training_progress_analytics')
+          .select('*')
+          .eq('user_code', userCode)
+          .order('date_end', { ascending: false });
+        
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        console.error('❌ Error fetching training analytics:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingAnalytics.getByUserCode');
       }
     },
     getByExercise: async (userCode, exerciseName) => {
       try {
-        const result = await apiCall(`/training-analytics/user/${userCode}/exercise/${encodeURIComponent(exerciseName)}`);
+        const { data: result, error } = await supabase
+          .from('training_progress_analytics')
+          .select('*')
+          .eq('user_code', userCode)
+          .eq('exercise_name', exerciseName)
+          .order('date_end', { ascending: false });
+        
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        console.error('❌ Error fetching exercise analytics:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingAnalytics.getByExercise');
       }
     },
   },
@@ -911,196 +1449,295 @@ export const entities = {
   TrainingReminders: {
     getPending: async () => {
       try {
-        const result = await apiCall('/training-reminders/pending');
+        const { data: result, error } = await supabase
+          .from('training_reminder_queue')
+          .select('*')
+          .eq('status', 'pending')
+          .order('scheduled_for');
+        
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        console.error('❌ Error fetching pending reminders:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingReminders.getPending');
       }
     },
     getByUserCode: async (userCode) => {
       try {
-        const result = await apiCall(`/training-reminders/user/${userCode}`);
+        const { data: result, error } = await supabase
+          .from('training_reminder_queue')
+          .select('*')
+          .eq('user_code', userCode)
+          .order('scheduled_for', { ascending: false });
+        
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        console.error('❌ Error fetching user reminders:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingReminders.getByUserCode');
       }
     },
     create: async (reminderData) => {
       try {
-        const result = await apiCall('/training-reminders', {
-          method: 'POST',
-          body: JSON.stringify(reminderData),
-        });
+        const { data: result, error } = await supabase
+          .from('training_reminder_queue')
+          .insert(reminderData)
+          .select()
+          .single();
+        
+        if (error) throw error;
         return result;
       } catch (err) {
-        console.error('❌ Error creating reminder:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingReminders.create');
       }
     },
     updateStatus: async (id, status, errorMessage = null) => {
       try {
         const updateData = { status };
+        if (status === 'sent') {
+          updateData.sent_at = new Date().toISOString();
+        }
         if (errorMessage) updateData.error_message = errorMessage;
-        const result = await apiCall(`/training-reminders/${id}`, {
-          method: 'PUT',
-          body: JSON.stringify(updateData),
-        });
+        
+        const { data: result, error } = await supabase
+          .from('training_reminder_queue')
+          .update(updateData)
+          .eq('id', id)
+          .select()
+          .single();
+        
+        if (error) throw error;
         return result;
       } catch (err) {
-        console.error('❌ Error updating reminder status:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingReminders.updateStatus');
       }
     },
     delete: async (id) => {
       try {
-        await apiCall(`/training-reminders/${id}`, { method: 'DELETE' });
+        const { error } = await supabase
+          .from('training_reminder_queue')
+          .delete()
+          .eq('id', id);
+        
+        if (error) throw error;
         return true;
       } catch (err) {
-        console.error('❌ Error deleting reminder:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingReminders.delete');
       }
     },
   },
   ExerciseLibrary: {
     getAll: async () => {
       try {
-        const result = await apiCall('/exercise-library');
+        const { data: result, error } = await supabase
+          .from('exercise_library')
+          .select('*')
+          .eq('is_active', true)
+          .order('exercise_name');
+        
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        console.error('❌ Error fetching exercise library:', err);
-        throw err;
+        handleSupabaseError(err, 'ExerciseLibrary.getAll');
       }
     },
     getByCategory: async (category) => {
       try {
-        const result = await apiCall(`/exercise-library/category/${encodeURIComponent(category)}`);
+        const { data: result, error } = await supabase
+          .from('exercise_library')
+          .select('*')
+          .eq('category', category)
+          .eq('is_active', true)
+          .order('exercise_name');
+        
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        console.error('❌ Error fetching exercises by category:', err);
-        throw err;
+        handleSupabaseError(err, 'ExerciseLibrary.getByCategory');
       }
     },
     search: async (searchTerm) => {
       try {
-        const result = await apiCall(`/exercise-library/search?q=${encodeURIComponent(searchTerm)}`);
+        if (!searchTerm) return [];
+        const { data: result, error } = await supabase
+          .from('exercise_library')
+          .select('*')
+          .ilike('exercise_name', `%${searchTerm}%`)
+          .eq('is_active', true)
+          .order('exercise_name');
+        
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        console.error('❌ Error searching exercises:', err);
-        throw err;
+        handleSupabaseError(err, 'ExerciseLibrary.search');
       }
     },
     create: async (exerciseData) => {
       try {
-        const result = await apiCall('/exercise-library', {
-          method: 'POST',
-          body: JSON.stringify(exerciseData),
-        });
+        const { data: result, error } = await supabase
+          .from('exercise_library')
+          .insert(exerciseData)
+          .select()
+          .single();
+        
+        if (error) throw error;
         return result;
       } catch (err) {
-        console.error('❌ Error creating exercise:', err);
-        throw err;
+        handleSupabaseError(err, 'ExerciseLibrary.create');
       }
     },
     update: async (id, updates) => {
       try {
-        const result = await apiCall(`/exercise-library/${id}`, {
-          method: 'PUT',
-          body: JSON.stringify(updates),
-        });
+        updates.updated_at = new Date().toISOString();
+        const { data: result, error } = await supabase
+          .from('exercise_library')
+          .update(updates)
+          .eq('id', id)
+          .select()
+          .single();
+        
+        if (error) throw error;
         return result;
       } catch (err) {
-        console.error('❌ Error updating exercise:', err);
-        throw err;
+        handleSupabaseError(err, 'ExerciseLibrary.update');
       }
     },
   },
   TrainingPlanTemplates: {
     getAll: async () => {
       try {
-        const result = await apiCall('/training-templates');
+        const { data: result, error } = await supabase
+          .from('training_plan_templates')
+          .select('*')
+          .eq('is_active', true)
+          .order('created_at', { ascending: false });
+        
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        console.error('❌ Error fetching training plan templates:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingPlanTemplates.getAll');
       }
     },
     getOwn: async () => {
-      // Note: Backend doesn't have a separate endpoint for own templates
-      // Filter from getAll results or implement in backend if needed
+      // Note: Filter from getAll results - would need user context for filtering
       try {
-        const allTemplates = await apiCall('/training-templates');
-        // Filter would need user context - this may need backend support
-        return allTemplates || [];
+        const { data: result, error } = await supabase
+          .from('training_plan_templates')
+          .select('*')
+          .eq('is_active', true)
+          .order('created_at', { ascending: false });
+        
+        if (error) throw error;
+        return result || [];
       } catch (err) {
-        console.error('❌ Error fetching own templates:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingPlanTemplates.getOwn');
       }
     },
     getPublic: async () => {
       try {
-        const result = await apiCall('/training-templates/public');
+        const { data: result, error } = await supabase
+          .from('training_plan_templates')
+          .select('*')
+          .eq('is_public', true)
+          .eq('is_active', true)
+          .order('usage_count', { ascending: false });
+        
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        console.error('❌ Error fetching public templates:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingPlanTemplates.getPublic');
       }
     },
     search: async (searchTerm) => {
       try {
-        const result = await apiCall(`/training-templates/search?q=${encodeURIComponent(searchTerm)}`);
+        if (!searchTerm) return [];
+        const { data: result, error } = await supabase
+          .from('training_plan_templates')
+          .select('*')
+          .ilike('template_name', `%${searchTerm}%`)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false });
+        
+        if (error) throw error;
         return result || [];
       } catch (err) {
-        console.error('❌ Error searching templates:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingPlanTemplates.search');
       }
     },
     create: async (templateData) => {
       try {
-        const result = await apiCall('/training-templates', {
-          method: 'POST',
-          body: JSON.stringify(templateData),
-        });
+        const { data: result, error } = await supabase
+          .from('training_plan_templates')
+          .insert(templateData)
+          .select()
+          .single();
+        
+        if (error) throw error;
         return result;
       } catch (err) {
-        console.error('❌ Error creating template:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingPlanTemplates.create');
       }
     },
     update: async (id, updates) => {
       try {
-        const result = await apiCall(`/training-templates/${id}`, {
-          method: 'PUT',
-          body: JSON.stringify(updates),
-        });
+        updates.updated_at = new Date().toISOString();
+        const { data: result, error } = await supabase
+          .from('training_plan_templates')
+          .update(updates)
+          .eq('id', id)
+          .select()
+          .single();
+        
+        if (error) throw error;
         return result;
       } catch (err) {
-        console.error('❌ Error updating template:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingPlanTemplates.update');
       }
     },
     delete: async (id) => {
       try {
-        await apiCall(`/training-templates/${id}`, { method: 'DELETE' });
+        // Soft delete
+        const { error } = await supabase
+          .from('training_plan_templates')
+          .update({ is_active: false })
+          .eq('id', id);
+        
+        if (error) throw error;
         return true;
       } catch (err) {
-        console.error('❌ Error deleting template:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingPlanTemplates.delete');
       }
     },
     hardDelete: async (id) => {
       try {
-        await apiCall(`/training-templates/${id}/hard-delete`, { method: 'DELETE' });
+        // Hard delete
+        const { error } = await supabase
+          .from('training_plan_templates')
+          .delete()
+          .eq('id', id);
+        
+        if (error) throw error;
         return true;
       } catch (err) {
-        console.error('❌ Error hard deleting template:', err);
-        throw err;
+        handleSupabaseError(err, 'TrainingPlanTemplates.hardDelete');
       }
     },
     incrementUsage: async (id) => {
       try {
-        await apiCall(`/training-templates/${id}/increment-usage`, { method: 'POST' });
+        // Get current count
+        const { data: current, error: fetchError } = await supabase
+          .from('training_plan_templates')
+          .select('usage_count')
+          .eq('id', id)
+          .single();
+        
+        if (fetchError) throw fetchError;
+        const newCount = (current?.usage_count || 0) + 1;
+        
+        const { error } = await supabase
+          .from('training_plan_templates')
+          .update({ usage_count: newCount })
+          .eq('id', id);
+        
+        if (error) throw error;
         return true;
       } catch (err) {
         console.error('❌ Error incrementing template usage:', err);

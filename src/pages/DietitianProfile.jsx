@@ -8,30 +8,94 @@ import { useNavigate } from 'react-router-dom';
 import { entities } from '@/api/client';
 import { getMyProfile, getCompanyProfileIds } from '@/utils/auth';
 
-// API helper functions
-const getBackendUrl = () => {
-  return import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net';
-};
-
-const apiCall = async (endpoint, options = {}) => {
-  const url = `${getBackendUrl()}/api/db${endpoint}`;
-  const defaultOptions = {
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  };
+// Helper function to get system messages for dietitian with visibility filtering
+const getSystemMessagesForDietitian = async (user_id, user_role, user_company_id) => {
+  // Get all messages
+  const { data: allMessages, error: messagesError } = await supabase
+    .from('system_messages')
+    .select('*')
+    .order('created_at', { ascending: false });
   
-  const response = await fetch(url, { ...defaultOptions, ...options });
-  const result = await response.json().catch(() => ({}));
+  if (messagesError) throw messagesError;
+  if (!allMessages) return [];
   
-  if (!response.ok) {
-    const message = result?.error || `API Error: ${response.status} ${response.statusText}`;
-    throw new Error(message);
+  // If sys_admin, return all messages
+  if (user_role === 'sys_admin') {
+    return allMessages;
   }
   
-  return result;
+  // For non-sys_admin users, apply visibility filtering
+  if (!user_id) return [];
+  
+  // Get all profiles for company-based filtering
+  const { data: allProfiles, error: profilesError } = await supabase
+    .from('profiles')
+    .select('id, role, company_id');
+  
+  if (profilesError) {
+    console.warn('Could not fetch profiles, falling back to basic filtering:', profilesError);
+    // Fallback to basic filtering
+    return allMessages.filter(msg => 
+      !msg.directed_to || msg.directed_to === user_id
+    );
+  }
+  
+  // Create maps for quick lookup
+  const profileMap = {};
+  for (const profile of allProfiles || []) {
+    profileMap[profile.id] = profile;
+  }
+  
+  // Filter messages based on visibility rules
+  const filteredMessages = [];
+  for (const message of allMessages) {
+    // Check if this is a personalized meal plan request by title
+    const isMealPlanRequest = (
+      message.title === 'בקשה לתוכנית תזונה מותאמת' || 
+      message.title === 'Request for Personalized Meal Plan'
+    );
+    
+    // For non-meal-plan-request messages, use simple filtering
+    if (!isMealPlanRequest) {
+      // Broadcast messages: visible to everyone
+      if (!message.directed_to) {
+        filteredMessages.push(message);
+        continue;
+      }
+      // Message directed to current user: always visible
+      if (message.directed_to === user_id) {
+        filteredMessages.push(message);
+      }
+      continue;
+    }
+    
+    // For meal plan request messages, apply company-based visibility rules
+    // Message directed to current user: always visible
+    if (message.directed_to === user_id) {
+      filteredMessages.push(message);
+      continue;
+    }
+    
+    // If no directed_to, don't show (meal plan requests should always be directed)
+    if (!message.directed_to) {
+      continue;
+    }
+    
+    // Get the target profile
+    const targetProfile = profileMap[message.directed_to];
+    if (!targetProfile) {
+      continue;
+    }
+    
+    // Show to company managers in the same company as the target
+    if (user_role === 'company_manager' && 
+        targetProfile.company_id && 
+        user_company_id === targetProfile.company_id) {
+      filteredMessages.push(message);
+    }
+  }
+  
+  return filteredMessages;
 };
 import { 
   Search,
@@ -344,9 +408,11 @@ export default function DietitianProfile() {
       const myProfile = await getMyProfile();
       console.log('👤 Current user profile:', { id: myProfile.id, role: myProfile.role, company_id: myProfile.company_id });
 
-      // Use API endpoint that handles all the complex filtering logic
-      const messagesData = await apiCall(
-        `/system-messages/for-dietitian?user_id=${myProfile.id}&user_role=${myProfile.role}&user_company_id=${myProfile.company_id || ''}`
+      // Get system messages with visibility filtering
+      const messagesData = await getSystemMessagesForDietitian(
+        myProfile.id,
+        myProfile.role || '',
+        myProfile.company_id || ''
       );
 
       console.log('📨 Filtered messages:', messagesData.length);
@@ -406,16 +472,18 @@ export default function DietitianProfile() {
         }
       }
       
-      // Build query parameters for API call
-      const params = new URLSearchParams();
-      finalUserCodes.forEach(code => params.append('user_code', code));
-      params.append('from', from);
-      params.append('to', to);
+      // Get user message preferences with pagination
+      let query = supabase
+        .from('user_message_preferences')
+        .select('*', { count: 'exact' })
+        .in('user_code', finalUserCodes);
       
-      const result = await apiCall(`/user-message-preferences?${params.toString()}`);
+      // Apply pagination
+      query = query.range(from, to);
       
-      const data = result.data || [];
-      const count = result.count || 0;
+      const { data, error, count } = await query;
+      
+      if (error) throw error;
       
       if (reset) {
         setUserPreferences(data || []);
@@ -448,10 +516,12 @@ export default function DietitianProfile() {
   const saveUserPreference = async (preference) => {
     try {
       setIsSavingPreference(true);
-      await apiCall(`/user-message-preferences/${preference.id}`, {
-        method: 'PUT',
-        body: JSON.stringify(preference)
-      });
+      const { error } = await supabase
+        .from('user_message_preferences')
+        .update(preference)
+        .eq('id', preference.id);
+      
+      if (error) throw error;
       
       // Update the preference in the local state instead of reloading all
       setUserPreferences(prev => 
@@ -530,13 +600,21 @@ export default function DietitianProfile() {
       
       // Load recent messages from all conversations
       console.log('🔍 Loading conversations...');
-      const conversationsData = await apiCall('/chat-conversations?fields=id,user_id,started_at');
+      const { data: conversationsData, error: conversationsError } = await supabase
+        .from('chat_conversations')
+        .select('id, user_id, started_at');
+      
+      if (conversationsError) throw conversationsError;
       
       console.log('✅ Conversations loaded:', conversationsData?.length || 0, 'records');
       
       // Load user data separately to avoid foreign key conflicts
       console.log('🔍 Loading user data...');
-      const usersData = await apiCall('/chat-users?fields=id,user_code,full_name');
+      const { data: usersData, error: usersError } = await supabase
+        .from('chat_users')
+        .select('id, user_code, full_name');
+      
+      if (usersError) throw usersError;
       
       // Create a map of user_id to user data
       const userMap = {};
@@ -618,11 +696,14 @@ export default function DietitianProfile() {
       // Load recent weight logs ONLY for visible clients
       let weightLogsData = [];
       try {
-        const params = new URLSearchParams();
-        visibleUserCodes.forEach(code => params.append('user_code', code));
-        params.append('limit', '50');
+        const { data: weightLogs, error: weightLogsError } = await supabase
+          .from('weight_logs')
+          .select('*')
+          .in('user_code', visibleUserCodes)
+          .order('measurement_date', { ascending: false })
+          .limit(50);
         
-        const weightLogs = await apiCall(`/weight-logs?${params.toString()}`);
+        if (weightLogsError) throw weightLogsError;
         weightLogsData = weightLogs || [];
         console.log('📊 Weight logs loaded for visible clients:', weightLogsData.length);
         setRecentWeightLogs(weightLogsData);
@@ -734,10 +815,12 @@ export default function DietitianProfile() {
 
   const toggleActive = async (message) => {
     try {
-      await apiCall(`/system-messages/${message.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ is_active: !message.is_active })
-      });
+      const { error } = await supabase
+        .from('system_messages')
+        .update({ is_active: !message.is_active })
+        .eq('id', message.id);
+      
+      if (error) throw error;
       await loadMessages();
       // Notify other components that system messages were updated
       EventBus.emit('systemMessagesUpdated');
