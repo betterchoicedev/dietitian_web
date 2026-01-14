@@ -99,7 +99,12 @@ else:
 
 CORS(
     app,
-    resources={r"/api/*": {"origins": allowed_origins}},
+    resources={r"/api/*": {
+        "origins": allowed_origins,
+        "supports_credentials": True,
+        "allow_headers": ["Content-Type", "Authorization"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
+    }},
     supports_credentials=True,
 )
 
@@ -107,6 +112,16 @@ CORS(
 if SUPABASE_API_AVAILABLE:
     app.register_blueprint(supabase_bp)
     logger.info("Registered supabase_api blueprint at /api/db")
+
+
+@app.after_request
+def after_request(response):
+    """Ensure CORS credentials header is set correctly for all responses"""
+    origin = request.headers.get('Origin')
+    if origin and origin in allowed_origins:
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+    return response
 
 
 
