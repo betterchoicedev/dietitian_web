@@ -1355,7 +1355,12 @@ export default function Chat() {
     // Support both 'message' (database column) and 'content' (local state) fields
     const messageText = msg.content || msg.message || '';
     
+    // Check for base64 image or audio in message column (when topic is 'image' or 'audio')
+    const topic = msg.topic;
+    const topicLower = topic ? topic.toLowerCase() : '';
+    
     // Check if message is from assistant and contains JSON with response_text and whatsapp_buttons
+    // For system_reply topic, only show response_text
     let parsedData = null;
     let displayText = messageText;
     let whatsappButtons = null;
@@ -1363,11 +1368,35 @@ export default function Chat() {
     if (msg.role === 'assistant' && messageText.trim().startsWith('{')) {
       try {
         parsedData = JSON.parse(messageText);
-        if (parsedData.response_text) {
-          displayText = parsedData.response_text;
-        }
-        if (parsedData.whatsapp_buttons && Array.isArray(parsedData.whatsapp_buttons)) {
-          whatsappButtons = parsedData.whatsapp_buttons;
+        // If topic is 'system_reply', extract response_text from nested agent_response JSON
+        if (topicLower === 'system_reply') {
+          // Check if there's an agent_response field (nested JSON string)
+          if (parsedData.agent_response && typeof parsedData.agent_response === 'string') {
+            try {
+              const innerJson = JSON.parse(parsedData.agent_response);
+              if (innerJson.response_text) {
+                displayText = innerJson.response_text;
+              } else {
+                displayText = '';
+              }
+            } catch (innerError) {
+              console.log('Failed to parse agent_response JSON:', innerError);
+              displayText = '';
+            }
+          } else if (parsedData.response_text) {
+            // Fallback: check if response_text exists directly in outer JSON
+            displayText = parsedData.response_text;
+          } else {
+            displayText = '';
+          }
+        } else {
+          // For non-system_reply messages, show response_text if available, otherwise show full JSON
+          if (parsedData.response_text) {
+            displayText = parsedData.response_text;
+          }
+          if (parsedData.whatsapp_buttons && Array.isArray(parsedData.whatsapp_buttons)) {
+            whatsappButtons = parsedData.whatsapp_buttons;
+          }
         }
       } catch (e) {
         // Not valid JSON, use original message text
@@ -1382,9 +1411,6 @@ export default function Chat() {
     const hasContentImage = imageUrl;
     const isFromDietitian = isDietitianMessage(msg);
 
-    // Check for base64 image or audio in message column (when topic is 'image' or 'audio')
-    const topic = msg.topic;
-    const topicLower = topic ? topic.toLowerCase() : '';
     // Check both message and content columns for base64 data
     const messageData = msg.message || msg.content || '';
     const trimmedMessageData = messageData.trim();
