@@ -458,33 +458,93 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex, alternativeInd
 
   const inputRef = useRef(null);
 
+  const { language } = useLanguage();
+
+
+
+  // Meal name options in English and Hebrew
+
+  const mealNamesEn = ['Meal', 'Breakfast', 'Morning Snack', 'Brunch', 'Lunch', 'Afternoon Snack', 'Dinner', 'Evening Snack', 'Late Dinner', 'Post-Workout Meal', 'Midnight Snack'];
+
+  const mealNamesHe = ['ארוחה', 'ארוחת בוקר', 'חטיף בוקר', 'בראנץ\'', 'ארוחת צהריים', 'חטיף צהריים', 'ארוחת ערב', 'חטיף ערב', 'ארוחת ערב מאוחרת', 'ארוחה לאחר אימון', 'חטיף לילה'];
+
+
+
+  // Map Hebrew to English meal names
+
+  const getEnglishValue = (displayValue) => {
+
+    const heIndex = mealNamesHe.indexOf(displayValue);
+
+    if (heIndex !== -1) {
+
+      return mealNamesEn[heIndex];
+
+    }
+
+    // If not found in Hebrew array, check if it's already English
+
+    if (mealNamesEn.includes(displayValue)) {
+
+      return displayValue;
+
+    }
+
+    // If not in either array, return the value as-is (fallback for custom names)
+
+    return displayValue;
+
+  };
+
+
+
+  // Get display value based on current language
+
+  const getDisplayValue = (englishValue) => {
+
+    const enIndex = mealNamesEn.indexOf(englishValue);
+
+    if (enIndex !== -1 && language === 'he') {
+
+      return mealNamesHe[enIndex];
+
+    }
+
+    return englishValue;
+
+  };
+
+
+
+  // Get current display value (English value mapped to current language)
+
+  const currentDisplayValue = getDisplayValue(value);
+
 
 
   useEffect(() => {
 
-    setEditValue(value);
+    // Update editValue to always use English for internal state
+
+    setEditValue(getEnglishValue(value));
 
   }, [value]);
 
 
 
-  useEffect(() => {
+  const handleSelectChange = (selectedDisplayValue) => {
 
-    if (isEditing && inputRef.current) {
+    // Convert selected value (could be Hebrew or English) to English
 
-      inputRef.current.focus();
+    const englishValue = getEnglishValue(selectedDisplayValue);
 
-      inputRef.current.select();
+    setEditValue(englishValue);
 
-    }
+    // Save the English value immediately
 
-  }, [isEditing]);
+    onChange(englishValue, mealIndex, optionIndex, alternativeIndex);
 
-
-
-  const handleChange = (e) => {
-
-    setEditValue(e.target.value);
+    setIsEditing(false);
 
   };
 
@@ -508,19 +568,11 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex, alternativeInd
 
     } else if (e.key === 'Escape') {
 
-      setEditValue(value);
+      setEditValue(getEnglishValue(value));
 
       setIsEditing(false);
 
     }
-
-  };
-
-
-
-  const handleBlur = () => {
-
-    handleSubmit();
 
   };
 
@@ -540,7 +592,7 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex, alternativeInd
 
       >
 
-        {value}
+        {currentDisplayValue}
 
       </h4>
 
@@ -550,25 +602,67 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex, alternativeInd
 
 
 
+  // Get options based on current language
+
+  const displayOptions = language === 'he' ? mealNamesHe : mealNamesEn;
+
+
+
   return (
 
-    <input
+    <Select
 
-      ref={inputRef}
+      value={currentDisplayValue}
 
-      type="text"
+      onValueChange={handleSelectChange}
 
-      value={editValue}
+      onOpenChange={(open) => {
 
-      onChange={handleChange}
+        // If dropdown closes without selection, cancel editing
 
-      onKeyDown={handleKeyPress}
+        // Note: onValueChange will already handle saving when an option is selected
 
-      onBlur={handleBlur}
+        if (!open && isEditing) {
 
-      className="font-medium text-gray-900 bg-white border border-gray-300 rounded px-2 py-1 w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          setEditValue(getEnglishValue(value));
 
-    />
+          setIsEditing(false);
+
+        }
+
+      }}
+
+    >
+
+      <SelectTrigger
+
+        ref={inputRef}
+
+        className="font-medium text-gray-900 bg-white border border-gray-300 rounded px-2 py-1 w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+
+        onKeyDown={handleKeyPress}
+
+      >
+
+        <SelectValue placeholder="Select meal name" />
+
+      </SelectTrigger>
+
+      <SelectContent>
+
+        {displayOptions.map((option, index) => (
+
+          <SelectItem key={index} value={option}>
+
+            {option}
+
+          </SelectItem>
+
+        ))}
+
+      </SelectContent>
+
+    </Select>
 
   );
 
@@ -7786,6 +7880,60 @@ const MenuCreate = () => {
 
 
 
+  // Meal name options in English and Hebrew
+
+  const mealNamesEn = ['Meal', 'Breakfast', 'Morning Snack', 'Brunch', 'Lunch', 'Afternoon Snack', 'Dinner', 'Evening Snack', 'Late Dinner', 'Post-Workout Meal', 'Midnight Snack'];
+
+  const mealNamesHe = ['ארוחה', 'ארוחת בוקר', 'חטיף בוקר', 'בראנץ\'', 'ארוחת צהריים', 'חטיף צהריים', 'ארוחת ערב', 'חטיף ערב', 'ארוחת ערב מאוחרת', 'ארוחה לאחר אימון', 'חטיף לילה'];
+
+
+
+  // Map Hebrew to English meal names
+
+  const getEnglishMealName = (displayValue) => {
+
+    const heIndex = mealNamesHe.indexOf(displayValue);
+
+    if (heIndex !== -1) {
+
+      return mealNamesEn[heIndex];
+
+    }
+
+    // If not found in Hebrew array, check if it's already English
+
+    if (mealNamesEn.includes(displayValue)) {
+
+      return displayValue;
+
+    }
+
+    // If not in either array, return the value as-is (fallback for custom names)
+
+    return displayValue;
+
+  };
+
+
+
+  // Get display value based on current language
+
+  const getDisplayMealName = (englishValue) => {
+
+    const enIndex = mealNamesEn.indexOf(englishValue);
+
+    if (enIndex !== -1 && language === 'he') {
+
+      return mealNamesHe[enIndex];
+
+    }
+
+    return englishValue;
+
+  };
+
+
+
   // Update meal in meal plan structure
 
   const updateMealInPlan = (index, field, value) => {
@@ -14145,19 +14293,99 @@ const MenuCreate = () => {
 
                 <div className="col-span-3">
 
-                  <Input
+                  <Select
 
-                    value={meal.meal}
+                    value={getDisplayMealName(meal.meal)}
 
-                    onChange={(e) => updateMealInPlan(index, 'meal', e.target.value)}
+                    onValueChange={(selectedValue) => {
+
+                      // Convert selected value (could be Hebrew or English) to English
+
+                      const englishValue = getEnglishMealName(selectedValue);
+
+                      updateMealInPlan(index, 'meal', englishValue);
+
+                    }}
 
                     disabled={!selectedClient?.daily_target_total_calories}
 
-                    className="text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  >
 
-                    placeholder={translations.mealName || 'Meal name'}
+                    <SelectTrigger
 
-                  />
+                      className="text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
+
+                    >
+
+                      <SelectValue placeholder={translations.mealName || 'Meal name'} />
+
+                    </SelectTrigger>
+
+                    <SelectContent>
+
+                      {(() => {
+
+                        // Get all currently used meal names (as English values), excluding the current meal
+
+                        const usedMealNames = mealPlanStructure
+
+                          .map((m, idx) => idx !== index ? m.meal : null)
+
+                          .filter(Boolean)
+
+                          .map(mealName => {
+
+                            // Convert to English if it's Hebrew, or return as-is if already English
+
+                            const enIndex = mealNamesEn.indexOf(mealName);
+
+                            if (enIndex !== -1) return mealName;
+
+                            const heIndex = mealNamesHe.indexOf(mealName);
+
+                            if (heIndex !== -1) return mealNamesEn[heIndex];
+
+                            return mealName;
+
+                          });
+
+
+
+                        // Filter options to exclude already-used meal names
+
+                        const availableOptions = (language === 'he' ? mealNamesHe : mealNamesEn).filter((option) => {
+
+                          const englishValue = getEnglishMealName(option);
+
+                          // Always include the current meal's value, even if it would be filtered out
+
+                          const currentMealEnglish = getEnglishMealName(getDisplayMealName(meal.meal));
+
+                          if (englishValue === currentMealEnglish) return true;
+
+                          // Exclude if already used by another meal
+
+                          return !usedMealNames.includes(englishValue);
+
+                        });
+
+
+
+                        return availableOptions.map((option, optIndex) => (
+
+                          <SelectItem key={optIndex} value={option}>
+
+                            {option}
+
+                          </SelectItem>
+
+                        ));
+
+                      })()}
+
+                    </SelectContent>
+
+                  </Select>
 
                 </div>
 
