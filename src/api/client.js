@@ -55,53 +55,81 @@ export const auth = {
 // Entity functions
 export const entities = {
   RegistrationInvites: {
+    // Direct Supabase access to registration_invites table
     list: async ({ email, status } = {}) => {
-      console.log('📨 Loading registration invites', { email, status });
-      const url = new URL(`${import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net'}/api/auth/invites`);
-      if (email) url.searchParams.set('email', email);
-      if (status) url.searchParams.set('status', status);
-      const response = await fetch(url.toString(), {
-        credentials: 'include',
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const message = result?.error || 'Failed to load invitations';
-        console.error('❌ RegistrationInvites.list failed:', message);
-        throw new Error(message);
+      try {
+        console.log('📨 Loading registration invites from Supabase', { email, status });
+        let query = supabase
+          .from('registration_invites')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (email) {
+          query = query.ilike('email', `%${email}%`);
+        }
+
+        if (status === 'active') {
+          query = query
+            .is('used_at', null)
+            .is('revoked_at', null);
+        } else if (status === 'used') {
+          query = query.not('used_at', 'is', null);
+        } else if (status === 'revoked') {
+          query = query.not('revoked_at', 'is', null);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+        return data || [];
+      } catch (err) {
+        handleSupabaseError(err, 'RegistrationInvites.list');
       }
-      return result.invites || [];
     },
     create: async (payload) => {
-      console.log('✉️ Creating registration invite', payload);
-      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net'}/api/auth/invites`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify(payload),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const message = result?.error || 'Failed to create invitation';
-        console.error('❌ RegistrationInvites.create failed:', message);
-        throw new Error(message);
+      try {
+        console.log('✉️ Creating registration invite in Supabase', payload);
+        const invite_record = {
+          email: (payload.email || '').trim().toLowerCase(),
+          role: payload.role || 'employee',
+          company_id:
+            payload.company_id === '' || payload.company_id === 'none'
+              ? null
+              : payload.company_id,
+          expires_in_hours:
+            payload.expires_in_hours !== undefined && payload.expires_in_hours !== ''
+              ? Number(payload.expires_in_hours)
+              : null,
+          max_uses: payload.max_uses || 1,
+          notes: payload.notes || null,
+        };
+
+        const { data, error } = await supabase
+          .from('registration_invites')
+          .insert(invite_record)
+          .select()
+          .single();
+
+        if (error) throw error;
+        return data;
+      } catch (err) {
+        handleSupabaseError(err, 'RegistrationInvites.create');
       }
-      return result.invite;
     },
     revoke: async (code) => {
-      console.log('🚫 Revoking registration invite', code);
-      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL || 'https://dietitian-be.azurewebsites.net'}/api/auth/invites/${code}/revoke`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const message = result?.error || 'Failed to revoke invitation';
-        console.error('❌ RegistrationInvites.revoke failed:', message);
-        throw new Error(message);
+      try {
+        console.log('🚫 Revoking registration invite in Supabase', code);
+        const { error } = await supabase
+          .from('registration_invites')
+          .update({
+            revoked_at: new Date().toISOString(),
+          })
+          .eq('code', code);
+
+        if (error) throw error;
+        return { success: true };
+      } catch (err) {
+        handleSupabaseError(err, 'RegistrationInvites.revoke');
       }
-      return result;
     },
   },
   Menu: {
