@@ -9,6 +9,12 @@ const handleSupabaseError = (error, operation) => {
   throw new Error(error.message || `Failed to ${operation}`);
 };
 
+// Helper to generate a short, human-friendly invite code
+const generateInviteCode = () => {
+  // 8-character uppercase base36 string, e.g. "A1B2C3D4"
+  return Math.random().toString(36).slice(2, 10).toUpperCase();
+};
+
 // Mock data for local development
 
 
@@ -88,17 +94,29 @@ export const entities = {
     create: async (payload) => {
       try {
         console.log('✉️ Creating registration invite in Supabase', payload);
+
+        // Compute expires_at from expires_in_hours (if provided and > 0)
+        let expires_at = null;
+        if (
+          payload.expires_in_hours !== undefined &&
+          payload.expires_in_hours !== null &&
+          payload.expires_in_hours !== ''
+        ) {
+          const hours = Number(payload.expires_in_hours);
+          if (!Number.isNaN(hours) && hours > 0) {
+            expires_at = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+          }
+        }
+
         const invite_record = {
+          code: payload.code || generateInviteCode(),
           email: (payload.email || '').trim().toLowerCase(),
           role: payload.role || 'employee',
           company_id:
             payload.company_id === '' || payload.company_id === 'none'
               ? null
               : payload.company_id,
-          expires_in_hours:
-            payload.expires_in_hours !== undefined && payload.expires_in_hours !== ''
-              ? Number(payload.expires_in_hours)
-              : null,
+          expires_at,
           max_uses: payload.max_uses || 1,
           notes: payload.notes || null,
         };
