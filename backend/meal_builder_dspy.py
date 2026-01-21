@@ -308,6 +308,194 @@ class GeminiNutritionLookup(dspy.Module):
 {"calories": <num>, "protein_g": <num>, "fat_g": <num>, "carbohydrates_g": <num>, "source": "israeli_db" or "web_search"}"""
         
         logger.info(f"✅ Gemini nutrition lookup initialized: {self.model_name} in {project_id}/{location}")
+    
+    def forward(self, ingredient_query: str, portion_grams: float) -> Dict[str, Any]:
+        """
+        Query Gemini for nutrition data and scale to portion size.
+        Returns dict with calories, protein_g, fat_g, carbohydrates_g.
+        With 5-second timeout - returns None if too slow.
+        
+        DISABLED: Using Claude only for accurate nutrition data.
+        """
+        return None  # Force Claude fallback
+        from google.genai import types
+        import signal
+        
+        def timeout_handler(signum, frame):
+            raise TimeoutError("Gemini lookup timed out")
+        
+        try:
+            # Set 5-second timeout (Unix/Linux only, won't work on Windows)
+            # For Windows, we'll use a simpler approach with threading
+            import threading
+            
+            result_container = [None]
+            exception_container = [None]
+            
+            def gemini_call():
+                try:
+                    # Short query - system instruction has the details
+                    query_text = f'"{ingredient_query}"'
+                    
+                    response = self.client.models.generate_content(
+                        model=self.model_name,
+                        contents=query_text,
+                        config=types.GenerateContentConfig(
+                            system_instruction=self.system_instruction,
+                            temperature=0.0,
+                        )
+                    )
+                    result_container[0] = response
+                except Exception as e:
+                    exception_container[0] = e
+            
+            thread = threading.Thread(target=gemini_call)
+            thread.daemon = True
+            thread.start()
+            thread.join(timeout=15.0)  # 15-second timeout (allows time for web search)
+            
+            if thread.is_alive():
+                logger.warning(f"⏱️ Gemini lookup timed out after 15s for '{ingredient_query}' - will use Claude fallback")
+                return None  # Signal to use Claude fallback
+            
+            if exception_container[0]:
+                raise exception_container[0]
+            
+            response = result_container[0]
+            if not response:
+                logger.warning(f"⚠️ Gemini returned no response for '{ingredient_query}'")
+                return None
+            
+            # Extract text from response
+            text_content = response.text
+            
+            # Log the raw response for debugging
+            if not text_content or text_content.strip() == "":
+                logger.warning(f"Empty response from Gemini for '{ingredient_query}'")
+                logger.warning(f"Full response object: {response}")
+                return {"calories": 0, "protein_g": 0, "fat_g": 0, "carbohydrates_g": 0}
+            
+            logger.debug(f"Gemini response for '{ingredient_query}': {text_content[:200]}...")
+            
+            # Strip markdown code fences if present
+            cleaned_text = text_content.strip()
+            if cleaned_text.startswith("```"):
+                # Remove opening fence (```json or ```)
+                cleaned_text = cleaned_text.split("\n", 1)[1] if "\n" in cleaned_text else cleaned_text[3:]
+                # Remove closing fence
+                if cleaned_text.endswith("```"):
+                    cleaned_text = cleaned_text.rsplit("```", 1)[0]
+                cleaned_text = cleaned_text.strip()
+            
+            # Parse nutrition row JSON
+            row = json.loads(cleaned_text)
+            
+            # Check for the new standardized format first
+            if all(key in row for key in ["calories", "protein_g", "fat_g", "carbohydrates_g"]):
+                # New format with explicit structure
+                source = row.get("source", "unknown")
+                
+                if source == "unknown":
+                    logger.warning(f"⚠️ Gemini: '{ingredient_query}' not found (returned zeros)")
+                    return None  # Fall back to Claude
+                
+                logger.info(f"📍 Data source for '{ingredient_query}': {source}")
+                
+                # Extract directly (already per 100g)
+                calories_per_100g = float(row["calories"])
+                protein_per_100g = float(row["protein_g"])
+                fat_per_100g = float(row["fat_g"])
+                carbs_per_100g = float(row["carbohydrates_g"])
+            else:
+                # Legacy format (Israeli DB raw format) - validate and extract
+                # Check if model explicitly said not found
+                if "error" in row and row["error"] == "not_found":
+                    logger.warning(f"⚠️ Gemini: '{ingredient_query}' not found in Israeli DB")
+                    return None
+                
+                # Validate that this is actually nutrition data, not translations or garbage
+                has_nutrition_fields = any(
+                    key in row for key in [
+                        "calories_energy", "calories", "protein_g", "protein",
+                        "fat_g", "total_fat", "carbohydrates_g", "total_carbohydrate"
+                    ]
+                )
+                
+                # Check if it's just translations (has language fields but no nutrition)
+                is_translation_dict = any(
+                    key in row for key in [
+                        "french_name", "spanish_name", "german_name", "chinese_name"
+                    ]
+                )
+                
+                if is_translation_dict or not has_nutrition_fields:
+                    logger.warning(f"⚠️ Gemini returned non-nutrition data for '{ingredient_query}' (translations or irrelevant data)")
+                    return None  # Signal to use Claude fallback
+            
+                # Helper function to extract numeric value from string (handles "20g", "5.5", etc.)
+                def parse_number(value):
+                    if value is None:
+                        return 0
+                    if isinstance(value, (int, float)):
+                        return float(value)
+                    # Strip units like 'g', 'mg', '%' and convert
+                    import re
+                    cleaned = re.sub(r'[^\d.]', '', str(value))
+                    return float(cleaned) if cleaned else 0
+                
+                # Extract macros (per 100g in source data)
+                # Try tuned model format first, fall back to generic formats
+                calories_per_100g = parse_number(
+                    row.get("calories_energy") or 
+                    row.get("calories") or 
+                    0
+                )
+                
+                protein_per_100g = parse_number(
+                    row.get("protein_g") or 
+                    row.get("protein") or 
+                    0
+                )
+                
+                # Handle fat from multiple possible field names
+                fat_per_100g = parse_number(
+                    row.get("fat_g") or 
+                    row.get("total_fat_g") or
+                    row.get("total_fat") or 
+                    0
+                )
+                
+                # Handle carbs from multiple possible field names
+                carbs_per_100g = parse_number(
+                    row.get("carbohydrates_g") or 
+                    row.get("total_carbohydrate_g") or
+                    row.get("total_carbohydrate") or
+                    row.get("total_carbohydrates") or
+                    0
+                )
+                
+                logger.info(f"📍 Data source for '{ingredient_query}': israeli_db (legacy format)")
+            
+            # Scale to actual portion
+            scale_factor = portion_grams / 100.0
+            
+            result = {
+                "calories": round(calories_per_100g * scale_factor, 1),
+                "protein_g": round(protein_per_100g * scale_factor, 1),
+                "fat_g": round(fat_per_100g * scale_factor, 1),
+                "carbohydrates_g": round(carbs_per_100g * scale_factor, 1)
+            }
+            
+            logger.info(f"✅ Nutrition for '{ingredient_query}' ({portion_grams}g): {result}")
+            return result
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON response for '{ingredient_query}': {e}")
+            logger.error(f"Response was: {text_content[:500] if 'text_content' in locals() else 'N/A'}")
+            return None  # Signal to use Claude fallback
+        except Exception as e:
+            logger.error(f"Gemini nutrition lookup failed for '{ingredient_query}': {e}")
+            return None  # Signal to use Claude fallback
 
 
 # ============================================================================

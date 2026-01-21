@@ -2164,11 +2164,11 @@ def _build_option_with_retries(
     Build a meal option using DSPy pipeline (multi-stage with specialized predictors).
     Falls back to legacy prompt-based approach if DSPy is unavailable.
     """
+    # Capture module-level USE_DSPY to avoid scoping issues
+    use_dspy = USE_DSPY
 
     # Try DSPy approach first
-    USE_DSPY = USE_DSPY
-
-    if USE_DSPY:
+    if use_dspy:
         try:
             from meal_builder_dspy import build_meal_with_dspy
 
