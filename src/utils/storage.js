@@ -69,54 +69,6 @@ export async function uploadFile(file, folder = 'chat', bucket = 'users-chat-upl
 }
 
 /**
- * Delete a file from Google Cloud Storage via backend
- * @param {string} filePath - The path of the file to delete
- * @param {string} bucket - The storage bucket name (default: 'users-chat-uploads')
- * @returns {Promise<{success: boolean, error: null | string}>}
- */
-export async function deleteFile(filePath, bucket = 'users-chat-uploads') {
-  try {
-    if (!filePath) {
-      throw new Error('File path is required');
-    }
-
-    console.log('🗑️ Deleting file:', filePath);
-
-    const response = await fetch(`${BACKEND_URL}/api/chat/uploads`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      credentials: 'include',
-      body: JSON.stringify({
-        path: filePath,
-        bucket
-      })
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({}));
-      const message = errorBody?.error || 'Failed to delete file';
-      console.error('❌ Delete error:', message, errorBody);
-      throw new Error(message);
-    }
-
-    console.log('✅ File deleted successfully');
-
-    return {
-      success: true,
-      error: null
-    };
-  } catch (error) {
-    console.error('❌ File deletion failed:', error);
-    return {
-      success: false,
-      error: error.message || 'Failed to delete file'
-    };
-  }
-}
-
-/**
  * Upload multiple files through the backend endpoint
  * @param {File[]} files - Array of files to upload
  * @param {string} folder - The folder path within the bucket
