@@ -721,51 +721,32 @@ def api_translate_recipes():
                 paths.append(("groups", gi, "recipes", ri, "tags", ti))
 
     # 2. For Hebrew: replace mapped phrases/words with placeholders, send to Azure, then restore
-
     placeholder_map = []  # List of dicts: {ph: hebrew}
-
     texts_for_azure = []
 
     if target == "he":
-
         for i, t in enumerate(texts):
-
             orig = t
-
             ph_map = {}
-
             ph_idx = 0
 
             # Replace each mapped phrase/word with a unique placeholder (longest first)
-
             def repl_func(match):
-
                 nonlocal ph_idx
-
                 en_word = match.group(0)
-
                 ph = f"__CUSTOMWORD{ph_idx}__"
-
                 ph_map[ph] = custom_map[en_word.lower()]
-
                 ph_idx += 1
-
                 return ph
 
             for en_word in custom_words:
-
                 pattern = r"(?<!\w)" + re.escape(en_word) + r"(?!\w)"
-
                 t = re.sub(pattern, repl_func, t, flags=re.IGNORECASE)
 
             placeholder_map.append(ph_map)
-
             texts_for_azure.append(t)
-
     else:
-
         texts_for_azure = texts
-
         placeholder_map = [{} for _ in texts]
 
     # 3. Call Azure Translator in bulk
@@ -806,32 +787,22 @@ def api_translate_recipes():
             if isinstance(key, int):
                 obj = obj[key]
             elif key == "groups":
-
                 continue  # Skip the "groups" prefix
-
             else:
-
                 obj = obj[key]
 
         # Set the translated value
-
         final_key = path[-1]
 
         if isinstance(obj, list) and isinstance(final_key, int):
-
             obj[final_key] = translated
-
         else:
-
             obj[final_key] = translated
 
     # Clean ingredient names before returning (if recipes contain ingredient data)
-
     cleaned_recipes = clean_ingredient_names({"recipes": new_recipes}).get("recipes", new_recipes)
 
     return jsonify({"recipes": cleaned_recipes})
-
-
 @app.route("/api/translate-text", methods=["POST"])
 def api_translate_text():
     """Simple text translation endpoint for translating user preferences and other text"""
@@ -926,46 +897,32 @@ def api_translate_text():
         translations = resp.json()
 
         if not translations:
-
             return jsonify({"translatedText": text})
 
         translated = translations[0]["translations"][0]["text"]
 
         # Replace placeholders with Hebrew terms
-
         for ph, heb in ph_map.items():
-
             translated = translated.replace(ph, heb)
 
         return jsonify({"translatedText": translated})
 
     except Exception as e:
-
         logger.error(f"Error in text translation: {str(e)}")
-
         return jsonify({"error": f"Translation failed: {str(e)}"}), 500
 
 
 @app.route("/api/translate", methods=["POST"])
 def api_translate_menu():
     """
-
     Translate menu text while preserving nutritional values and measurements.
 
-
-
     This endpoint translates ingredient names and household measures but preserves
-
     the original nutritional values (calories, protein, fat, carbs) and gram amounts
-
     to prevent values from changing during translation.
-
     """
-
     data = request.get_json()
-
     menu = data.get("menu", {})
-
     target = data.get("targetLang", "he")
 
     # Custom translation mapping for specific food terms (phrases first, then single words)
@@ -1001,67 +958,46 @@ def api_translate_menu():
     # Sort terms by length of English phrase, descending (longest first)
 
     custom_terms.sort(key=lambda t: -len(t["en"]))
-
     custom_map = {t["en"].lower(): t["he"] for t in custom_terms}
-
     custom_words = [t["en"] for t in custom_terms]
 
     # 1. Gather every string you want to translate, and remember its "path" in the object
-
     texts = []
-
     paths = []
 
     if menu.get("note"):
-
         texts.append(menu["note"])
-
         paths.append(("note",))
 
     for mi, meal in enumerate(menu.get("meals", [])):
-
         texts.append(meal.get("meal", ""))
-
         paths.append(("meals", mi, "meal"))
 
         for optKey in ("main", "alternative"):
-
             opt = meal.get(optKey)
 
             if not opt:
-
                 continue
 
             texts.append(opt.get("meal_title", ""))
-
             paths.append(("meals", mi, optKey, "meal_title"))
 
             for ii, ing in enumerate(opt.get("ingredients", [])):
-
                 texts.append(ing.get("item", ""))
-
                 paths.append(("meals", mi, optKey, "ingredients", ii, "item"))
-
                 texts.append(ing.get("household_measure", ""))
-
                 paths.append(("meals", mi, optKey, "ingredients", ii, "household_measure"))
 
         alternatives = meal.get("alternatives", [])
 
         for ai, alt in enumerate(alternatives):
-
             texts.append(alt.get("meal_title", ""))
-
             paths.append(("meals", mi, "alternatives", ai, "meal_title"))
 
             for ii, ing in enumerate(alt.get("ingredients", [])):
-
                 texts.append(ing.get("item", ""))
-
                 paths.append(("meals", mi, "alternatives", ai, "ingredients", ii, "item"))
-
                 texts.append(ing.get("household_measure", ""))
-
                 paths.append(
                     ("meals", mi, "alternatives", ai, "ingredients", ii, "household_measure")
                 )
@@ -1142,23 +1078,16 @@ def api_translate_menu():
 
             # Preserve values for main and alternative options
             for optKey in ("main", "alternative"):
-
                 if optKey in original_meal and optKey in translated_meal:
-
                     original_opt = original_meal[optKey]
-
                     translated_opt = translated_meal[optKey]
 
                     if "ingredients" in original_opt and "ingredients" in translated_opt:
-
                         for ii, original_ing in enumerate(original_opt["ingredients"]):
-
                             if ii < len(translated_opt["ingredients"]):
-
                                 translated_ing = translated_opt["ingredients"][ii]
 
                                 # Preserve nutritional values and gram amounts
-
                                 nutritional_fields = [
                                     "calories",
                                     "protein",
@@ -1168,41 +1097,28 @@ def api_translate_menu():
                                 ]
 
                                 for field in nutritional_fields:
-
                                     if field in original_ing:
-
                                         translated_ing[field] = original_ing[field]
 
                                 # Preserve other important fields that shouldn't change
-
                                 preserve_fields = ["brand of pruduct", "UPC"]
 
                                 for field in preserve_fields:
-
                                     if field in original_ing:
-
                                         translated_ing[field] = original_ing[field]
 
             # Preserve values for alternatives array if it exists
-
             if "alternatives" in original_meal and "alternatives" in translated_meal:
-
                 for ai, original_alt in enumerate(original_meal["alternatives"]):
-
                     if ai < len(translated_meal["alternatives"]):
-
                         translated_alt = translated_meal["alternatives"][ai]
 
                         if "ingredients" in original_alt and "ingredients" in translated_alt:
-
                             for ii, original_ing in enumerate(original_alt["ingredients"]):
-
                                 if ii < len(translated_alt["ingredients"]):
-
                                     translated_ing = translated_alt["ingredients"][ii]
 
                                     # Preserve nutritional values and gram amounts
-
                                     nutritional_fields = [
                                         "calories",
                                         "protein",
@@ -1212,23 +1128,17 @@ def api_translate_menu():
                                     ]
 
                                     for field in nutritional_fields:
-
                                         if field in original_ing:
-
                                             translated_ing[field] = original_ing[field]
 
                                     # Preserve other important fields
-
                                     preserve_fields = ["brand of pruduct", "UPC"]
 
                                     for field in preserve_fields:
-
                                         if field in original_ing:
-
                                             translated_ing[field] = original_ing[field]
 
     # Clean ingredient names before returning
-
     cleaned_menu = clean_ingredient_names(new_menu)
 
     return jsonify(cleaned_menu)
@@ -1236,29 +1146,20 @@ def api_translate_menu():
 
 def load_user_preferences(user_code=None):
     """
-
     Load user preferences from Supabase chat_users table.
 
     If user_code is not provided, falls back to first user or default values.
-
     """
-
     try:
-
         # logger.info(f"🔍 Loading user preferences for user_code: {user_code}")
-
         # logger.info(f"Supabase URL: {supabase_url}")
-
         # logger.info(f"Supabase Key exists: {bool(supabase_key)}")
 
         # Define the specific fields we need to reduce data transfer
-
         selected_fields = "user_code,food_allergies,daily_target_total_calories,recommendations,food_limitations,goal,number_of_meals,client_preference,macros,region,meal_plan_structure"
 
         if user_code:
-
             # Fetch specific user by user_code
-
             # logger.info(f"Fetching user with user_code: {user_code}")
 
             response = (
@@ -1271,21 +1172,13 @@ def load_user_preferences(user_code=None):
             # logger.info(f"Supabase response: {response}")
 
             if response.data:
-
                 user_data = response.data[0]
-
                 # logger.info(f"Found user: {user_data.get('user_code')}")
-
             else:
-
                 logger.warning(f"No user found with user_code: {user_code}")
-
                 raise Exception(f"User not found: {user_code}")
-
         else:
-
             # Fallback: get first user or use default values
-
             logger.info("No user_code provided, fetching first user")
 
             response = supabase.table("chat_users").select(selected_fields).limit(1).execute()
@@ -1293,13 +1186,9 @@ def load_user_preferences(user_code=None):
             logger.info(f"Fallback supabase response: {response}")
 
             if response.data:
-
                 user_data = response.data[0]
-
                 logger.info(f"Using fallback user: {user_data.get('user_code')}")
-
             else:
-
                 logger.warning("No users found in chat_users table, using default values")
 
                 return {
@@ -1315,77 +1204,49 @@ def load_user_preferences(user_code=None):
                 }
 
         # Debug: Log the raw user data
-
         # logger.info(f"Raw user data from Supabase: {json.dumps(user_data, indent=2, default=str, ensure_ascii=False)}")
 
         # Parse macros - handle both string and object formats
-
         macros = user_data.get("macros", {})
 
         if isinstance(macros, str):
-
             try:
-
                 macros = json.loads(macros)
-
             except:
-
                 macros = {"protein": "150g", "fat": "80g", "carbs": "250g"}
-
         elif not macros:  # Handle None or empty
-
             macros = {"protein": "150g", "fat": "80g", "carbs": "250g"}
 
         # Parse arrays - handle both string and array formats
-
         def parse_array_field(field_value):
-
             if isinstance(field_value, list):
-
                 return field_value
-
             elif isinstance(field_value, str):
-
                 try:
-
                     return json.loads(field_value)
-
                 except:
-
                     return field_value.split(",") if field_value else []
-
             else:
-
                 return []
 
         allergies = parse_array_field(user_data.get("food_allergies", []))
-
         limitations = parse_array_field(user_data.get("food_limitations", []))
 
         # Parse client_preference
-
         client_preference = user_data.get("client_preference", {})
 
         if isinstance(client_preference, str):
-
             try:
-
                 client_preference = json.loads(client_preference)
-
             except:
-
                 client_preference = {}
 
         # Parse meal_plan_structure
-
         meal_plan_structure = user_data.get("meal_plan_structure", {})
 
         if isinstance(meal_plan_structure, str):
-
             try:
-
                 meal_plan_structure = json.loads(meal_plan_structure)
-
             except:
                 meal_plan_structure = {}
 
@@ -1711,23 +1572,17 @@ def api_template():
 
     # TYPE 2: Normal template generation with AI
     max_retries = 4  # Build 4 templates before giving up
-
     previous_issues = []  # Track issues from previous attempts
 
     for attempt in range(1, max_retries + 1):
-
         try:
-
             logger.info(f"🔄 Attempt {attempt}/{max_retries} to generate template")
 
             if previous_issues:
-
                 logger.info(f"📋 Previous issues to address: {previous_issues}")
 
             data = request.get_json()
-
             user_code = data.get("user_code") if data else None
-
             preferences = load_user_preferences(user_code)
             # logger.info("🔹 Received user preferences for template:\n%s", json.dumps(preferences, indent=2, ensure_ascii=False))
 
@@ -1956,7 +1811,6 @@ Schema:
 Generate meal options that are practical, delicious, and respect all dietary restrictions and preferences.
 
 """
-
             user_prompt = {
                 "role": "user",
                 "content": f"User preferences: {json.dumps(preferences, ensure_ascii=False)}",
@@ -1973,39 +1827,28 @@ Generate meal options that are practical, delicious, and respect all dietary res
             )
 
             result = response.choices[0].message.content
-
             logger.info("✅ Raw response from OpenAI (/template):\n%s", result)
 
             try:
-
                 parsed = json.loads(result)
-
                 logger.info("✅ Parsed template successfully on attempt %d.", attempt)
 
                 # Add debugging for template structure
-
                 template = parsed.get("template", [])
 
                 if template:
-
                     # logger.info(f"🔍 Template has {len(template)} meals")
 
                     for i, meal in enumerate(template):
-
                         meal_name = meal.get("meal", "Unknown")
-
                         # logger.info(f"🔍 Meal {i+1}: {meal_name}")
 
                     meal_count = preferences.get("meal_count", 5)
-
                     logger.info(f"✅ Meal names validated for {meal_count} meals")
 
                 # Validate the template before returning
-
                 if template:
-
                     # Test validation to catch issues early
-
                     val_res = app.test_client().post(
                         "/api/validate-template",
                         json={"template": template, "user_code": user_code},
@@ -2014,27 +1857,18 @@ Generate meal options that are practical, delicious, and respect all dietary res
                     val_data = val_res.get_json()
 
                     if val_data.get("is_valid"):
-
                         logger.info("✅ Template passes validation on attempt %d.", attempt)
-
                         return jsonify(parsed)
-
                     else:
-
                         # Collect issues for next attempt
-
                         main_issues = val_data.get("issues_main", [])
-
                         alt_issues = val_data.get("issues_alt", [])
-
                         main_alt_issues = val_data.get("issues_main_alt", [])
-
                         similarity_issues = val_data.get("issues_similarity", [])
 
                         new_issues = main_issues + alt_issues + main_alt_issues + similarity_issues
 
                         if new_issues:
-
                             previous_issues = new_issues
 
                             logger.warning(
@@ -2044,58 +1878,39 @@ Generate meal options that are practical, delicious, and respect all dietary res
                             )
 
                             if attempt < max_retries:
-
                                 logger.info(
                                     f"🔄 Retrying template generation with issues feedback..."
                                 )
-
                                 continue
-
                             else:
-
                                 logger.warning(
                                     "⚠️ Returning template despite validation failure after all attempts"
                                 )
-
                                 return jsonify(parsed)
-
                         else:
-
                             return jsonify(parsed)
-
                 else:
-
                     logger.error("❌ No template found in parsed response")
 
                     if attempt < max_retries:
-
                         previous_issues = ["No template structure found in response"]
-
                         continue
-
                     else:
-
                         return (
                             jsonify({"error": "No valid template generated after all attempts"}),
                             500,
                         )
 
             except json.JSONDecodeError:
-
                 logger.error(
                     "❌ JSON decode error in /api/template (attempt %d):\n%s", attempt, result
                 )
 
                 if attempt < max_retries:
-
                     previous_issues = ["Invalid JSON response from AI"]
-
                     logger.info(f"🔄 Retrying template generation due to JSON decode error...")
-
                     continue
-
                 else:
-
                     return (
                         jsonify(
                             {"error": "Invalid JSON from OpenAI after all attempts", "raw": result}
@@ -2104,32 +1919,24 @@ Generate meal options that are practical, delicious, and respect all dietary res
                     )
 
         except Exception as e:
-
             logger.error(
                 "❌ Exception in /api/template (attempt %d):\n%s", attempt, traceback.format_exc()
             )
 
             if attempt < max_retries:
-
                 previous_issues = [f"Exception occurred: {str(e)}"]
-
                 logger.info(f"🔄 Retrying template generation due to exception...")
-
                 continue
-
             else:
-
                 return jsonify({"error": str(e)}), 500
 
     # If we get here, all attempts failed
-
     logger.error("❌ All %d attempts to generate template failed", max_retries)
 
     return jsonify({"error": f"Failed to generate template after {max_retries} attempts"}), 500
 
 
 def calculate_totals(meals):
-
     totals = {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
 
     for meal in meals:
@@ -2265,11 +2072,9 @@ VALIDATION
 
 
 def _strip_markdown_fences(s: str) -> str:
-
     s = s.strip()
 
     if s.startswith("```"):
-
         s = s.split("```", 1)[-1]
 
         # Remove language tag (e.g., "json", "python") if present on first line
@@ -2334,13 +2139,10 @@ def _calculate_nutrition_from_ingredients(meal_data):
         nutrition["carbs"] += float(ingredient.get("carbs", 0))
 
     # Round to 1 decimal place for consistency
-
     for macro in nutrition:
-
         nutrition[macro] = round(nutrition[macro], 1)
 
     # Add nutrition to meal data
-
     meal_data["nutrition"] = nutrition
 
     return meal_data
@@ -2539,7 +2341,6 @@ Your previous meal attempt failed validation. Review the failed meal and issues 
 }}}}
 
 """
-
             user_payload = validation_feedback  # String with failed meal + issues
 
         # Construct user message based on attempt type
@@ -2576,11 +2377,8 @@ Your previous meal attempt failed validation. Review the failed meal and issues 
         # If correction failed or was skipped, candidate already contains original meal
 
         # Wrap for validator
-
         tpl_key = "main" if option_type.upper() == "MAIN" else "alternative"
-
         wrapped_template = [{tpl_key: macro_targets}]
-
         wrapped_menu = [{tpl_key: candidate}]
 
         val_res = app.test_client().post(
@@ -2591,11 +2389,9 @@ Your previous meal attempt failed validation. Review the failed meal and issues 
         val = val_res.get_json() or {}
 
         if val.get("is_valid"):
-
             logger.info(f"✅ {option_type} for '{meal_name}' passed validation.")
 
             # Automatically calculate and add nutrition totals from ingredients
-
             candidate = _calculate_nutrition_from_ingredients(candidate)
 
             # Persist the protein source so downstream consumers (UI, alt generators) have it
@@ -2605,13 +2401,9 @@ Your previous meal attempt failed validation. Review the failed meal and issues 
                 candidate.setdefault("main_protein_source", "Unknown")
 
             return candidate
-
         else:
-
             # Collect validation issues for next attempt
-
             issues = val.get("issues", [])
-
             failed_meal = val.get("meal_data", {})
 
             logger.warning(
@@ -2619,7 +2411,6 @@ Your previous meal attempt failed validation. Review the failed meal and issues 
             )
 
             # Add issues to running list
-
             previous_issues.extend(issues)
 
             # Format validation feedback for next retry
@@ -2726,9 +2517,7 @@ def api_build_menu():
     max_retries = 4  # Try 4 times before giving up
 
     for attempt in range(1, max_retries + 1):
-
         try:
-
             logger.info(f"🔄 Attempt {attempt}/{max_retries} to build menu")
 
             data = request.json or {}
@@ -2821,9 +2610,7 @@ def api_build_menu():
                         ),
                         400,
                     )
-
                 else:
-
                     continue  # next attempt
 
             logger.info("🔹 Building menu in PARALLEL - ALL meal options at once...")
@@ -2946,7 +2733,6 @@ def api_build_menu():
                     ),
                     500,
                 )
-
             else:
                 logger.info("🔄 Retrying menu build due to exception...")
                 continue
@@ -3143,11 +2929,9 @@ def api_validate_menu():
 
         def _validate_dietary_restrictions(ingredients, limitations_list, allergies_list):
             """Validate general dietary limitations and allergies (not just kosher)"""
-
             issues = []
 
             # Normalize lists to lowercase for comparison
-
             limitations_normalized = [str(lim).lower().strip() for lim in limitations_list if lim]
 
             allergies_normalized = [
@@ -3155,33 +2939,23 @@ def api_validate_menu():
             ]
 
             # Skip kosher as it's handled separately
-
             limitations_normalized = [lim for lim in limitations_normalized if lim != "kosher"]
 
             for ing in ingredients or []:
-
                 item_name = str(ing.get("item", "")).lower()
 
                 # Check allergies (exact or substring match)
-
                 for allergy in allergies_normalized:
-
                     if allergy in item_name or item_name in allergy:
-
                         issues.append(
                             f"ALLERGY VIOLATION: Contains '{ing.get('item', '')}' which matches allergy '{allergy}'"
                         )
 
                 # Check limitations (exact or substring match)
-
                 for limitation in limitations_normalized:
-
                     # Handle common patterns like "no chicken", "no beef", etc.
-
                     if limitation.startswith("no ") or limitation.startswith("avoid "):
-
                         # Extract the food item from "no chicken" -> "chicken"
-
                         food_item = limitation.replace("no ", "").replace("avoid ", "").strip()
 
                         if food_item in item_name or item_name in food_item:
@@ -3388,29 +3162,21 @@ def api_validate_template():
         logger.info(f"🔍 Parsed target_macros: {target_macros}")
 
         def is_out_of_range(actual, target, margin=0.05):  # 5% margin
-
             if target == 0:
-
                 return False
 
             return abs(actual - target) / target > margin
 
         # Collect issues for main and alternative
-
         issues_main = []
-
         issues_alt = []
 
         for macro in total_main:
-
             # MAIN
-
             actual_main = round(total_main[macro], 1)
-
             expected = target_macros.get(macro, 0)
 
             if is_out_of_range(actual_main, expected):
-
                 percent_off = round((actual_main - expected) / expected * 100, 3)
 
                 issues_main.append(
@@ -3418,11 +3184,9 @@ def api_validate_template():
                 )
 
             # ALT
-
             actual_alt = round(total_alt[macro], 1)
 
             if is_out_of_range(actual_alt, expected):
-
                 percent_off = round((actual_alt - expected) / expected * 100, 3)
 
                 issues_alt.append(
@@ -3430,29 +3194,21 @@ def api_validate_template():
                 )
 
         # Check for equality between main and alternative macros (with ±3g tolerance)
-
         main_alt_issues = []
-
         TOLERANCE_GRAMS = 3.0
 
         for macro in total_main:
-
             main_val = round(total_main[macro], 1)
-
             alt_val = round(total_alt[macro], 1)
-
             diff = abs(main_val - alt_val)
 
             if diff > TOLERANCE_GRAMS:
-
                 main_alt_issues.append(
                     f"Main vs Alternative {macro} mismatch: Main={main_val}, Alt={alt_val} (diff={diff:.1f}g, allowed: ±{TOLERANCE_GRAMS}g)"
                 )
 
         is_valid_main = len(issues_main) == 0
-
         is_valid_alt = len(issues_alt) == 0
-
         is_valid = is_valid_main and is_valid_alt and len(main_alt_issues) == 0
 
         # Logging for debugging
@@ -3530,86 +3286,56 @@ def api_validate_template():
 
 def prepare_upc_lookup_params(brand, name, region="israel"):
     """
-
     Prepare parameters for UPC lookup based on the user's region.
-
     """
-
     if not brand and not name:
-
         return None, None, None
 
     # Normalize region to handle different variations
-
     region_normalized = region.lower().strip() if region else "israel"
 
     israeli_variations = ["israel", "il", "isr", "israeli"]
-
     is_israeli = region_normalized in israeli_variations
 
     if is_israeli:
-
         # For Israeli region: combine brand and name but avoid duplication
-
         brand_lower = brand.lower() if brand else ""
-
         name_lower = name.lower() if name else ""
 
         # Check if brand is already in the name to avoid duplication
-
         if brand and brand_lower in name_lower:
-
             query = name  # Use name as is since it already contains brand
-
         else:
-
             # Combine brand and name
-
             query = f"{brand} {name}".strip()
 
         return "hebrew", {"query": query}, is_israeli
-
     else:
-
         # For non-Israeli regions: send brand and name separately
-
         return "regular", {"brand": brand, "name": name}, is_israeli
 
 
 @app.route("/api/enrich-menu-with-upc", methods=["POST"])
 def enrich_menu_with_upc():
     """
-
     Asynchronous endpoint to add UPC codes to an existing menu.
 
     Takes a menu JSON and returns it with UPC codes added to ingredients.
-
     """
-
     try:
-
         data = request.json
-
         menu = data.get("menu")
-
         user_code = data.get("user_code")
 
         if not menu:
-
             return jsonify({"error": "Missing menu data"}), 400
 
         # Load user preferences to get region
-
         try:
-
             preferences = load_user_preferences(user_code)
-
             region = preferences.get("region", "israel")
-
         except Exception as e:
-
             logger.warning(f"Failed to load user preferences, using default region: {e}")
-
             region = "israel"
 
         logger.info(f"🔍 Starting UPC enrichment for menu with region: {region}")
@@ -3667,21 +3393,17 @@ def enrich_menu_with_upc():
                             app.logger.info(f"Parsed UPC: {enriched_ing['UPC']!r}")
 
                         except Exception as e:
-
                             enriched_ing["UPC"] = None
-
                             app.logger.warning(f"UPC lookup failed for {brand!r} {name!r}: {e}")
 
                         enriched_ingredients.append(enriched_ing)
 
                     block["ingredients"] = enriched_ingredients
-
                     enriched_meal[section] = block
 
             enriched_menu.append(enriched_meal)
 
         # Clean ingredient names before returning
-
         cleaned_menu = clean_ingredient_names(enriched_menu)
 
         logger.info("✅ UPC enrichment completed.")
@@ -3689,7 +3411,6 @@ def enrich_menu_with_upc():
         return jsonify({"menu": cleaned_menu})
 
     except Exception as e:
-
         logger.error("❌ Exception in /api/enrich-menu-with-upc:\n%s", traceback.format_exc())
 
         return jsonify({"error": str(e)}), 500
@@ -3698,21 +3419,15 @@ def enrich_menu_with_upc():
 @app.route("/api/batch-upc-lookup", methods=["POST"])
 def batch_upc_lookup():
     """
-
     Streamlined batch UPC lookup endpoint.
 
     Takes a list of ingredients and returns UPC codes for all of them in one go.
 
     Much more efficient than individual lookups.
-
     """
-
     try:
-
         data = request.json
-
         ingredients = data.get("ingredients", [])
-
         user_code = data.get("user_code")
 
         if not ingredients:
@@ -3788,13 +3503,10 @@ def batch_upc_lookup():
 
             except requests.exceptions.Timeout:
                 results.append({"brand": brand, "name": name, "upc": None, "error": "Timeout"})
-
                 logger.warning(f"⏰ UPC lookup timed out for {brand} {name}")
 
             except Exception as e:
-
                 results.append({"brand": brand, "name": name, "upc": None, "error": str(e)})
-
                 logger.warning(f"❌ UPC lookup failed for {brand} {name}: {e}")
 
         successful_lookups = len([r for r in results if r.get("upc")])
@@ -3815,7 +3527,6 @@ def batch_upc_lookup():
         )
 
     except Exception as e:
-
         logger.error("❌ Exception in /api/batch-upc-lookup:\n%s", traceback.format_exc())
 
         return jsonify({"error": str(e)}), 500
@@ -3967,49 +3678,36 @@ def _collect_avoid_lists(main: dict, current_alt: dict):
 
 def _collect_avoid_lists_from_all_alternatives(main: dict, all_alternatives: list):
     """Collect proteins & ingredients to avoid based on main and ALL alternatives for better duplication avoidance."""
-
     avoid_proteins = set()
 
     # Add main meal
-
     if main:
-
         src = main.get("main_protein_source")
 
         if isinstance(src, str) and src.strip():
-
             avoid_proteins.add(src.strip())
 
     # Add all alternatives
-
     for alt in all_alternatives:
-
         if alt:
-
             src = alt.get("main_protein_source")
 
             if isinstance(src, str) and src.strip():
-
                 avoid_proteins.add(src.strip())
 
     def _ing_names(m):
-
         out = []
 
         for ing in m.get("ingredients") or []:
-
             name = (ing.get("item") or "").strip()
 
             if name:
-
                 out.append(name)
 
         # Also avoid words from meal_title to reduce overlap
-
         mt = (m.get("meal_title") or "").strip()
 
         if mt:
-
             out.append(mt)
 
         return out
@@ -4017,17 +3715,12 @@ def _collect_avoid_lists_from_all_alternatives(main: dict, all_alternatives: lis
     avoid_ingredients = set()
 
     # Add main meal ingredients
-
     if main:
-
         avoid_ingredients.update(_ing_names(main))
 
     # Add all alternatives ingredients
-
     for alt in all_alternatives:
-
         if alt:
-
             avoid_ingredients.update(_ing_names(alt))
 
     return list(avoid_proteins), list(avoid_ingredients)
@@ -4035,41 +3728,27 @@ def _collect_avoid_lists_from_all_alternatives(main: dict, all_alternatives: lis
 
 @app.route("/api/generate-alternative-meal", methods=["POST"])
 def generate_alternative_meal():
-
     max_attempts = 4
-
     previous_issues = []  # Track issues across attempts
-
     validation_feedback = ""  # Current validation feedback
-
     previous_candidate = None  # Store the failed meal for retry attempts
 
     data = request.get_json() or {}
-
     main = data.get("main")
-
     current_alt = data.get("alternative")  # existing alternative
-
     all_alternatives = data.get("allAlternatives", [])  # all existing alternatives
-
     user_code = data.get("user_code")
 
     if not main or not current_alt:
-
         return jsonify({"error": "Missing main or alternative meal"}), 400
 
     if not user_code:
-
         return jsonify({"error": "Missing user_code"}), 500
 
     # Load preferences & region
-
     try:
-
         preferences = load_user_preferences(user_code) or {}
-
     except Exception as e:
-
         return jsonify({"error": f"Failed to load user preferences: {str(e)}"}), 500
 
     region_instruction = _region_instruction_from_prefs(preferences)
@@ -4083,11 +3762,9 @@ def generate_alternative_meal():
     limitations_list = ", ".join(limitations) if limitations else "None"
 
     # Macro targets: mirror the MAIN meal's totals (strict)
-
     macro_targets = _extract_macros(main)
 
     if any(macro_targets.get(k) is None for k in ("calories", "protein", "fat", "carbs")):
-
         return (
             jsonify(
                 {"error": "Main meal lacks complete macro totals (calories, protein, fat, carbs)."}
@@ -4096,25 +3773,18 @@ def generate_alternative_meal():
         )
 
     # Build differentiation constraints using ALL alternatives for better duplication avoidance
-
     avoid_proteins, avoid_ingredients = _collect_avoid_lists_from_all_alternatives(
         main, all_alternatives
     )
 
     # Try multiple times until it validates
-
     for attempt in range(1, max_attempts + 1):
-
         try:
-
             app.logger.info(f"🧠 Generating NEW ALTERNATIVE (attempt {attempt}/{max_attempts})")
 
             # FIRST ATTEMPT: Use full detailed prompt
-
             if attempt == 1:
-
                 # Compose full prompt with all constraints
-
                 system_prompt = ALTERNATIVE_GENERATOR_PROMPT.format(
                     region_instruction=region_instruction,
                     macro_targets=macro_targets,
@@ -4234,7 +3904,6 @@ Return ONLY valid JSON, no markdown fences or explanations."""
             return jsonify(enriched)
 
         except Exception as e:
-
             error_msg = f"Exception occurred: {str(e)}"
 
             app.logger.error(f"❌ Exception in generate_alternative_meal attempt {attempt}: {e}")
@@ -4242,7 +3911,6 @@ Return ONLY valid JSON, no markdown fences or explanations."""
             previous_issues.append(error_msg)
 
             if attempt == max_attempts:
-
                 return (
                     jsonify(
                         {
@@ -4258,7 +3926,6 @@ Return ONLY valid JSON, no markdown fences or explanations."""
             # otherwise loop and retry
 
     # Fallback (should not reach due to returns above)
-
     return (
         jsonify(
             {
@@ -4275,71 +3942,50 @@ Return ONLY valid JSON, no markdown fences or explanations."""
 
 
 def enrich_alternative_with_upc(alternative, user_code, region):
-
     # This function mimics the logic in enrich_menu_with_upc but for a single alternative dict
-
     import requests
 
     block = alternative.copy()
-
     enriched_ingredients = []
 
     access_token = get_azure_access_token()
-
     headers = {"Authorization": f"Bearer {access_token}"} if access_token else {}
 
     for ing in block.get("ingredients", []):
-
         enriched_ing = ing.copy()
-
         brand = enriched_ing.get("brand of pruduct", "")
-
         name = enriched_ing.get("item", "")
 
         try:
-
             logger.info(f"[UPC] Looking up for brand='{brand}', name='{name}', region='{region}'")
 
             endpoint_type, params, is_israeli = prepare_upc_lookup_params(brand, name, region)
 
             if not endpoint_type:
-
                 enriched_ing["UPC"] = None
-
                 logger.info(f"[UPC] No valid parameters for lookup: brand='{brand}', name='{name}'")
-
             else:
-
                 if endpoint_type == "hebrew":
-
                     url = "https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-upc-hebrew"
 
                     print("Tenant ID:", AZURE_TENANT_ID)
                     print("Client ID:", AZURE_CLIENT_ID)
                     print("Client Secret:", AZURE_CLIENT_SECRET)
-
                 else:
-
                     url = "https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-upc"
 
                 logger.info(f"[UPC] Sending request to {url} with params={params}")
 
                 if not access_token:
-
                     logger.warning("[UPC] No Azure access token available, skipping UPC lookup.")
-
                     enriched_ing["UPC"] = None
-
                 else:
-
                     resp = requests.get(url, params=params, headers=headers, timeout=30)
 
                     logger.info(f"[UPC] HTTP {resp.status_code} — URL: {resp.url}")
-
                     logger.info(f"[UPC] Response body: {resp.text}")
 
                     resp.raise_for_status()
-
                     upc_data = resp.json()
 
                     enriched_ing["UPC"] = upc_data.get("upc")
@@ -4347,9 +3993,7 @@ def enrich_alternative_with_upc(alternative, user_code, region):
                     logger.info(f"[UPC] Parsed UPC: {enriched_ing['UPC']!r}")
 
         except Exception as e:
-
             enriched_ing["UPC"] = None
-
             logger.warning(f"[UPC] UPC lookup failed for {brand!r} {name!r}: {e}")
 
         enriched_ingredients.append(enriched_ing)
@@ -4363,28 +4007,18 @@ def enrich_alternative_with_upc(alternative, user_code, region):
 
 def clean_ingredient_names(menu):
     """
-
     Remove brand names from ingredient item names if the brand appears in the item name.
 
-
-
     Args:
-
         menu: List of meals or complete menu structure
 
-
-
     Returns:
-
         Cleaned menu with brand names removed from item names
-
     """
 
     def clean_ingredient(ingredient):
         """Clean a single ingredient by removing brand name from item name"""
-
         if not isinstance(ingredient, dict):
-
             return ingredient
 
         item = ingredient.get("item", "")
@@ -4394,25 +4028,18 @@ def clean_ingredient_names(menu):
         )  # Note: keeping the typo as it matches the existing code
 
         if not item or not brand:
-
             return ingredient
 
         # Create a copy to avoid modifying the original
-
         cleaned_ingredient = ingredient.copy()
 
         # Case-insensitive brand removal
-
         item_lower = item.lower().strip()
-
         brand_lower = brand.lower().strip()
 
         if brand_lower in item_lower:
-
             # Remove brand name from item, handling various positions
-
             # Try different patterns: "Brand Item", "Item Brand", "Brand - Item", etc.
-
             patterns_to_try = [
                 f"{brand_lower} ",  # "Brand Item"
                 f" {brand_lower}",  # "Item Brand"
@@ -4426,27 +4053,18 @@ def clean_ingredient_names(menu):
             cleaned_item = item
 
             for pattern in patterns_to_try:
-
                 if pattern in item_lower:
-
                     # Find the actual case-preserved version to remove
-
                     start_idx = item_lower.find(pattern)
 
                     if start_idx != -1:
-
                         # Remove the pattern and clean up extra spaces/dashes
-
                         cleaned_item = item[:start_idx] + item[start_idx + len(pattern) :]
-
                         cleaned_item = cleaned_item.strip().strip("-").strip()
-
                         break
 
             # If we removed something, update the item name
-
             if cleaned_item and cleaned_item != item:
-
                 cleaned_ingredient["item"] = cleaned_item
 
                 logger.info(
@@ -4456,63 +4074,45 @@ def clean_ingredient_names(menu):
                 # 2) Remove any parenthesized content, e.g. "(tnuva) hummus" → "hummus"
 
             #    \([^)]*\)  matches a '(' plus any non-')' chars up to ')'
-
             #    Surrounding \s* eats any extra whitespace left behind
-
             cleaned_item = re.sub(r"\s*\([^)]*\)\s*", " ", cleaned_item).strip()
 
             # Update only if it actually changed
-
             if cleaned_item and cleaned_item != cleaned_ingredient.get("item"):
-
                 cleaned_ingredient["item"] = cleaned_item
-
                 logger.info(f"🧹 Stripped parentheses: '{item}' -> '{cleaned_item}'")
 
         return cleaned_ingredient
 
     def clean_meal_section(section):
         """Clean all ingredients in a meal section (main/alternative)"""
-
         if not isinstance(section, dict):
-
             return section
 
         cleaned_section = section.copy()
-
         ingredients = section.get("ingredients", [])
 
         if ingredients:
-
             cleaned_ingredients = [clean_ingredient(ing) for ing in ingredients]
-
             cleaned_section["ingredients"] = cleaned_ingredients
 
         return cleaned_section
 
     def clean_meal(meal):
         """Clean all sections of a meal"""
-
         if not isinstance(meal, dict):
-
             return meal
 
         cleaned_meal = meal.copy()
 
         # Clean main and alternative options
-
         for section_key in ["main", "alternative"]:
-
             if section_key in meal:
-
                 cleaned_meal[section_key] = clean_meal_section(meal[section_key])
 
         # Clean alternatives array if it exists
-
         if "alternatives" in meal and isinstance(meal["alternatives"], list):
-
             cleaned_alternatives = [clean_meal_section(alt) for alt in meal["alternatives"]]
-
             cleaned_meal["alternatives"] = cleaned_alternatives
 
         return cleaned_meal
@@ -4561,7 +4161,6 @@ def clean_ingredient_names(menu):
 
 
 def get_azure_access_token():
-
     import requests
 
     tenant_id = AZURE_TENANT_ID
@@ -4570,9 +4169,7 @@ def get_azure_access_token():
     scope = AZURE_UPC_SCOPE
 
     if not all([tenant_id, client_id, client_secret, scope]):
-
         logger.error("Azure AD credentials are not set in environment variables.")
-
         return None
 
     token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
@@ -4585,7 +4182,6 @@ def get_azure_access_token():
     }
 
     try:
-
         token_resp = requests.post(token_url, data=token_data)
 
         token_resp.raise_for_status()
@@ -4593,13 +4189,11 @@ def get_azure_access_token():
         access_token = token_resp.json().get("access_token")
 
         if not access_token:
-
             logger.error(f"Failed to obtain Azure access token: {token_resp.text}")
 
         return access_token
 
     except Exception as e:
-
         logger.error(f"Error requesting Azure access token: {e}")
 
         return None
