@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useClient } from '@/contexts/ClientContext';
 import { entities } from '@/api/client';
-import { ExerciseLibrary, TrainingPlanTemplates } from '@/api/entities';
+import { ExerciseLibrary, TrainingPlanTemplates, ChatUser, ScheduledReminders } from '@/api/entities';
 import { getMyProfile, getCompanyProfileIds } from '@/utils/auth';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
@@ -63,20 +63,12 @@ const createWeeklyTrainingPlanReminders = async (userCode, trainingPlanId, activ
     // Get client data including phone_number and telegram_chat_id
     let clientData;
     try {
-      const { data, error } = await supabase
-        .from('chat_users')
-        .select('phone_number, telegram_chat_id, id')
-        .eq('user_code', userCode)
-        .single();
+      clientData = await ChatUser.get(userCode, 'phone_number,telegram_chat_id,id');
       
-      if (error) throw error;
-      
-      if (!data) {
+      if (!clientData) {
         console.error('Error fetching client data for reminders: No data returned');
         return;
       }
-      
-      clientData = data;
     } catch (clientError) {
       console.error('Error fetching client data for reminders:', clientError);
       return;
@@ -183,12 +175,11 @@ const createWeeklyTrainingPlanReminders = async (userCode, trainingPlanId, activ
     }
     
     // Insert all reminders in batch
-    const { data, error } = await supabase
-      .from('scheduled_reminders')
-      .insert(reminders)
-      .select();
+    const data = await ScheduledReminders.create(reminders);
     
-    if (error) throw error;
+    if (!data) {
+      throw new Error('Failed to create reminders');
+    }
     
     console.log(`✅ Created ${reminders.length} weekly reminders successfully:`, data);
     return data;

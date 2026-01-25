@@ -1,18 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { SystemMessages, Profiles } from '@/api/entities';
 
 // Helper function to get urgent system messages with visibility filtering
 const getUrgentSystemMessages = async (user_id, user_role, user_company_id) => {
-  // Get all urgent active messages
-  const { data: allUrgentMessages, error: messagesError } = await supabase
-    .from('system_messages')
-    .select('*')
-    .eq('is_active', true)
-    .eq('priority', 'urgent')
-    .order('created_at', { ascending: false });
+  // Get all urgent active messages via API
+  let allUrgentMessages = [];
+  try {
+    allUrgentMessages = await SystemMessages.list({ 
+      is_active: true, 
+      priority: 'urgent' 
+    });
+  } catch (messagesError) {
+    console.error('Error fetching system messages:', messagesError);
+    throw messagesError;
+  }
   
-  if (messagesError) throw messagesError;
   if (!allUrgentMessages) return [];
   
   // If sys_admin, return all messages
@@ -23,12 +27,11 @@ const getUrgentSystemMessages = async (user_id, user_role, user_company_id) => {
   // For non-sys_admin users, apply visibility filtering
   if (!user_id) return [];
   
-  // Get all profiles for company-based filtering
-  const { data: allProfiles, error: profilesError } = await supabase
-    .from('profiles')
-    .select('id, role, company_id');
-  
-  if (profilesError) {
+  // Get all profiles for company-based filtering via API
+  let allProfiles = [];
+  try {
+    allProfiles = await Profiles.getBasic();
+  } catch (profilesError) {
     console.warn('Could not fetch profiles, falling back to basic filtering:', profilesError);
     // Fallback to basic filtering
     return allUrgentMessages.filter(msg => 

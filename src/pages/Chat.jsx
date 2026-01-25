@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChatUser, ChatMessage, ChatConversation } from '@/api/entities';
+import { ChatUser, ChatMessage, ChatConversation, ScheduledReminders } from '@/api/entities';
 import { Menu } from '@/api/entities';
 import { Client } from '@/api/entities';
 import { User } from '@/api/entities';
@@ -17,6 +17,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/lib/supabase';
 import { uploadFile, validateFile, getFileCategory, formatFileSize } from '@/utils/storage';
+
 
 export default function Chat() {
   const { language, translations } = useLanguage();
@@ -135,16 +136,7 @@ export default function Chat() {
       
       try {
         console.log('🔍 Getting client ID for user_code:', selectedClient.user_code);
-        const { data: client, error } = await supabase
-          .from('chat_users')
-          .select('id')
-          .eq('user_code', selectedClient.user_code)
-          .single();
-        
-        if (error) {
-          console.error('Error getting client ID:', error);
-          return;
-        }
+        const client = await ChatUser.get(selectedClient.user_code, { fields: 'id' });
         
         if (client) {
           setClientId(client.id);
@@ -416,14 +408,10 @@ export default function Chat() {
   const addToUserMessageQueue = async (queueData) => {
     try {
       // Get phone number from chat_users table
-      const { data: clientData, error: clientError } = await supabase
-        .from('chat_users')
-        .select('phone_number')
-        .eq('user_code', queueData.user_code)
-        .single();
+      const clientData = await ChatUser.get(queueData.user_code, { fields: 'phone_number' });
 
-      if (clientError || !clientData?.phone_number) {
-        console.error('Error fetching phone number from chat_users:', clientError);
+      if (!clientData?.phone_number) {
+        console.error('Error fetching phone number from chat_users');
         throw new Error(`Failed to get phone number for user ${queueData.user_code}`);
       }
 
@@ -524,18 +512,10 @@ export default function Chat() {
     if (!selectedClient?.user_code) return;
     
     try {
-      const { data, error } = await supabase
-        .from('scheduled_reminders')
-        .select('*')
-        .eq('user_code', selectedClient.user_code)
-        .in('status', ['pending', 'scheduled'])
-        .order('scheduled_date', { ascending: true })
-        .order('scheduled_time', { ascending: true });
-      
-      if (error) {
-        console.error('Error fetching scheduled reminders:', error);
-        throw error;
-      }
+      const data = await ScheduledReminders.list({ 
+        user_code: selectedClient.user_code,
+        status: ['pending', 'scheduled']
+      });
       
       setScheduledReminders(data || []);
       console.log('✅ Fetched scheduled reminders:', data?.length || 0);
@@ -548,17 +528,7 @@ export default function Chat() {
   // Update scheduled reminder
   const updateScheduledReminder = async (reminderId, updates) => {
     try {
-      const { data, error } = await supabase
-        .from('scheduled_reminders')
-        .update(updates)
-        .eq('id', reminderId)
-        .select()
-        .single();
-      
-      if (error) {
-        console.error('Error updating scheduled reminder:', error);
-        throw error;
-      }
+      const data = await ScheduledReminders.update(reminderId, updates);
       
       // Refresh the list
       await fetchScheduledReminders();
@@ -578,15 +548,7 @@ export default function Chat() {
     }
     
     try {
-      const { error } = await supabase
-        .from('scheduled_reminders')
-        .delete()
-        .eq('id', reminderId);
-      
-      if (error) {
-        console.error('Error deleting scheduled reminder:', error);
-        throw error;
-      }
+      await ScheduledReminders.delete(reminderId);
       
       // Refresh the list
       await fetchScheduledReminders();
@@ -801,36 +763,24 @@ export default function Chat() {
           // Insert into scheduled_reminders table
           try {
             // Get client data including phone_number and telegram_chat_id
-            const { data: clientData, error: clientError } = await supabase
-              .from('chat_users')
-              .select('phone_number, telegram_chat_id')
-              .eq('user_code', selectedClient.user_code)
-              .single();
+            const clientData = await ChatUser.get(selectedClient.user_code, { fields: 'phone_number,telegram_chat_id' });
             
-            if (clientError) {
-              console.error('Error fetching client data:', clientError);
-              throw clientError;
+            if (!clientData) {
+              console.error('Error fetching client data');
+              throw new Error('Failed to fetch client data');
             }
             
             // Determine channel based on telegram_chat_id
             const channel = clientData.telegram_chat_id ? 'telegram' : 'whatsapp';
             
             // Get active meal plan ID from meal_plans_and_schemas
-            const { data: mealPlanData, error: mealPlanError } = await supabase
-              .from('meal_plans_and_schemas')
-              .select('id')
-              .eq('user_code', selectedClient.user_code)
-              .eq('record_type', 'meal_plan')
-              .eq('status', 'active')
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .single();
+            const mealPlan = await ChatUser.getMealPlanByUserCode(selectedClient.user_code);
             
             let planId = null;
-            if (mealPlanError) {
-              console.warn('No active meal plan found:', mealPlanError);
-            } else if (mealPlanData) {
-              planId = mealPlanData.id;
+            if (!mealPlan) {
+              console.warn('No active meal plan found');
+            } else {
+              planId = mealPlan.id;
             }
             
             // Prepare media attachments if file is attached
@@ -845,40 +795,31 @@ export default function Chat() {
             }
             
             // Insert into scheduled_reminders table
-            const { data: scheduledReminder, error: reminderError } = await supabase
-              .from('scheduled_reminders')
-              .insert({
-                message_type: 'scheduled',
-                topic: 'chat_message_scheduled',
-                scheduled_date: scheduledDate,
-                scheduled_time: scheduledTime,
-                context: message,
-                status: 'pending',
-                priority: 'high',
-                user_id: currentDietitian.id, // Required for RLS policy
-                user_code: selectedClient.user_code,
-                phone_number: clientData.phone_number,
-                channel: channel,
-                plan_type: null, // Regular scheduled messages are not tied to a plan
-                plan_id: null,
-                week_number: null,
-                is_active: true,
-                media_attachments: mediaAttachments.length > 0 ? mediaAttachments : null,
-                metadata: {
-                  conversation_id: conversationId,
-                  dietitian_id: currentDietitian.id,
-                  client_id: clientId,
-                  message_type: messageType,
-                  isSystemReminder: messageType === 'system_reminder'
-                }
-              })
-              .select()
-              .single();
-            
-            if (reminderError) {
-              console.error('Error inserting into scheduled_reminders:', reminderError);
-              throw reminderError;
-            }
+            const scheduledReminder = await ScheduledReminders.create({
+              message_type: 'scheduled',
+              topic: 'chat_message_scheduled',
+              scheduled_date: scheduledDate,
+              scheduled_time: scheduledTime,
+              context: message,
+              status: 'pending',
+              priority: 'high',
+              user_id: currentDietitian.id, // Required for RLS policy
+              user_code: selectedClient.user_code,
+              phone_number: clientData.phone_number,
+              channel: channel,
+              plan_type: null, // Regular scheduled messages are not tied to a plan
+              plan_id: null,
+              week_number: null,
+              is_active: true,
+              media_attachments: mediaAttachments.length > 0 ? mediaAttachments : null,
+              metadata: {
+                conversation_id: conversationId,
+                dietitian_id: currentDietitian.id,
+                client_id: clientId,
+                message_type: messageType,
+                isSystemReminder: messageType === 'system_reminder'
+              }
+            });
             
             console.log('✅ Scheduled reminder added to scheduled_reminders table:', scheduledReminder);
             

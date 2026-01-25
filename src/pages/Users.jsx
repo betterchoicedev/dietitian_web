@@ -9,14 +9,15 @@ import {
   Chat,
   ChatConversation,
   ChatMessage,
-  MessageQueue
+  MessageQueue,
+  Clients as ClientsAPI
 } from '@/api/entities';
 
 import { useLanguage } from '@/contexts/LanguageContext';
 
 import { getMyProfile, getCompanyProfileIds } from '@/utils/auth';
 
-import { supabase, secondSupabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 
 import { 
 
@@ -2582,23 +2583,8 @@ export default function Clients() {
       // Ensure all meal plans are deleted by user_code (fallback for any that failed above)
       // This is critical - we must delete all meal plans before deleting the user to avoid foreign key constraint errors
       try {
-        const { error: mealPlanDeleteError } = await supabase
-          .from('meal_plans_and_schemas')
-          .delete()
-          .eq('user_code', clientId);
-        
-        if (mealPlanDeleteError) {
-          console.error(
-            `Failed to delete meal plans for user_code ${clientId}:`,
-            mealPlanDeleteError
-          );
-          throw new Error(
-            `Cannot delete client: Failed to delete associated meal plans. ` +
-            `This is required to avoid database constraint errors. Error: ${mealPlanDeleteError.message}`
-          );
-        } else {
-          console.log(`✅ Ensured all meal plans deleted for user_code ${clientId}`);
-        }
+        await Menu.deleteByUserCode(clientId);
+        console.log(`✅ Ensured all meal plans deleted for user_code ${clientId}`);
       } catch (mealPlanCleanupError) {
         console.error(
           `Error during meal plan cleanup for user_code ${clientId}:`,
@@ -2661,14 +2647,11 @@ export default function Clients() {
       // Delete from secondary Supabase clients table and auth.users
       try {
         // First, fetch the client record to get user_id or email for auth deletion
-        const { data: clientRecord, error: fetchError } = await secondSupabase
-          .from('clients')
-          .select('user_id, email')
-          .eq('user_code', clientId)
-          .single();
-
-        if (fetchError && fetchError.code !== 'PGRST116') {
-          // PGRST116 means no rows found, which is fine
+        let clientRecord = null;
+        try {
+          clientRecord = await ClientsAPI.get(clientId, 'user_id,email');
+        } catch (fetchError) {
+          // If error (like 404), that's fine - client might not exist in second DB
           console.warn(
             `Failed to fetch client record from secondary Supabase for user_code ${clientId}:`,
             fetchError
@@ -2676,19 +2659,15 @@ export default function Clients() {
         }
 
         // Delete from clients table
-        const { error: clientsDeleteError } = await secondSupabase
-          .from('clients')
-          .delete()
-          .eq('user_code', clientId);
-
-        if (clientsDeleteError) {
+        try {
+          await ClientsAPI.delete(clientId);
+          console.log(`Successfully deleted client from secondary Supabase clients table for user_code ${clientId}`);
+        } catch (clientsDeleteError) {
           console.warn(
             `Failed to delete client from secondary Supabase clients table for user_code ${clientId}:`,
             clientsDeleteError
           );
           // Don't throw - continue with deletion even if secondary table deletion fails
-        } else {
-          console.log(`Successfully deleted client from secondary Supabase clients table for user_code ${clientId}`);
         }
 
         // Delete from auth.users if we have the user_id or email

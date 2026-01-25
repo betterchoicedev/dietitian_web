@@ -1,111 +1,163 @@
 """
-Supabase API Routes
-This module provides REST API endpoints for all Supabase database operations.
-Replaces direct Supabase calls from the frontend with backend API calls.
+Secure Backend API Blueprint for Dietitian Web Application
+All Supabase database operations as Flask Blueprint
+Integrates with backend.py
+
+CORS Configuration:
+- CORS is handled by the main Flask app in backend.py
+- All routes under /api/* (including /api/db/*) have CORS enabled
+- Allowed origins include:
+  * http://localhost:5173
+  * https://www.betterchoicefood.com
+  * And other configured origins
 """
 
 from flask import Blueprint, jsonify, request
-from supabase import create_client, Client
+from typing import Optional
+from datetime import datetime, timedelta
 import os
-from datetime import datetime
 import logging
+from supabase import create_client, Client
+import random
+import string
 
+# Initialize logging
 logger = logging.getLogger(__name__)
 
-# Create Blueprint
+# Create Flask Blueprint
 supabase_bp = Blueprint('supabase_api', __name__, url_prefix='/api/db')
 
 # Initialize Supabase client
-supabase_url = os.getenv('supabaseUrl')
-supabase_key = os.getenv('supabaseKey')
+SUPABASE_URL = os.getenv("supabaseUrl") or os.getenv("SUPABASE_URL")
+SUPABASE_KEY = (
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    or os.getenv("supabaseServiceRoleKey")
+    or os.getenv("supabaseServiceKey")
+    or os.getenv("supabaseKey")
+)
 
-if not supabase_url or not supabase_key:
-    logger.error("Supabase credentials not found in environment variables")
-    supabase: Client = None
+if not SUPABASE_URL or not SUPABASE_KEY:
+    logger.warning("⚠️ Supabase credentials not found in environment variables")
+    logger.warning("Set supabaseUrl and supabaseServiceRoleKey (or variations)")
+
+try:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    logger.info("✅ Supabase client initialized for API blueprint")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize Supabase client: {e}")
+    supabase = None
+
+# Initialize second Supabase client (for client_meal_plans database)
+SECOND_SUPABASE_URL = os.getenv("SECOND_SUPABASE_URL") or os.getenv("secondSupabaseUrl")
+SECOND_SUPABASE_KEY = (
+    os.getenv("SECOND_SUPABASE_SERVICE_ROLE_KEY")
+    or os.getenv("secondSupabaseServiceRoleKey")
+    or os.getenv("secondSupabaseServiceKey")
+    or os.getenv("secondSupabaseKey")
+)
+
+second_supabase: Client = None
+if SECOND_SUPABASE_URL and SECOND_SUPABASE_KEY:
+    try:
+        second_supabase = create_client(SECOND_SUPABASE_URL, SECOND_SUPABASE_KEY)
+        logger.info("✅ Second Supabase client initialized for API blueprint")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize second Supabase client: {e}")
+        second_supabase = None
 else:
-    supabase: Client = create_client(supabase_url, supabase_key)
+    logger.warning("⚠️ Second Supabase credentials not found - client_meal_plans endpoints will not work")
 
-
-def handle_error(error, operation="Operation"):
-    """Centralized error handler"""
-    logger.error(f"{operation} failed: {str(error)}")
+# Helper function to handle Supabase errors
+def handle_supabase_error(error, operation):
+    logger.error(f"❌ Error in {operation}: {error}")
     return jsonify({"error": str(error)}), 500
 
+# Helper to generate a short, human-friendly invite code
+def generate_invite_code():
+    """Generate 8-character uppercase alphanumeric invite code"""
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
-def sanitize_for_serialization(obj, seen=None):
-    """
-    Recursively sanitize an object to remove circular references.
-    Returns a clean copy that can be safely serialized to JSON.
-    """
-    if seen is None:
-        seen = set()
-    
-    # Handle None
-    if obj is None:
-        return None
-    
-    # Handle primitives
-    if not isinstance(obj, (dict, list)):
-        # Handle datetime objects
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        return obj
-    
-    # Check for circular reference
-    obj_id = id(obj)
-    if obj_id in seen:
-        return "[Circular Reference]"
-    
-    seen.add(obj_id)
-    
+# ==================== REGISTRATION INVITES ENDPOINTS ====================
+
+@supabase_bp.route("/registration-invites", methods=["GET"])
+def list_registration_invites():
+    """List registration invites with optional filters"""
     try:
-        # Handle dictionaries
-        if isinstance(obj, dict):
-            sanitized = {}
-            for key, value in obj.items():
-                # Skip change_log to prevent circular references
-                if key == 'change_log':
-                    continue
-                try:
-                    sanitized[key] = sanitize_for_serialization(value, seen)
-                except Exception:
-                    sanitized[key] = "[Error serializing]"
-            seen.remove(obj_id)
-            return sanitized
+        email = request.args.get('email')
+        status = request.args.get('status')
         
-        # Handle lists
-        if isinstance(obj, list):
-            sanitized = [sanitize_for_serialization(item, seen) for item in obj]
-            seen.remove(obj_id)
-            return sanitized
-    except Exception:
-        seen.discard(obj_id)
-        return "[Error serializing]"
-    
-    seen.discard(obj_id)
-    return obj
+        query = supabase.table("registration_invites").select("*").order("created_at", desc=True)
+        
+        if email:
+            query = query.ilike("email", f"%{email}%")
+        
+        if status == "active":
+            query = query.is_("used_at", "null").is_("revoked_at", "null")
+        elif status == "used":
+            query = query.not_.is_("used_at", "null")
+        elif status == "revoked":
+            query = query.not_.is_("revoked_at", "null")
+        
+        response = query.execute()
+        return jsonify(response.data), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'list_registration_invites')
 
-
-# ============================================================================
-# MEAL PLANS AND SCHEMAS (Menu entity)
-# ============================================================================
-
-@supabase_bp.route('/meal-plans', methods=['POST'])
-def create_meal_plan():
-    """Create a new meal plan"""
+@supabase_bp.route("/registration-invites", methods=["POST"])
+def create_registration_invite():
+    """Create a new registration invite"""
     try:
-        data = request.json
+        payload = request.get_json()
         
-        # Normalize status to draft by default
-        data['status'] = data.get('status', 'draft')
+        # Compute expires_at from expires_in_hours
+        expires_at = None
+        if payload.get('expires_in_hours'):
+            hours = float(payload['expires_in_hours'])
+            if hours > 0:
+                expires_at = (datetime.utcnow() + timedelta(hours=hours)).isoformat()
         
-        # Only block creation if trying to create an ACTIVE menu while one already exists
-        if data.get('user_code') and data['status'] == 'active':
-            existing = supabase.table('meal_plans_and_schemas')\
-                .select('id')\
-                .eq('user_code', data['user_code'])\
-                .eq('record_type', 'meal_plan')\
-                .eq('status', 'active')\
+        invite_record = {
+            "code": payload.get('code') or generate_invite_code(),
+            "email": payload.get('email', '').strip().lower(),
+            "role": payload.get('role', 'employee'),
+            "company_id": None if payload.get('company_id') in ['', 'none'] else payload.get('company_id'),
+            "expires_at": expires_at,
+            "max_uses": payload.get('max_uses', 1),
+            "notes": payload.get('notes'),
+        }
+        
+        response = supabase.table("registration_invites").insert(invite_record).execute()
+        return jsonify(response.data[0] if response.data else None), 201
+    except Exception as e:
+        return handle_supabase_error(e, 'create_registration_invite')
+
+@supabase_bp.route("/registration-invites/<code>/revoke", methods=["POST"])
+def revoke_registration_invite(code):
+    """Revoke a registration invite"""
+    try:
+        response = supabase.table("registration_invites").update({
+            "revoked_at": datetime.utcnow().isoformat()
+        }).eq("code", code).execute()
+        
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'revoke_registration_invite')
+
+# ==================== MENU / MEAL PLANS ENDPOINTS ====================
+
+@supabase_bp.route("/menus", methods=["POST"])
+def create_menu():
+    """Create a new menu/meal plan"""
+    try:
+        data = request.get_json()
+        
+        # Check if active menu exists
+        if data.get('user_code') and data.get('status') == 'active':
+            existing = supabase.table("meal_plans_and_schemas")\
+                .select("id")\
+                .eq("user_code", data['user_code'])\
+                .eq("record_type", "meal_plan")\
+                .eq("status", "active")\
                 .execute()
             
             if existing.data and len(existing.data) > 0:
@@ -114,7 +166,8 @@ def create_meal_plan():
                 }), 400
         
         # Add change log entry
-        log_entry = {
+        change_log = data.get("change_log", [])
+        change_log.append({
             "timestamp": datetime.utcnow().isoformat(),
             "actor_id": data.get('dietitian_id', 'system'),
             "action": "CREATED",
@@ -122,2198 +175,1802 @@ def create_meal_plan():
                 "record_type": data.get('record_type'),
                 "meal_plan_name": data.get('meal_plan_name')
             }
-        }
+        })
+        data["change_log"] = change_log
         
-        change_log = data.get('change_log', [])
-        change_log.append(log_entry)
-        data['change_log'] = change_log
-        
-        # Insert into Supabase
-        result = supabase.table('meal_plans_and_schemas')\
-            .insert(data)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 201
-        
+        response = supabase.table("meal_plans_and_schemas").insert(data).execute()
+        return jsonify(response.data[0] if response.data else None), 201
     except Exception as e:
-        return handle_error(e, "Create meal plan")
+        return handle_supabase_error(e, 'create_menu')
 
-
-@supabase_bp.route('/meal-plans/<meal_plan_id>', methods=['GET'])
-def get_meal_plan(meal_plan_id):
-    """Get a specific meal plan by ID"""
+@supabase_bp.route("/menus/<menu_id>", methods=["GET"])
+def get_menu(menu_id):
+    """Get a specific menu by ID"""
     try:
-        result = supabase.table('meal_plans_and_schemas')\
-            .select('*')\
-            .eq('id', meal_plan_id)\
-            .single()\
-            .execute()
-        
-        return jsonify(result.data if result.data else {}), 200
-        
+        response = supabase.table("meal_plans_and_schemas").select("*").eq("id", menu_id).execute()
+        if not response.data:
+            return jsonify({"error": "Menu not found"}), 404
+        return jsonify(response.data[0]), 200
     except Exception as e:
-        return handle_error(e, "Get meal plan")
+        return handle_supabase_error(e, 'get_menu')
 
-
-@supabase_bp.route('/meal-plans', methods=['GET'])
-def list_meal_plans():
-    """List all meal plans"""
+@supabase_bp.route("/menus", methods=["GET"])
+def list_menus():
+    """List all menus"""
     try:
-        result = supabase.table('meal_plans_and_schemas')\
-            .select('*')\
-            .order('created_at', desc=True)\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
+        response = supabase.table("meal_plans_and_schemas").select("*").order("created_at", desc=True).execute()
+        return jsonify(response.data), 200
     except Exception as e:
-        return handle_error(e, "List meal plans")
+        return handle_supabase_error(e, 'list_menus')
 
-
-@supabase_bp.route('/meal-plans/filter', methods=['POST'])
-def filter_meal_plans():
-    """Filter meal plans based on query parameters"""
+@supabase_bp.route("/menus/filter", methods=["POST"])
+def filter_menus():
+    """Filter menus with query parameters
+    
+    Supports:
+    - Simple equality: { key: value }
+    - IN clause: { key: [value1, value2] }
+    - Not equal: { not_key: value } -> neq('key', value)
+    - Less than: { key_lt: value } -> lt('key', value)
+    - Not null: { key_not_null: true } -> not('key', 'is', null)
+    """
     try:
-        query_params = request.json
-        order_by = query_params.pop('orderBy', 'created_at')
+        data = request.get_json()
+        filters = data.get('filters', {})
+        order_by = data.get('order_by', 'created_at')
         
-        # Check for empty array filters
-        has_empty_array = any(
-            isinstance(v, list) and len(v) == 0 
-            for v in query_params.values()
-        )
+        query = supabase.table("meal_plans_and_schemas").select("*")
         
-        if has_empty_array:
-            return jsonify([]), 200
-        
-        # Build query
-        query = supabase.table('meal_plans_and_schemas').select('*')
-        
-        # Apply filters
-        for key, value in query_params.items():
+        for key, value in filters.items():
             if value is not None:
-                if isinstance(value, list):
-                    query = query.in_(key, value)
+                # Handle special operators
+                if key.endswith('_lt'):
+                    # Less than operator
+                    column = key[:-3]  # Remove '_lt' suffix
+                    query = query.lt(column, value)
+                elif key.endswith('_not_null') and value is True:
+                    # Not null operator
+                    column = key[:-9]  # Remove '_not_null' suffix
+                    query = query.not_.is_(column, "null")
+                elif key.startswith('not_'):
+                    # Not equal operator
+                    column = key[4:]  # Remove 'not_' prefix
+                    query = query.neq(column, value)
+                elif isinstance(value, list):
+                    # IN clause
+                    if len(value) > 0:
+                        query = query.in_(key, value)
+                    else:
+                        return jsonify([]), 200
                 else:
+                    # Simple equality
                     query = query.eq(key, value)
         
         # Apply ordering
-        order_column = order_by.lstrip('-')
-        if order_column == 'created_date':
-            order_column = 'created_at'
+        order_column = order_by.replace("-", "")
+        desc = order_by.startswith("-")
+        if order_column == "created_date":
+            order_column = "created_at"
         
-        desc_order = order_by.startswith('-')
-        query = query.order(order_column, desc=desc_order)
-        
-        result = query.execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
+        query = query.order(order_column, desc=desc)
+        response = query.execute()
+        return jsonify(response.data), 200
     except Exception as e:
-        return handle_error(e, "Filter meal plans")
+        return handle_supabase_error(e, 'filter_menus')
 
-
-@supabase_bp.route('/meal-plans/<meal_plan_id>', methods=['PUT'])
-def update_meal_plan(meal_plan_id):
-    """Update a meal plan"""
+@supabase_bp.route("/menus/<menu_id>", methods=["PATCH"])
+def update_menu(menu_id):
+    """Update a menu"""
     try:
-        data = request.json
+        updates = request.get_json()
+        if not updates:
+            return jsonify({"error": "No update data provided"}), 400
         
-        # Check if user already has an active menu before setting status to active
-        if data.get('status') == 'active':
-            # Ensure we have user_code
-            user_code = data.get('user_code')
-            if not user_code:
-                current_menu = supabase.table('meal_plans_and_schemas')\
-                    .select('user_code')\
-                    .eq('id', meal_plan_id)\
-                    .single()\
-                    .execute()
-                user_code = current_menu.data.get('user_code') if current_menu.data else None
-            
-            if not user_code:
-                return jsonify({"error": "User code is required to activate a menu."}), 400
-            
-            # Find other active menus for this user
-            existing_active = supabase.table('meal_plans_and_schemas')\
-                .select('id, active_days')\
-                .eq('user_code', user_code)\
-                .eq('record_type', 'meal_plan')\
-                .eq('status', 'active')\
-                .execute()
-            
-            other_active = [m for m in (existing_active.data or []) if m['id'] != meal_plan_id]
-            
-            if other_active:
-                # Get new meal plan's active_days
-                new_active_days = data.get('active_days')
-                if new_active_days is None:
-                    current_menu = supabase.table('meal_plans_and_schemas')\
-                        .select('active_days')\
-                        .eq('id', meal_plan_id)\
-                        .single()\
-                        .execute()
-                    new_active_days = current_menu.data.get('active_days') if current_menu.data else None
-                
-                # Normalize days
-                new_days_set = set(range(7)) if not new_active_days or len(new_active_days) == 0 else set(new_active_days)
-                
-                # Check for conflicts
-                for existing_menu in other_active:
-                    existing_days = existing_menu.get('active_days')
-                    existing_days_set = set(range(7)) if not existing_days or len(existing_days) == 0 else set(existing_days)
-                    
-                    # Check overlap
-                    if new_days_set & existing_days_set:
-                        return jsonify({
-                            "error": f"Cannot activate meal plan: There is already an active meal plan for overlapping days."
-                        }), 400
+        # Get existing change log
+        existing = supabase.table("meal_plans_and_schemas").select("change_log").eq("id", menu_id).execute()
+        if not existing.data:
+            return jsonify({"error": "Menu not found"}), 404
         
-        # Add change log entry
-        existing_menu = supabase.table('meal_plans_and_schemas')\
-            .select('change_log')\
-            .eq('id', meal_plan_id)\
-            .single()\
-            .execute()
+        # Handle change log - ensure it's a list
+        change_log = existing.data[0].get("change_log")
+        if change_log is None:
+            change_log = []
+        elif not isinstance(change_log, list):
+            change_log = []
         
-        change_log = existing_menu.data.get('change_log', []) if existing_menu.data else []
+        # Add change log entry (only if not already in updates to avoid recursion)
+        if "change_log" not in updates:
+            change_log.append({
+                "timestamp": datetime.utcnow().isoformat(),
+                "actor_id": updates.get('dietitian_id', 'system'),
+                "action": "UPDATED",
+                "details": {k: v for k, v in updates.items() if k != 'change_log'}
+            })
+            updates["change_log"] = change_log
         
-        # Create a sanitized copy of data for the change log to avoid circular references
-        log_details = sanitize_for_serialization(data)
+        # Set updated_at if not already set
+        if "updated_at" not in updates:
+            updates["updated_at"] = datetime.utcnow().isoformat()
         
-        log_entry = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "actor_id": data.get('dietitian_id', 'system'),
-            "action": "UPDATED",
-            "details": log_details
-        }
-        change_log.append(log_entry)
-        data['change_log'] = change_log
-        data['updated_at'] = datetime.utcnow().isoformat()
-        
-        # Update in Supabase
-        result = supabase.table('meal_plans_and_schemas')\
-            .update(data)\
-            .eq('id', meal_plan_id)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 200
-        
+        response = supabase.table("meal_plans_and_schemas").update(updates).eq("id", menu_id).execute()
+        return jsonify(response.data[0] if response.data else None), 200
     except Exception as e:
-        return handle_error(e, "Update meal plan")
+        return handle_supabase_error(e, 'update_menu')
 
-
-@supabase_bp.route('/meal-plans/<meal_plan_id>', methods=['DELETE'])
-def delete_meal_plan(meal_plan_id):
-    """Delete a meal plan"""
+@supabase_bp.route("/menus/<menu_id>", methods=["DELETE"])
+def delete_menu(menu_id):
+    """Delete a menu"""
     try:
-        supabase.table('meal_plans_and_schemas')\
-            .delete()\
-            .eq('id', meal_plan_id)\
-            .execute()
-        
+        supabase.table("meal_plans_and_schemas").delete().eq("id", menu_id).execute()
         return jsonify({"success": True}), 200
-        
     except Exception as e:
-        return handle_error(e, "Delete meal plan")
+        return handle_supabase_error(e, 'delete_menu')
 
+@supabase_bp.route("/menus/user/<user_code>", methods=["DELETE"])
+def delete_menus_by_user_code(user_code):
+    """Delete all menus for a user_code"""
+    try:
+        supabase.table("meal_plans_and_schemas").delete().eq("user_code", user_code).execute()
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'delete_menus_by_user_code')
 
-# ============================================================================
-# CHAT USERS
-# ============================================================================
+# ==================== CHAT USERS ENDPOINTS ====================
 
-@supabase_bp.route('/chat-users', methods=['POST'])
+@supabase_bp.route("/chat-users", methods=["POST"])
 def create_chat_user():
     """Create a new chat user"""
     try:
-        data = request.json
-        
-        result = supabase.table('chat_users')\
-            .insert(data)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 201
-        
+        data = request.get_json()
+        response = supabase.table("chat_users").insert(data).execute()
+        return jsonify(response.data[0] if response.data else None), 201
     except Exception as e:
-        return handle_error(e, "Create chat user")
+        return handle_supabase_error(e, 'create_chat_user')
 
-
-@supabase_bp.route('/chat-users', methods=['GET'])
+@supabase_bp.route("/chat-users", methods=["GET"])
 def list_chat_users():
-    """List all chat users with optional field selection"""
+    """List all chat users"""
     try:
-        # Support field selection via query parameter
         fields = request.args.get('fields', '*')
-        if fields != '*':
-            # Convert comma-separated string to list
-            fields = [f.strip() for f in fields.split(',')]
-        
-        query = supabase.table('chat_users')
-        
-        if fields == '*':
-            query = query.select('*')
-        else:
-            query = query.select(','.join(fields))
-        
-        result = query.order('full_name').execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
+        response = supabase.table("chat_users").select(fields).order("full_name").execute()
+        return jsonify(response.data), 200
     except Exception as e:
-        return handle_error(e, "List chat users")
+        return handle_supabase_error(e, 'list_chat_users')
 
-
-@supabase_bp.route('/chat-users/<user_code>', methods=['GET'])
+@supabase_bp.route("/chat-users/<user_code>", methods=["GET"])
 def get_chat_user(user_code):
-    """Get a chat user by user_code with optional field selection"""
+    """Get a specific chat user by user_code"""
     try:
-        # Support field selection via query parameter
         fields = request.args.get('fields', '*')
-        if fields != '*':
-            # Convert comma-separated string to list
-            fields = [f.strip() for f in fields.split(',')]
-        
-        # Select must be called first to get a query builder that supports filtering
-        if fields == '*':
-            query = supabase.table('chat_users').select('*')
-        else:
-            query = supabase.table('chat_users').select(','.join(fields))
-        
-        # Then apply the filter
-        query = query.eq('user_code', user_code)
-        
-        result = query.single().execute()
-        
-        return jsonify(result.data if result.data else {}), 200
-        
+        response = supabase.table("chat_users").select(fields).eq("user_code", user_code).execute()
+        if not response.data:
+            return jsonify({"error": "User not found"}), 404
+        return jsonify(response.data[0]), 200
     except Exception as e:
-        return handle_error(e, "Get chat user")
+        return handle_supabase_error(e, 'get_chat_user')
 
-
-@supabase_bp.route('/chat-users/<user_code>', methods=['PUT'])
-def update_chat_user(user_code):
-    """Update a chat user"""
-    try:
-        data = request.json
-        
-        result = supabase.table('chat_users')\
-            .update(data)\
-            .eq('user_code', user_code)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Update chat user")
-
-
-@supabase_bp.route('/chat-users/<user_code>', methods=['DELETE'])
-def delete_chat_user(user_code):
-    """Delete a chat user"""
-    try:
-        supabase.table('chat_users')\
-            .delete()\
-            .eq('user_code', user_code)\
-            .execute()
-        
-        return jsonify({"success": True}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Delete chat user")
-
-
-@supabase_bp.route('/chat-users/<user_code>/meal-plan', methods=['GET'])
-def get_user_active_meal_plan(user_code):
+@supabase_bp.route("/chat-users/<user_code>/meal-plan", methods=["GET"])
+def get_user_meal_plan(user_code):
     """Get active meal plan for a user"""
     try:
-        result = supabase.table('meal_plans_and_schemas')\
-            .select('meal_plan, daily_total_calories, macros_target, recommendations, dietary_restrictions')\
-            .eq('user_code', user_code)\
-            .eq('record_type', 'meal_plan')\
-            .eq('status', 'active')\
-            .order('created_at', desc=True)\
+        response = supabase.table("meal_plans_and_schemas")\
+            .select("meal_plan, daily_total_calories, macros_target, recommendations, dietary_restrictions")\
+            .eq("user_code", user_code)\
+            .eq("record_type", "meal_plan")\
+            .eq("status", "active")\
+            .order("created_at", desc=True)\
             .limit(1)\
             .execute()
         
-        meal_plan = result.data[0] if result.data and len(result.data) > 0 else None
-        return jsonify(meal_plan), 200
-        
+        return jsonify(response.data[0] if response.data else None), 200
     except Exception as e:
-        return handle_error(e, "Get user meal plan")
+        return handle_supabase_error(e, 'get_user_meal_plan')
 
-
-# ============================================================================
-# CHATS
-# ============================================================================
-
-@supabase_bp.route('/chats', methods=['POST'])
-def create_chat():
-    """Create a new chat"""
+@supabase_bp.route("/chat-users/<user_code>", methods=["PATCH"])
+def update_chat_user(user_code):
+    """Update a chat user"""
     try:
-        data = request.json
+        updates = request.get_json()
+        response = supabase.table("chat_users").update(updates).eq("user_code", user_code).execute()
         
-        result = supabase.table('chats')\
-            .insert(data)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 201
-        
+        if not response.data:
+            return jsonify({"error": "User not found"}), 404
+        return jsonify(response.data[0]), 200
     except Exception as e:
-        return handle_error(e, "Create chat")
+        return handle_supabase_error(e, 'update_chat_user')
 
-
-@supabase_bp.route('/chats/<chat_id>', methods=['GET'])
-def get_chat(chat_id):
-    """Get a specific chat"""
+@supabase_bp.route("/chat-users/<user_code>", methods=["DELETE"])
+def delete_chat_user(user_code):
+    """Delete a chat user"""
     try:
-        result = supabase.table('chats')\
-            .select('*')\
-            .eq('id', chat_id)\
+        supabase.table("chat_users").delete().eq("user_code", user_code).execute()
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'delete_chat_user')
+
+# ==================== CHAT CONVERSATIONS ENDPOINTS ====================
+
+@supabase_bp.route("/chat-conversations", methods=["GET"])
+def list_chat_conversations():
+    """List all chat conversations"""
+    try:
+        fields = request.args.get('fields', '*')
+        # Order by id (descending) to get the most recent conversations first
+        response = supabase.table("chat_conversations").select(fields).order("id", desc=True).execute()
+        return jsonify(response.data), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'list_chat_conversations')
+
+@supabase_bp.route("/chat-conversations/user/<user_code>", methods=["GET"])
+def get_conversation_by_user_code(user_code):
+    """Get conversation for a specific user by user_code"""
+    try:
+        # First, get the user_id from chat_users table using user_code
+        user_response = supabase.table("chat_users")\
+            .select("id")\
+            .eq("user_code", user_code)\
             .single()\
             .execute()
         
-        return jsonify(result.data if result.data else {}), 200
+        if not user_response.data:
+            return jsonify({"error": "User not found"}), 404
         
-    except Exception as e:
-        return handle_error(e, "Get chat")
-
-
-@supabase_bp.route('/chats', methods=['GET'])
-def list_chats():
-    """List all chats"""
-    try:
-        result = supabase.table('chats')\
-            .select('*')\
-            .order('created_at', desc=True)\
+        user_id = user_response.data["id"]
+        
+        # Now get the conversation using user_id
+        # Order by id (descending) to get the most recent conversation
+        response = supabase.table("chat_conversations")\
+            .select("*")\
+            .eq("user_id", user_id)\
+            .order("id", desc=True)\
+            .limit(1)\
             .execute()
         
-        return jsonify(result.data if result.data else []), 200
-        
+        if not response.data:
+            return jsonify({"error": "Conversation not found"}), 404
+        return jsonify(response.data[0]), 200
     except Exception as e:
-        return handle_error(e, "List chats")
+        return handle_supabase_error(e, 'get_conversation_by_user_code')
 
-
-@supabase_bp.route('/chats/filter', methods=['POST'])
-def filter_chats():
-    """Filter chats based on query parameters"""
+@supabase_bp.route("/chat-conversations/user/<user_code>/all", methods=["GET"])
+def list_conversations_by_user_code(user_code):
+    """List all conversations for a specific user"""
     try:
-        query_params = request.json
-        
-        query = supabase.table('chats').select('*')
-        
-        for key, value in query_params.items():
-            if value is not None:
-                query = query.eq(key, value)
-        
-        result = query.execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Filter chats")
-
-
-@supabase_bp.route('/chats/<chat_id>', methods=['PUT'])
-def update_chat(chat_id):
-    """Update a chat"""
-    try:
-        data = request.json
-        data['updated_at'] = datetime.utcnow().isoformat()
-        
-        result = supabase.table('chats')\
-            .update(data)\
-            .eq('id', chat_id)\
+        # First, get the user_id from chat_users table using user_code
+        user_response = supabase.table("chat_users")\
+            .select("id")\
+            .eq("user_code", user_code)\
+            .single()\
             .execute()
         
-        return jsonify(result.data[0] if result.data else {}), 200
+        if not user_response.data:
+            return jsonify({"error": "User not found"}), 404
         
-    except Exception as e:
-        return handle_error(e, "Update chat")
-
-
-@supabase_bp.route('/chats/<chat_id>', methods=['DELETE'])
-def delete_chat(chat_id):
-    """Delete a chat"""
-    try:
-        supabase.table('chats')\
-            .delete()\
-            .eq('id', chat_id)\
+        user_id = user_response.data["id"]
+        
+        # Now get all conversations using user_id
+        # Order by id (descending) to get the most recent conversations first
+        response = supabase.table("chat_conversations")\
+            .select("*")\
+            .eq("user_id", user_id)\
+            .order("id", desc=True)\
             .execute()
         
+        return jsonify(response.data), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'list_conversations_by_user_code')
+
+@supabase_bp.route("/chat-conversations/<conversation_id>", methods=["DELETE"])
+def delete_conversation(conversation_id):
+    """Delete a specific conversation"""
+    try:
+        supabase.table("chat_conversations").delete().eq("id", conversation_id).execute()
         return jsonify({"success": True}), 200
-        
     except Exception as e:
-        return handle_error(e, "Delete chat")
+        return handle_supabase_error(e, 'delete_conversation')
 
+@supabase_bp.route("/chat-conversations/user/<user_code>", methods=["DELETE"])
+def delete_conversations_by_user_code(user_code):
+    """Delete all conversations for a specific user"""
+    try:
+        # First, get the user_id from chat_users table using user_code
+        user_response = supabase.table("chat_users")\
+            .select("id")\
+            .eq("user_code", user_code)\
+            .single()\
+            .execute()
+        
+        if not user_response.data:
+            return jsonify({"error": "User not found"}), 404
+        
+        user_id = user_response.data["id"]
+        
+        # Now delete all conversations using user_id
+        supabase.table("chat_conversations").delete().eq("user_id", user_id).execute()
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'delete_conversations_by_user_code')
 
-# ============================================================================
-# FOOD LOGS
-# ============================================================================
+# ==================== CHAT MESSAGES ENDPOINTS ====================
 
-@supabase_bp.route('/food-logs/user/<user_code>', methods=['GET'])
+@supabase_bp.route("/chat-messages", methods=["POST"])
+def create_chat_message():
+    """Create a new chat message"""
+    try:
+        data = request.get_json()
+        response = supabase.table("chat_messages").insert(data).execute()
+        return jsonify(response.data[0] if response.data else None), 201
+    except Exception as e:
+        return handle_supabase_error(e, 'create_chat_message')
+
+@supabase_bp.route("/chat-messages/conversation/<conversation_id>", methods=["GET"])
+def list_messages_by_conversation(conversation_id):
+    """List messages for a specific conversation"""
+    try:
+        limit = request.args.get('limit', type=int)
+        before_message_id = request.args.get('beforeMessageId')
+        
+        query = supabase.table("chat_messages")\
+            .select("*")\
+            .eq("conversation_id", conversation_id)
+        
+        if before_message_id:
+            # Get messages before a specific message ID (for pagination)
+            # First get the created_at of the reference message
+            ref_msg = supabase.table("chat_messages").select("created_at").eq("id", before_message_id).single().execute()
+            if ref_msg.data:
+                query = query.lt("created_at", ref_msg.data["created_at"])
+        
+        query = query.order("created_at", desc=True)
+        
+        if limit:
+            query = query.limit(limit)
+        
+        response = query.execute()
+        return jsonify(response.data), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'list_messages_by_conversation')
+
+# ==================== FOOD LOGS ENDPOINTS ====================
+
+@supabase_bp.route("/food-logs/<user_code>", methods=["GET"])
 def get_food_logs_by_user_code(user_code):
     """Get food logs for a user by user_code"""
     try:
-        # First get the user_id from chat_users table
-        user_result = supabase.table('chat_users')\
-            .select('id')\
-            .eq('user_code', user_code)\
-            .single()\
-            .execute()
+        # First, get the user_id from chat_users table
+        user_response = supabase.table("chat_users").select("id").eq("user_code", user_code).execute()
         
-        if not user_result.data:
-            return jsonify([]), 200
+        if not user_response.data or len(user_response.data) == 0:
+            return jsonify({"error": "User not found"}), 404
         
-        user_id = user_result.data['id']
+        user_id = user_response.data[0]["id"]
         
         # Get food logs by user_id
-        result = supabase.table('food_logs')\
-            .select('*')\
-            .eq('user_id', user_id)\
-            .order('log_date', desc=True)\
+        logs_response = supabase.table("food_logs")\
+            .select("*")\
+            .eq("user_id", user_id)\
+            .order("log_date", desc=True)\
             .execute()
         
-        return jsonify(result.data if result.data else []), 200
-        
+        return jsonify(logs_response.data or []), 200
     except Exception as e:
-        return handle_error(e, "Get food logs by user code")
+        return handle_supabase_error(e, 'get_food_logs_by_user_code')
 
-
-@supabase_bp.route('/food-logs/analyze/<user_code>', methods=['GET'])
+@supabase_bp.route("/food-logs/<user_code>/analyze", methods=["GET"])
 def analyze_food_preferences(user_code):
-    """Analyze food preferences from food logs"""
+    """Analyze food preferences for a user by user_code"""
     try:
-        # Get food logs
-        user_result = supabase.table('chat_users')\
-            .select('id')\
-            .eq('user_code', user_code)\
-            .single()\
+        # First, get the user_id from chat_users table
+        user_response = supabase.table("chat_users").select("id").eq("user_code", user_code).execute()
+        
+        if not user_response.data or len(user_response.data) == 0:
+            return jsonify({"error": "User not found"}), 404
+        
+        user_id = user_response.data[0]["id"]
+        
+        # Get food logs by user_id
+        logs_response = supabase.table("food_logs")\
+            .select("*")\
+            .eq("user_id", user_id)\
+            .order("log_date", desc=True)\
             .execute()
         
-        if not user_result.data:
-            return jsonify(None), 200
-        
-        user_id = user_result.data['id']
-        
-        logs_result = supabase.table('food_logs')\
-            .select('*')\
-            .eq('user_id', user_id)\
-            .order('log_date', desc=True)\
-            .execute()
-        
-        food_logs = logs_result.data if logs_result.data else []
+        food_logs = logs_response.data or []
         
         if not food_logs:
-            return jsonify(None), 200
+            return jsonify({"error": "No food logs found for this user"}), 404
         
-        # Analyze preferences
-        all_food_items = []
-        for log in food_logs:
-            if log.get('food_items'):
-                items = log['food_items'] if isinstance(log['food_items'], list) else [log['food_items']]
-                for item in items:
-                    if item and item.get('name'):
-                        all_food_items.append({
-                            'name': item['name'],
-                            'meal_label': log.get('meal_label'),
-                            'date': log.get('log_date')
-                        })
-        
-        # Count frequencies
-        food_frequency = {}
-        for item in all_food_items:
-            name = item['name'].lower().strip()
-            food_frequency[name] = food_frequency.get(name, 0) + 1
-        
-        # Get top 10 foods
-        sorted_foods = sorted(food_frequency.items(), key=lambda x: x[1], reverse=True)[:10]
-        
-        # Analyze meal patterns
-        meal_counts = {}
-        foods_by_meal = {}
-        
-        for log in food_logs:
-            meal_label = log.get('meal_label')
-            if meal_label:
-                meal_counts[meal_label] = meal_counts.get(meal_label, 0) + 1
-                
-                if meal_label not in foods_by_meal:
-                    foods_by_meal[meal_label] = {}
-                
-                if log.get('food_items'):
-                    items = log['food_items'] if isinstance(log['food_items'], list) else [log['food_items']]
-                    for item in items:
-                        if item and item.get('name'):
-                            food_name = item['name'].lower().strip()
-                            foods_by_meal[meal_label][food_name] = foods_by_meal[meal_label].get(food_name, 0) + 1
-        
-        # Sort foods by meal
-        foods_by_meal_sorted = {}
-        for meal, foods in foods_by_meal.items():
-            sorted_meal_foods = sorted(foods.items(), key=lambda x: x[1], reverse=True)
-            foods_by_meal_sorted[meal] = [{'name': name, 'count': count} for name, count in sorted_meal_foods]
-        
-        preferences = {
-            'frequently_consumed_foods': [name for name, _ in sorted_foods],
-            'meal_patterns': meal_counts,
-            'foods_by_meal': foods_by_meal_sorted,
-            'total_logs': len(food_logs),
-            'analysis_date': datetime.utcnow().isoformat()
+        # Analyze eating habits
+        meal_categories = {
+            "breakfast": [],
+            "lunch": [],
+            "dinner": [],
+            "snack": [],
+            "morning snack": [],
+            "afternoon snack": [],
+            "evening snack": [],
+            "other": [],
         }
         
-        return jsonify(preferences), 200
+        # Process each food log
+        for log in food_logs:
+            meal_type = (log.get("meal_type") or "other").lower()
+            if meal_type in meal_categories:
+                meal_categories[meal_type].append(log)
+            else:
+                meal_categories["other"].append(log)
         
+        # Return analysis
+        return jsonify({
+            "total_logs": len(food_logs),
+            "meal_categories": {k: len(v) for k, v in meal_categories.items()},
+            "food_logs": food_logs
+        }), 200
     except Exception as e:
-        return handle_error(e, "Analyze food preferences")
+        return handle_supabase_error(e, 'analyze_food_preferences')
 
+# ==================== WEIGHT LOGS ENDPOINTS ====================
 
-@supabase_bp.route('/food-logs/user/<user_code>', methods=['DELETE'])
-def delete_food_logs_by_user_code(user_code):
-    """Delete all food logs for a user"""
-    try:
-        # Get user_id
-        user_result = supabase.table('chat_users')\
-            .select('id')\
-            .eq('user_code', user_code)\
-            .single()\
-            .execute()
-        
-        if not user_result.data:
-            return jsonify({"success": True, "deleted": 0}), 200
-        
-        user_id = user_result.data['id']
-        
-        # Delete food logs
-        supabase.table('food_logs')\
-            .delete()\
-            .eq('user_id', user_id)\
-            .execute()
-        
-        return jsonify({"success": True}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Delete food logs by user code")
-
-
-# ============================================================================
-# WEIGHT LOGS
-# ============================================================================
-
-@supabase_bp.route('/weight-logs/user/<user_code>', methods=['GET'])
-def get_weight_logs_by_user_code(user_code):
-    """Get weight logs for a user"""
-    try:
-        result = supabase.table('weight_logs')\
-            .select('*')\
-            .eq('user_code', user_code)\
-            .order('measurement_date')\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get weight logs")
-
-
-@supabase_bp.route('/weight-logs', methods=['GET'])
+@supabase_bp.route("/weight-logs", methods=["GET"])
 def list_weight_logs():
-    """List weight logs with optional filtering by user_code array"""
+    """List weight logs with optional filters"""
     try:
         user_code = request.args.get('user_code')
-        user_codes = request.args.getlist('user_code')  # Support multiple user codes
+        user_codes = request.args.get('user_codes')  # Comma-separated
+        limit = request.args.get('limit', type=int)
         
-        query = supabase.table('weight_logs').select('*')
+        query = supabase.table("weight_logs").select("*")
         
         if user_code:
-            query = query.eq('user_code', user_code)
-        elif user_codes and len(user_codes) > 0:
-            query = query.in_('user_code', user_codes)
+            query = query.eq("user_code", user_code)
+        elif user_codes:
+            codes_list = user_codes.split(",")
+            query = query.in_("user_code", codes_list)
         
-        # Support limit
-        limit = request.args.get('limit')
         if limit:
-            try:
-                limit = int(limit)
-                query = query.limit(limit)
-            except ValueError:
-                pass
+            query = query.limit(limit)
         
-        result = query.order('measurement_date', desc=True).execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
+        query = query.order("measurement_date", desc=True)
+        response = query.execute()
+        return jsonify(response.data), 200
     except Exception as e:
-        return handle_error(e, "List weight logs")
+        return handle_supabase_error(e, 'list_weight_logs')
 
+@supabase_bp.route("/weight-logs/user-codes", methods=["GET"])
+def get_unique_user_codes():
+    """Get unique user codes with weight logs"""
+    try:
+        response = supabase.table("weight_logs").select("user_code").execute()
+        unique_codes = list(set([item["user_code"] for item in response.data if item.get("user_code")]))
+        return jsonify(unique_codes), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_unique_user_codes')
 
-@supabase_bp.route('/weight-logs', methods=['POST'])
+@supabase_bp.route("/weight-logs", methods=["POST"])
 def create_weight_log():
     """Create a new weight log entry"""
     try:
-        data = request.json
-        
-        result = supabase.table('weight_logs')\
-            .insert(data)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 201
-        
+        data = request.get_json()
+        response = supabase.table("weight_logs").insert(data).execute()
+        return jsonify(response.data[0] if response.data else None), 201
     except Exception as e:
-        return handle_error(e, "Create weight log")
+        return handle_supabase_error(e, 'create_weight_log')
 
-
-@supabase_bp.route('/weight-logs/<log_id>', methods=['PUT'])
+@supabase_bp.route("/weight-logs/<log_id>", methods=["PATCH"])
 def update_weight_log(log_id):
     """Update a weight log entry"""
     try:
-        data = request.json
+        updates = request.get_json()
+        response = supabase.table("weight_logs").update(updates).eq("id", log_id).execute()
         
-        result = supabase.table('weight_logs')\
-            .update(data)\
-            .eq('id', log_id)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 200
-        
+        if not response.data:
+            return jsonify({"error": "Weight log not found"}), 404
+        return jsonify(response.data[0]), 200
     except Exception as e:
-        return handle_error(e, "Update weight log")
+        return handle_supabase_error(e, 'update_weight_log')
 
-
-@supabase_bp.route('/weight-logs/<log_id>', methods=['DELETE'])
+@supabase_bp.route("/weight-logs/<log_id>", methods=["DELETE"])
 def delete_weight_log(log_id):
     """Delete a weight log entry"""
     try:
-        supabase.table('weight_logs')\
-            .delete()\
-            .eq('id', log_id)\
-            .execute()
-        
+        supabase.table("weight_logs").delete().eq("id", log_id).execute()
         return jsonify({"success": True}), 200
-        
     except Exception as e:
-        return handle_error(e, "Delete weight log")
+        return handle_supabase_error(e, 'delete_weight_log')
 
+# ==================== PROFILES ENDPOINTS ====================
 
-# ============================================================================
-# PROFILES
-# ============================================================================
-
-@supabase_bp.route('/profiles', methods=['GET'])
+@supabase_bp.route("/profiles", methods=["GET"])
 def list_profiles():
     """List all profiles with company info"""
     try:
-        result = supabase.table('profiles')\
-            .select('id, role, company_id, name, created_at, company:companies(id, name)')\
-            .order('created_at', desc=True)\
+        response = supabase.table("profiles")\
+            .select("id, role, company_id, name, created_at, company:companies(id, name)")\
+            .order("created_at", desc=True)\
+            .execute()
+        return jsonify(response.data), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'list_profiles')
+
+@supabase_bp.route("/profiles/basic", methods=["GET"])
+def get_basic_profiles():
+    """Get basic profile information"""
+    try:
+        response = supabase.table("profiles").select("id, role, company_id").execute()
+        return jsonify(response.data), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_basic_profiles')
+
+@supabase_bp.route("/profiles/<profile_id>", methods=["GET"])
+def get_profile(profile_id):
+    """Get a profile by ID"""
+    try:
+        response = supabase.table("profiles")\
+            .select("id, role, company_id")\
+            .eq("id", profile_id)\
+            .single()\
             .execute()
         
-        return jsonify(result.data if result.data else []), 200
-        
+        if not response.data:
+            return jsonify({"error": "Profile not found"}), 404
+        return jsonify(response.data), 200
     except Exception as e:
-        return handle_error(e, "List profiles")
+        # Handle case where profile doesn't exist (PGRST116)
+        if hasattr(e, 'code') and e.code == 'PGRST116':
+            return jsonify({"error": "Profile not found"}), 404
+        return handle_supabase_error(e, 'get_profile')
 
+@supabase_bp.route("/profiles/company/<company_id>", methods=["GET"])
+def get_profiles_by_company(company_id):
+    """Get all profile IDs for a company"""
+    try:
+        response = supabase.table("profiles")\
+            .select("id")\
+            .eq("company_id", company_id)\
+            .execute()
+        return jsonify(response.data), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_profiles_by_company')
 
-@supabase_bp.route('/profiles/<profile_id>', methods=['PUT'])
+@supabase_bp.route("/profiles/<profile_id>", methods=["PATCH"])
 def update_profile(profile_id):
     """Update a profile"""
     try:
-        data = request.json
+        updates = request.get_json()
+        response = supabase.table("profiles").update(updates).eq("id", profile_id).execute()
         
-        result = supabase.table('profiles')\
-            .update(data)\
-            .eq('id', profile_id)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 200
-        
+        if not response.data:
+            return jsonify({"error": "Profile not found"}), 404
+        return jsonify(response.data[0]), 200
     except Exception as e:
-        return handle_error(e, "Update profile")
+        return handle_supabase_error(e, 'update_profile')
 
+# ==================== COMPANIES ENDPOINTS ====================
 
-# ============================================================================
-# COMPANIES
-# ============================================================================
-
-@supabase_bp.route('/companies', methods=['GET'])
+@supabase_bp.route("/companies", methods=["GET"])
 def list_companies():
     """List all companies"""
     try:
-        result = supabase.table('companies')\
-            .select('id, name')\
-            .order('name')\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
+        response = supabase.table("companies").select("id, name").order("name").execute()
+        return jsonify(response.data), 200
     except Exception as e:
-        return handle_error(e, "List companies")
+        return handle_supabase_error(e, 'list_companies')
 
-
-@supabase_bp.route('/companies', methods=['POST'])
+@supabase_bp.route("/companies", methods=["POST"])
 def create_company():
     """Create a new company"""
     try:
-        data = request.json
+        data = request.get_json()
         name = data.get('name')
         
         if not name:
             return jsonify({"error": "Company name is required"}), 400
         
-        result = supabase.table('companies')\
-            .insert({'name': name})\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 201
-        
+        response = supabase.table("companies").insert({"name": name}).execute()
+        return jsonify(response.data[0] if response.data else None), 201
     except Exception as e:
-        return handle_error(e, "Create company")
+        return handle_supabase_error(e, 'create_company')
 
+# ==================== SYSTEM MESSAGES ENDPOINTS ====================
 
-# ============================================================================
-# CHAT MESSAGES
-# ============================================================================
-
-@supabase_bp.route('/chat-messages', methods=['POST'])
-def create_chat_message():
-    """Create a new chat message"""
+@supabase_bp.route("/system-messages", methods=["GET"])
+def list_system_messages():
+    """List system messages with optional filters"""
     try:
-        data = request.json
-        
-        result = supabase.table('chat_messages')\
-            .insert(data)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 201
-        
-    except Exception as e:
-        return handle_error(e, "Create chat message")
-
-
-@supabase_bp.route('/chat-messages/conversation/<conversation_id>', methods=['GET'])
-def list_messages_by_conversation(conversation_id):
-    """Get messages for a conversation"""
-    try:
-        limit = request.args.get('limit', 20, type=int)
-        before_id = request.args.get('beforeMessageId', type=int)
-        
-        query = supabase.table('chat_messages')\
-            .select('*')\
-            .eq('conversation_id', conversation_id)\
-            .order('created_at', desc=True)\
-            .limit(limit)
-        
-        if before_id:
-            query = query.lt('id', before_id)
-        
-        result = query.execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "List messages by conversation")
-
-
-@supabase_bp.route('/chat-messages/conversation/<conversation_id>', methods=['DELETE'])
-def delete_messages_by_conversation(conversation_id):
-    """Delete all messages for a conversation"""
-    try:
-        supabase.table('chat_messages')\
-            .delete()\
-            .eq('conversation_id', conversation_id)\
-            .execute()
-        
-        return jsonify({"success": True}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Delete messages by conversation")
-
-
-@supabase_bp.route('/chat-messages/user/<user_code>', methods=['DELETE'])
-def delete_messages_by_user_code(user_code):
-    """Delete all messages for a user"""
-    try:
-        # Get user
-        user_result = supabase.table('chat_users')\
-            .select('id')\
-            .eq('user_code', user_code)\
-            .single()\
-            .execute()
-        
-        if not user_result.data:
-            return jsonify({"success": True, "deleted": 0}), 200
-        
-        user_id = user_result.data['id']
-        
-        # Get conversations
-        conv_result = supabase.table('chat_conversations')\
-            .select('id')\
-            .eq('user_id', user_id)\
-            .execute()
-        
-        if not conv_result.data:
-            return jsonify({"success": True, "deleted": 0}), 200
-        
-        conversation_ids = [c['id'] for c in conv_result.data]
-        
-        # Delete messages
-        supabase.table('chat_messages')\
-            .delete()\
-            .in_('conversation_id', conversation_ids)\
-            .execute()
-        
-        return jsonify({"success": True}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Delete messages by user code")
-
-
-# ============================================================================
-# MESSAGE QUEUE
-# ============================================================================
-
-@supabase_bp.route('/message-queue', methods=['POST'])
-def add_to_message_queue():
-    """Add a message to the queue"""
-    try:
-        data = request.json
-        
-        # Validate required fields
-        if not all(key in data for key in ['conversation_id', 'client_id', 'dietitian_id']):
-            return jsonify({"error": "Missing required fields"}), 400
-        
-        result = supabase.table('message_queue')\
-            .insert(data)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 201
-        
-    except Exception as e:
-        return handle_error(e, "Add to message queue")
-
-
-@supabase_bp.route('/message-queue/client/<client_id>', methods=['GET'])
-def get_pending_messages_for_client(client_id):
-    """Get pending messages for a client"""
-    try:
-        result = supabase.table('message_queue')\
-            .select('*')\
-            .eq('client_id', client_id)\
-            .eq('status', 'pending')\
-            .order('priority', desc=True)\
-            .order('created_at')\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get pending messages for client")
-
-
-@supabase_bp.route('/message-queue/dietitian/<dietitian_id>', methods=['GET'])
-def get_messages_by_dietitian(dietitian_id):
-    """Get messages sent by a dietitian"""
-    try:
-        status = request.args.get('status')
-        limit = request.args.get('limit', 100, type=int)
-        offset = request.args.get('offset', 0, type=int)
-        
-        query = supabase.table('message_queue')\
-            .select('*')\
-            .eq('dietitian_id', dietitian_id)\
-            .order('created_at', desc=True)\
-            .range(offset, offset + limit - 1)
-        
-        if status:
-            query = query.eq('status', status)
-        
-        result = query.execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get messages by dietitian")
-
-
-@supabase_bp.route('/message-queue/<message_id>', methods=['PUT'])
-def update_message_status(message_id):
-    """Update message status"""
-    try:
-        data = request.json
-        status = data.get('status')
-        
-        if not status:
-            return jsonify({"error": "Status is required"}), 400
-        
-        update_data = {
-            'status': status,
-            'updated_at': datetime.utcnow().isoformat()
-        }
-        
-        if status == 'sent':
-            update_data['processed_at'] = datetime.utcnow().isoformat()
-        
-        if 'error_message' in data:
-            update_data['error_message'] = data['error_message']
-        
-        result = supabase.table('message_queue')\
-            .update(update_data)\
-            .eq('id', message_id)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Update message status")
-
-
-@supabase_bp.route('/message-queue', methods=['GET'])
-def list_all_messages():
-    """Get all messages in queue (admin)"""
-    try:
-        status = request.args.get('status')
-        limit = request.args.get('limit', 100, type=int)
-        offset = request.args.get('offset', 0, type=int)
-        
-        query = supabase.table('message_queue')\
-            .select('*, chat_conversations!inner(id, started_at), chat_users!inner(id, full_name, user_code)')\
-            .order('priority', desc=True)\
-            .order('created_at', desc=True)\
-            .range(offset, offset + limit - 1)
-        
-        if status:
-            query = query.eq('status', status)
-        
-        result = query.execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "List all messages")
-
-
-@supabase_bp.route('/message-queue/user/<user_code>', methods=['GET'])
-def list_messages_by_user_code(user_code):
-    """List queued messages for a user"""
-    try:
-        result = supabase.table('message_queue')\
-            .select('*')\
-            .eq('user_code', user_code)\
-            .order('created_at', desc=True)\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "List messages by user code")
-
-
-@supabase_bp.route('/message-queue/conversation/<conversation_id>', methods=['DELETE'])
-def delete_queue_by_conversation(conversation_id):
-    """Delete queued messages for a conversation"""
-    try:
-        supabase.table('message_queue')\
-            .delete()\
-            .eq('conversation_id', conversation_id)\
-            .execute()
-        
-        return jsonify({"success": True}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Delete queue by conversation")
-
-
-@supabase_bp.route('/message-queue/user/<user_code>', methods=['DELETE'])
-def delete_queue_by_user_code(user_code):
-    """Delete queued messages for a user"""
-    try:
-        supabase.table('message_queue')\
-            .delete()\
-            .eq('user_code', user_code)\
-            .execute()
-        
-        return jsonify({"success": True}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Delete queue by user code")
-
-
-# ============================================================================
-# CHAT CONVERSATIONS
-# ============================================================================
-
-@supabase_bp.route('/chat-conversations', methods=['GET'])
-def list_chat_conversations():
-    """List all chat conversations with optional field selection"""
-    try:
-        # Support field selection via query parameter
-        fields = request.args.get('fields', '*')
-        if fields != '*':
-            # Convert comma-separated string to list
-            fields = [f.strip() for f in fields.split(',')]
-        
-        query = supabase.table('chat_conversations')
-        
-        if fields == '*':
-            query = query.select('*')
-        else:
-            query = query.select(','.join(fields))
-        
-        result = query.order('started_at', desc=True).execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "List chat conversations")
-
-
-@supabase_bp.route('/chat-conversations/user/<user_code>', methods=['GET'])
-def get_conversation_by_user_code(user_code):
-    """Get conversation for a user"""
-    try:
-        # Get user
-        user_result = supabase.table('chat_users')\
-            .select('id')\
-            .eq('user_code', user_code)\
-            .single()\
-            .execute()
-        
-        if not user_result.data:
-            return jsonify(None), 404
-        
-        user_id = user_result.data['id']
-        
-        # Get conversation
-        result = supabase.table('chat_conversations')\
-            .select('*')\
-            .eq('user_id', user_id)\
-            .order('started_at', desc=True)\
-            .limit(1)\
-            .execute()
-        
-        conversation = result.data[0] if result.data else None
-        return jsonify(conversation), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get conversation by user code")
-
-
-@supabase_bp.route('/chat-conversations/user/<user_code>/list', methods=['GET'])
-def list_conversations_by_user_code(user_code):
-    """List all conversations for a user"""
-    try:
-        # Get user
-        user_result = supabase.table('chat_users')\
-            .select('id')\
-            .eq('user_code', user_code)\
-            .single()\
-            .execute()
-        
-        if not user_result.data:
-            return jsonify([]), 200
-        
-        user_id = user_result.data['id']
-        
-        # Get conversations
-        result = supabase.table('chat_conversations')\
-            .select('*')\
-            .eq('user_id', user_id)\
-            .order('started_at', desc=True)\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "List conversations by user code")
-
-
-@supabase_bp.route('/chat-conversations/<conversation_id>', methods=['DELETE'])
-def delete_conversation(conversation_id):
-    """Delete a conversation"""
-    try:
-        supabase.table('chat_conversations')\
-            .delete()\
-            .eq('id', conversation_id)\
-            .execute()
-        
-        return jsonify({"success": True}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Delete conversation")
-
-
-@supabase_bp.route('/chat-conversations/user/<user_code>', methods=['DELETE'])
-def delete_conversations_by_user_code(user_code):
-    """Delete all conversations for a user"""
-    try:
-        # Get user
-        user_result = supabase.table('chat_users')\
-            .select('id')\
-            .eq('user_code', user_code)\
-            .single()\
-            .execute()
-        
-        if not user_result.data:
-            return jsonify({"success": True, "deleted": 0}), 200
-        
-        user_id = user_result.data['id']
-        
-        # Delete conversations
-        supabase.table('chat_conversations')\
-            .delete()\
-            .eq('user_id', user_id)\
-            .execute()
-        
-        return jsonify({"success": True}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Delete conversations by user code")
-
-
-# ============================================================================
-# TRAINING PLANS
-# ============================================================================
-
-@supabase_bp.route('/training-plans/user/<user_code>', methods=['GET'])
-def get_training_plans_by_user(user_code):
-    """Get all training plans for a user"""
-    try:
-        result = supabase.table('training_plans')\
-            .select('*')\
-            .eq('user_code', user_code)\
-            .order('created_at', desc=True)\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get training plans by user")
-
-
-@supabase_bp.route('/training-plans', methods=['GET'])
-def get_all_training_plans():
-    """Get all training plans"""
-    try:
-        result = supabase.table('training_plans')\
-            .select('*')\
-            .order('created_at', desc=True)\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get all training plans")
-
-
-@supabase_bp.route('/training-plans/user/<user_code>/active', methods=['GET'])
-def get_active_training_plan(user_code):
-    """Get active training plan for a user"""
-    try:
-        result = supabase.table('training_plans')\
-            .select('*')\
-            .eq('user_code', user_code)\
-            .eq('status', 'active')\
-            .order('created_at', desc=True)\
-            .limit(1)\
-            .execute()
-        
-        plan = result.data[0] if result.data else None
-        return jsonify(plan), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get active training plan")
-
-
-@supabase_bp.route('/training-plans', methods=['POST'])
-def create_training_plan():
-    """Create a new training plan"""
-    try:
-        data = request.json
-        
-        # If setting as active, deactivate other plans
-        if data.get('status') == 'active' and data.get('user_code'):
-            supabase.table('training_plans')\
-                .update({'status': 'archived'})\
-                .eq('user_code', data['user_code'])\
-                .eq('status', 'active')\
-                .execute()
-        
-        result = supabase.table('training_plans')\
-            .insert(data)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 201
-        
-    except Exception as e:
-        return handle_error(e, "Create training plan")
-
-
-@supabase_bp.route('/training-plans/<plan_id>', methods=['PUT'])
-def update_training_plan(plan_id):
-    """Update a training plan"""
-    try:
-        data = request.json
-        data['updated_at'] = datetime.utcnow().isoformat()
-        
-        result = supabase.table('training_plans')\
-            .update(data)\
-            .eq('id', plan_id)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Update training plan")
-
-
-@supabase_bp.route('/training-plans/<plan_id>', methods=['DELETE'])
-def delete_training_plan(plan_id):
-    """Delete a training plan"""
-    try:
-        supabase.table('training_plans')\
-            .delete()\
-            .eq('id', plan_id)\
-            .execute()
-        
-        return jsonify({"success": True}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Delete training plan")
-
-
-# ============================================================================
-# TRAINING LOGS
-# ============================================================================
-
-@supabase_bp.route('/training-logs/user/<user_code>', methods=['GET'])
-def get_training_logs_by_user(user_code):
-    """Get training logs for a user"""
-    try:
-        limit = request.args.get('limit', 50, type=int)
-        
-        result = supabase.table('training_logs')\
-            .select('*')\
-            .eq('user_code', user_code)\
-            .order('session_date', desc=True)\
-            .limit(limit)\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get training logs by user")
-
-
-@supabase_bp.route('/training-logs/user/<user_code>/range', methods=['GET'])
-def get_training_logs_by_date_range(user_code):
-    """Get training logs by date range"""
-    try:
-        start_date = request.args.get('startDate')
-        end_date = request.args.get('endDate')
-        
-        if not start_date or not end_date:
-            return jsonify({"error": "startDate and endDate are required"}), 400
-        
-        result = supabase.table('training_logs')\
-            .select('*')\
-            .eq('user_code', user_code)\
-            .gte('session_date', start_date)\
-            .lte('session_date', end_date)\
-            .order('session_date', desc=True)\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get training logs by date range")
-
-
-@supabase_bp.route('/training-logs', methods=['GET'])
-def get_all_training_logs():
-    """Get all training logs (for analytics)"""
-    try:
-        limit = request.args.get('limit', 100, type=int)
-        
-        result = supabase.table('training_logs')\
-            .select('*')\
-            .order('session_date', desc=True)\
-            .limit(limit)\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get all training logs")
-
-
-# ============================================================================
-# TRAINING ANALYTICS
-# ============================================================================
-
-@supabase_bp.route('/training-analytics/user/<user_code>', methods=['GET'])
-def get_training_analytics_by_user(user_code):
-    """Get progress analytics for a user"""
-    try:
-        result = supabase.table('training_progress_analytics')\
-            .select('*')\
-            .eq('user_code', user_code)\
-            .order('date_end', desc=True)\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get training analytics by user")
-
-
-@supabase_bp.route('/training-analytics/user/<user_code>/exercise/<exercise_name>', methods=['GET'])
-def get_exercise_analytics(user_code, exercise_name):
-    """Get analytics for specific exercise"""
-    try:
-        result = supabase.table('training_progress_analytics')\
-            .select('*')\
-            .eq('user_code', user_code)\
-            .eq('exercise_name', exercise_name)\
-            .order('date_end', desc=True)\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get exercise analytics")
-
-
-# ============================================================================
-# TRAINING REMINDERS
-# ============================================================================
-
-@supabase_bp.route('/training-reminders/pending', methods=['GET'])
-def get_pending_reminders():
-    """Get pending reminders"""
-    try:
-        result = supabase.table('training_reminder_queue')\
-            .select('*')\
-            .eq('status', 'pending')\
-            .order('scheduled_for')\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get pending reminders")
-
-
-@supabase_bp.route('/training-reminders/user/<user_code>', methods=['GET'])
-def get_reminders_by_user(user_code):
-    """Get reminders for a user"""
-    try:
-        result = supabase.table('training_reminder_queue')\
-            .select('*')\
-            .eq('user_code', user_code)\
-            .order('scheduled_for', desc=True)\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get reminders by user")
-
-
-@supabase_bp.route('/training-reminders', methods=['POST'])
-def create_reminder():
-    """Create a reminder"""
-    try:
-        data = request.json
-        
-        result = supabase.table('training_reminder_queue')\
-            .insert(data)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 201
-        
-    except Exception as e:
-        return handle_error(e, "Create reminder")
-
-
-@supabase_bp.route('/training-reminders/<reminder_id>', methods=['PUT'])
-def update_reminder_status(reminder_id):
-    """Update reminder status"""
-    try:
-        data = request.json
-        status = data.get('status')
-        
-        if not status:
-            return jsonify({"error": "Status is required"}), 400
-        
-        update_data = {'status': status}
-        
-        if status == 'sent':
-            update_data['sent_at'] = datetime.utcnow().isoformat()
-        
-        if 'error_message' in data:
-            update_data['error_message'] = data['error_message']
-        
-        result = supabase.table('training_reminder_queue')\
-            .update(update_data)\
-            .eq('id', reminder_id)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Update reminder status")
-
-
-@supabase_bp.route('/training-reminders/<reminder_id>', methods=['DELETE'])
-def delete_reminder(reminder_id):
-    """Delete a reminder"""
-    try:
-        supabase.table('training_reminder_queue')\
-            .delete()\
-            .eq('id', reminder_id)\
-            .execute()
-        
-        return jsonify({"success": True}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Delete reminder")
-
-
-# ============================================================================
-# EXERCISE LIBRARY
-# ============================================================================
-
-@supabase_bp.route('/exercise-library', methods=['GET'])
-def get_all_exercises():
-    """Get all active exercises"""
-    try:
-        result = supabase.table('exercise_library')\
-            .select('*')\
-            .eq('is_active', True)\
-            .order('exercise_name')\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get all exercises")
-
-
-@supabase_bp.route('/exercise-library/category/<category>', methods=['GET'])
-def get_exercises_by_category(category):
-    """Get exercises by category"""
-    try:
-        result = supabase.table('exercise_library')\
-            .select('*')\
-            .eq('category', category)\
-            .eq('is_active', True)\
-            .order('exercise_name')\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get exercises by category")
-
-
-@supabase_bp.route('/exercise-library/search', methods=['GET'])
-def search_exercises():
-    """Search exercises"""
-    try:
-        search_term = request.args.get('q', '')
-        
-        if not search_term:
-            return jsonify([]), 200
-        
-        result = supabase.table('exercise_library')\
-            .select('*')\
-            .ilike('exercise_name', f'%{search_term}%')\
-            .eq('is_active', True)\
-            .order('exercise_name')\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Search exercises")
-
-
-@supabase_bp.route('/exercise-library', methods=['POST'])
-def create_exercise():
-    """Create a new exercise"""
-    try:
-        data = request.json
-        
-        result = supabase.table('exercise_library')\
-            .insert(data)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 201
-        
-    except Exception as e:
-        return handle_error(e, "Create exercise")
-
-
-@supabase_bp.route('/exercise-library/<exercise_id>', methods=['PUT'])
-def update_exercise(exercise_id):
-    """Update an exercise"""
-    try:
-        data = request.json
-        data['updated_at'] = datetime.utcnow().isoformat()
-        
-        result = supabase.table('exercise_library')\
-            .update(data)\
-            .eq('id', exercise_id)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Update exercise")
-
-
-# ============================================================================
-# TRAINING PLAN TEMPLATES
-# ============================================================================
-
-@supabase_bp.route('/training-templates', methods=['GET'])
-def get_all_templates():
-    """Get all active templates"""
-    try:
-        result = supabase.table('training_plan_templates')\
-            .select('*')\
-            .eq('is_active', True)\
-            .order('created_at', desc=True)\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get all templates")
-
-
-@supabase_bp.route('/training-templates/public', methods=['GET'])
-def get_public_templates():
-    """Get public templates"""
-    try:
-        result = supabase.table('training_plan_templates')\
-            .select('*')\
-            .eq('is_public', True)\
-            .eq('is_active', True)\
-            .order('usage_count', desc=True)\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get public templates")
-
-
-@supabase_bp.route('/training-templates/search', methods=['GET'])
-def search_templates():
-    """Search templates"""
-    try:
-        search_term = request.args.get('q', '')
-        
-        if not search_term:
-            return jsonify([]), 200
-        
-        # Note: Supabase Python client doesn't support .or() in the same way
-        # We'll need to do multiple queries and combine results
-        result = supabase.table('training_plan_templates')\
-            .select('*')\
-            .ilike('template_name', f'%{search_term}%')\
-            .eq('is_active', True)\
-            .order('created_at', desc=True)\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Search templates")
-
-
-@supabase_bp.route('/training-templates', methods=['POST'])
-def create_template():
-    """Create a new template"""
-    try:
-        data = request.json
-        
-        result = supabase.table('training_plan_templates')\
-            .insert(data)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 201
-        
-    except Exception as e:
-        return handle_error(e, "Create template")
-
-
-@supabase_bp.route('/training-templates/<template_id>', methods=['PUT'])
-def update_template(template_id):
-    """Update a template"""
-    try:
-        data = request.json
-        data['updated_at'] = datetime.utcnow().isoformat()
-        
-        result = supabase.table('training_plan_templates')\
-            .update(data)\
-            .eq('id', template_id)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Update template")
-
-
-@supabase_bp.route('/training-templates/<template_id>', methods=['DELETE'])
-def delete_template(template_id):
-    """Delete a template (soft delete)"""
-    try:
-        supabase.table('training_plan_templates')\
-            .update({'is_active': False})\
-            .eq('id', template_id)\
-            .execute()
-        
-        return jsonify({"success": True}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Delete template")
-
-
-@supabase_bp.route('/training-templates/<template_id>/hard-delete', methods=['DELETE'])
-def hard_delete_template(template_id):
-    """Hard delete a template (permanent)"""
-    try:
-        supabase.table('training_plan_templates')\
-            .delete()\
-            .eq('id', template_id)\
-            .execute()
-        
-        return jsonify({"success": True}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Hard delete template")
-
-
-@supabase_bp.route('/training-templates/<template_id>/increment-usage', methods=['POST'])
-def increment_template_usage(template_id):
-    """Increment template usage count"""
-    try:
-        # Get current count
-        current = supabase.table('training_plan_templates')\
-            .select('usage_count')\
-            .eq('id', template_id)\
-            .single()\
-            .execute()
-        
-        new_count = (current.data.get('usage_count', 0) if current.data else 0) + 1
-        
-        supabase.table('training_plan_templates')\
-            .update({'usage_count': new_count})\
-            .eq('id', template_id)\
-            .execute()
-        
-        return jsonify({"success": True, "usage_count": new_count}), 200
-        
-    except Exception as e:
-        # Non-critical operation, don't fail
-        logger.warning(f"Failed to increment template usage: {str(e)}")
-        return jsonify({"success": False}), 200
-
-
-# ============================================================================
-# CLIENTS FILTER
-# ============================================================================
-
-@supabase_bp.route('/clients/filter', methods=['POST'])
-def filter_clients():
-    """Filter clients (chat_users) based on query parameters"""
-    try:
-        query_params = request.json
-        
-        query = supabase.table('chat_users').select('*')
-        
-        # Apply filters
-        if query_params.get('dietitian_id'):
-            query = query.eq('provider_id', query_params['dietitian_id'])
-        
-        if query_params.get('code'):
-            query = query.eq('user_code', query_params['code'])
-        
-        result = query.order('full_name').execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Filter clients")
-
-
-# ============================================================================
-# SYSTEM MESSAGES
-# ============================================================================
-
-@supabase_bp.route('/system-messages', methods=['GET'])
-def get_system_messages():
-    """Get system messages with optional filtering"""
-    try:
-        is_active = request.args.get('is_active', 'true').lower() == 'true'
+        is_active = request.args.get('is_active')
         priority = request.args.get('priority')
-        directed_to = request.args.get('directed_to')
         
-        query = supabase.table('system_messages').select('*')
+        query = supabase.table("system_messages").select("*")
         
         if is_active is not None:
-            query = query.eq('is_active', is_active)
+            # Convert string to boolean
+            is_active_bool = is_active.lower() == 'true' if isinstance(is_active, str) else bool(is_active)
+            query = query.eq("is_active", is_active_bool)
         
         if priority:
-            query = query.eq('priority', priority)
+            query = query.eq("priority", priority)
         
-        if directed_to:
-            query = query.eq('directed_to', directed_to)
-        
-        result = query.order('created_at', desc=True).execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
+        query = query.order("created_at", desc=True)
+        response = query.execute()
+        return jsonify(response.data), 200
     except Exception as e:
-        return handle_error(e, "Get system messages")
+        return handle_supabase_error(e, 'list_system_messages')
 
+@supabase_bp.route("/system-messages/<message_id>", methods=["GET"])
+def get_system_message(message_id):
+    """Get a specific system message"""
+    try:
+        response = supabase.table("system_messages").select("*").eq("id", message_id).execute()
+        if not response.data:
+            return jsonify({"error": "Message not found"}), 404
+        return jsonify(response.data[0]), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_system_message')
 
-@supabase_bp.route('/system-messages/<message_id>', methods=['PUT'])
+@supabase_bp.route("/system-messages", methods=["POST"])
+def create_system_message():
+    """Create a new system message"""
+    try:
+        data = request.get_json()
+        response = supabase.table("system_messages").insert(data).execute()
+        return jsonify(response.data[0] if response.data else None), 201
+    except Exception as e:
+        return handle_supabase_error(e, 'create_system_message')
+
+@supabase_bp.route("/system-messages/<message_id>", methods=["PATCH"])
 def update_system_message(message_id):
     """Update a system message"""
     try:
-        data = request.json
+        updates = request.get_json()
+        response = supabase.table("system_messages").update(updates).eq("id", message_id).execute()
         
-        result = supabase.table('system_messages')\
-            .update(data)\
-            .eq('id', message_id)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 200
-        
+        if not response.data:
+            return jsonify({"error": "Message not found"}), 404
+        return jsonify(response.data[0]), 200
     except Exception as e:
-        return handle_error(e, "Update system message")
+        return handle_supabase_error(e, 'update_system_message')
 
-
-@supabase_bp.route('/system-messages/active-for-user', methods=['GET'])
-def get_active_messages_for_user():
-    """Get active system messages visible to a user (broadcast or directed to user)"""
+@supabase_bp.route("/system-messages/<message_id>", methods=["DELETE"])
+def delete_system_message(message_id):
+    """Delete a system message"""
     try:
-        user_id = request.args.get('user_id')
-        
-        if not user_id:
-            return jsonify([]), 200
-        
-        # Get active messages that are either broadcast (directed_to IS NULL) or directed to the user
-        # Select only the fields needed for counting: id, start_date, end_date, priority, directed_to
-        result = supabase.table('system_messages')\
-            .select('id, start_date, end_date, priority, directed_to')\
-            .eq('is_active', True)\
-            .execute()
-        
-        all_messages = result.data if result.data else []
-        
-        # Filter messages: broadcast (directed_to is None) or directed to user
-        filtered_messages = []
-        for message in all_messages:
-            directed_to = message.get('directed_to')
-            if not directed_to or directed_to == user_id:
-                filtered_messages.append(message)
-        
-        return jsonify(filtered_messages), 200
-        
+        supabase.table("system_messages").delete().eq("id", message_id).execute()
+        return jsonify({"success": True}), 200
     except Exception as e:
-        return handle_error(e, "Get active messages for user")
+        return handle_supabase_error(e, 'delete_system_message')
 
+# ==================== SCHEDULED REMINDERS ENDPOINTS ====================
 
-@supabase_bp.route('/system-messages/urgent', methods=['GET'])
-def get_urgent_system_messages():
-    """Get urgent system messages with visibility filtering"""
-    try:
-        # Get current user from request (should be passed from frontend)
-        user_id = request.args.get('user_id')
-        user_role = request.args.get('user_role')
-        user_company_id = request.args.get('user_company_id')
-        
-        # Get all urgent active messages
-        result = supabase.table('system_messages')\
-            .select('*')\
-            .eq('is_active', True)\
-            .eq('priority', 'urgent')\
-            .order('created_at', desc=True)\
-            .execute()
-        
-        all_urgent_messages = result.data if result.data else []
-        
-        # If sys_admin, return all messages
-        if user_role == 'sys_admin':
-            return jsonify(all_urgent_messages), 200
-        
-        # For non-sys_admin users, apply visibility filtering
-        if not user_id:
-            return jsonify([]), 200
-        
-        # Get all profiles for company-based filtering
-        try:
-            profiles_result = supabase.table('profiles')\
-                .select('id, role, company_id')\
-                .execute()
-            
-            all_profiles = profiles_result.data if profiles_result.data else []
-            
-            # Create maps for quick lookup
-            profile_map = {}
-            company_managers_map = {}
-            
-            for profile in all_profiles:
-                profile_map[profile['id']] = profile
-                
-                if profile.get('role') == 'company_manager' and profile.get('company_id'):
-                    company_id = profile['company_id']
-                    if company_id not in company_managers_map:
-                        company_managers_map[company_id] = []
-                    company_managers_map[company_id].append(profile['id'])
-            
-            # Filter messages based on visibility rules
-            filtered_messages = []
-            for message in all_urgent_messages:
-                # Check if this is a personalized meal plan request by title
-                is_meal_plan_request = (
-                    message.get('title') == 'בקשה לתוכנית תזונה מותאמת' or 
-                    message.get('title') == 'Request for Personalized Meal Plan'
-                )
-                
-                # For non-meal-plan-request messages, use simple filtering
-                if not is_meal_plan_request:
-                    # Broadcast messages: visible to everyone
-                    if not message.get('directed_to'):
-                        filtered_messages.append(message)
-                        continue
-                    # Message directed to current user: always visible
-                    if message.get('directed_to') == user_id:
-                        filtered_messages.append(message)
-                    continue
-                
-                # For meal plan request messages, apply company-based visibility rules
-                # Message directed to current user: always visible
-                if message.get('directed_to') == user_id:
-                    filtered_messages.append(message)
-                    continue
-                
-                # If no directed_to, don't show (meal plan requests should always be directed)
-                if not message.get('directed_to'):
-                    continue
-                
-                # Get the target profile
-                target_profile = profile_map.get(message.get('directed_to'))
-                if not target_profile:
-                    continue
-                
-                # Show to company managers in the same company as the target
-                if (user_role == 'company_manager' and 
-                    target_profile.get('company_id') and 
-                    user_company_id == target_profile.get('company_id')):
-                    filtered_messages.append(message)
-            
-            return jsonify(filtered_messages), 200
-            
-        except Exception as profiles_error:
-            # Fallback to basic filtering if profiles table is not available
-            logger.warning(f'Could not fetch profiles, falling back to basic filtering: {str(profiles_error)}')
-            
-            # Basic filtering: show broadcast messages or messages directed to user
-            filtered_messages = []
-            for message in all_urgent_messages:
-                if not message.get('directed_to') or message.get('directed_to') == user_id:
-                    filtered_messages.append(message)
-            
-            return jsonify(filtered_messages), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get urgent system messages")
-
-
-@supabase_bp.route('/system-messages/for-dietitian', methods=['GET'])
-def get_system_messages_for_dietitian():
-    """Get all system messages with visibility filtering for dietitian profile"""
-    try:
-        # Get current user from request (should be passed from frontend)
-        user_id = request.args.get('user_id')
-        user_role = request.args.get('user_role')
-        user_company_id = request.args.get('user_company_id')
-        
-        # Get all messages
-        result = supabase.table('system_messages')\
-            .select('*')\
-            .order('created_at', desc=True)\
-            .execute()
-        
-        all_messages = result.data if result.data else []
-        
-        # If sys_admin, return all messages
-        if user_role == 'sys_admin':
-            return jsonify(all_messages), 200
-        
-        # For non-sys_admin users, apply visibility filtering
-        if not user_id:
-            return jsonify([]), 200
-        
-        # Get all profiles for company-based filtering
-        try:
-            profiles_result = supabase.table('profiles')\
-                .select('id, role, company_id')\
-                .execute()
-            
-            all_profiles = profiles_result.data if profiles_result.data else []
-            
-            # Create maps for quick lookup
-            profile_map = {}
-            company_managers_map = {}
-            
-            for profile in all_profiles:
-                profile_map[profile['id']] = profile
-                
-                if profile.get('role') == 'company_manager' and profile.get('company_id'):
-                    company_id = profile['company_id']
-                    if company_id not in company_managers_map:
-                        company_managers_map[company_id] = []
-                    company_managers_map[company_id].append(profile['id'])
-            
-            # Filter messages based on visibility rules
-            filtered_messages = []
-            for message in all_messages:
-                # Check if this is a personalized meal plan request by title
-                is_meal_plan_request = (
-                    message.get('title') == 'בקשה לתוכנית תזונה מותאמת' or 
-                    message.get('title') == 'Request for Personalized Meal Plan'
-                )
-                
-                # For non-meal-plan-request messages, use simple filtering
-                if not is_meal_plan_request:
-                    # Broadcast messages: visible to everyone
-                    if not message.get('directed_to'):
-                        filtered_messages.append(message)
-                        continue
-                    # Message directed to current user: always visible
-                    if message.get('directed_to') == user_id:
-                        filtered_messages.append(message)
-                    continue
-                
-                # For meal plan request messages, apply company-based visibility rules
-                # Message directed to current user: always visible
-                if message.get('directed_to') == user_id:
-                    filtered_messages.append(message)
-                    continue
-                
-                # If no directed_to, don't show (meal plan requests should always be directed)
-                if not message.get('directed_to'):
-                    continue
-                
-                # Get the target profile
-                target_profile = profile_map.get(message.get('directed_to'))
-                if not target_profile:
-                    continue
-                
-                # Show to company managers in the same company as the target
-                if (user_role == 'company_manager' and 
-                    target_profile.get('company_id') and 
-                    user_company_id == target_profile.get('company_id')):
-                    filtered_messages.append(message)
-            
-            return jsonify(filtered_messages), 200
-            
-        except Exception as profiles_error:
-            # Fallback to basic filtering if profiles table is not available
-            logger.warning(f'Could not fetch profiles, falling back to basic filtering: {str(profiles_error)}')
-            
-            # Basic filtering: show broadcast messages or messages directed to user
-            filtered_messages = []
-            for message in all_messages:
-                if not message.get('directed_to') or message.get('directed_to') == user_id:
-                    filtered_messages.append(message)
-            
-            return jsonify(filtered_messages), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get system messages for dietitian")
-
-
-@supabase_bp.route('/profiles/basic', methods=['GET'])
-def get_profiles_basic():
-    """Get basic profile information (id, role, company_id)"""
-    try:
-        result = supabase.table('profiles')\
-            .select('id, role, company_id')\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get profiles basic")
-
-
-# ============================================================================
-# USER MESSAGE PREFERENCES
-# ============================================================================
-
-@supabase_bp.route('/user-message-preferences', methods=['GET'])
-def get_user_message_preferences():
-    """Get user message preferences with optional filtering"""
-    try:
-        user_code = request.args.get('user_code')
-        user_codes = request.args.getlist('user_code')  # Support multiple user codes
-        
-        query = supabase.table('user_message_preferences').select('*', count='exact')
-        
-        if user_code:
-            query = query.eq('user_code', user_code)
-        elif user_codes and len(user_codes) > 0:
-            query = query.in_('user_code', user_codes)
-        
-        # Get count
-        count_result = query.execute()
-        total_count = count_result.count if hasattr(count_result, 'count') else len(count_result.data or [])
-        
-        # Get data with pagination (support both from/to and offset/limit)
-        from_param = request.args.get('from', type=int)
-        to_param = request.args.get('to', type=int)
-        limit = request.args.get('limit', type=int)
-        offset = request.args.get('offset', type=int)
-        
-        if from_param is not None and to_param is not None:
-            # Use from/to range
-            query = query.range(from_param, to_param)
-        elif limit:
-            query = query.limit(limit)
-            if offset:
-                query = query.range(offset, offset + limit - 1)
-        
-        query = query.order('user_code', desc=False)
-        result = query.execute()
-        
-        # Return data with count
-        response_data = result.data if result.data else []
-        return jsonify({
-            'data': response_data,
-            'count': total_count
-        }), 200
-        
-    except Exception as e:
-        return handle_error(e, "Get user message preferences")
-
-
-@supabase_bp.route('/user-message-preferences/<preference_id>', methods=['PUT'])
-def update_user_message_preference(preference_id):
-    """Update a user message preference"""
-    try:
-        data = request.json
-        
-        result = supabase.table('user_message_preferences')\
-            .update(data)\
-            .eq('id', preference_id)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 200
-        
-    except Exception as e:
-        return handle_error(e, "Update user message preference")
-
-
-# ============================================================================
-# SCHEDULED REMINDERS
-# ============================================================================
-
-@supabase_bp.route('/scheduled-reminders', methods=['POST'])
-def create_scheduled_reminders():
-    """Create scheduled reminders (supports bulk insert)"""
-    try:
-        data = request.json
-        
-        # Support both single object and array
-        if isinstance(data, dict):
-            data = [data]
-        
-        result = supabase.table('scheduled_reminders')\
-            .insert(data)\
-            .execute()
-        
-        return jsonify(result.data if result.data else []), 201
-        
-    except Exception as e:
-        return handle_error(e, "Create scheduled reminders")
-
-
-@supabase_bp.route('/scheduled-reminders', methods=['GET'])
+@supabase_bp.route("/scheduled-reminders", methods=["GET"])
 def list_scheduled_reminders():
-    """List scheduled reminders with optional filtering"""
+    """List scheduled reminders with optional filters"""
     try:
         user_code = request.args.get('user_code')
-        status = request.args.get('status')
-        plan_type = request.args.get('plan_type')
-        plan_id = request.args.get('plan_id')
+        status = request.args.get('status')  # Comma-separated statuses
         
-        query = supabase.table('scheduled_reminders').select('*')
+        query = supabase.table("scheduled_reminders").select("*")
         
         if user_code:
-            query = query.eq('user_code', user_code)
+            query = query.eq("user_code", user_code)
+        
         if status:
-            query = query.eq('status', status)
-        if plan_type:
-            query = query.eq('plan_type', plan_type)
-        if plan_id:
-            query = query.eq('plan_id', plan_id)
+            statuses = status.split(",")
+            query = query.in_("status", statuses)
         
-        result = query.order('scheduled_date', desc=False).execute()
-        
-        return jsonify(result.data if result.data else []), 200
-        
+        query = query.order("scheduled_date").order("scheduled_time")
+        response = query.execute()
+        return jsonify(response.data), 200
     except Exception as e:
-        return handle_error(e, "List scheduled reminders")
+        return handle_supabase_error(e, 'list_scheduled_reminders')
 
+@supabase_bp.route("/scheduled-reminders", methods=["POST"])
+def create_scheduled_reminder():
+    """Create a new scheduled reminder"""
+    try:
+        data = request.get_json()
+        response = supabase.table("scheduled_reminders").insert(data).execute()
+        return jsonify(response.data[0] if response.data else None), 201
+    except Exception as e:
+        return handle_supabase_error(e, 'create_scheduled_reminder')
 
-@supabase_bp.route('/scheduled-reminders/<reminder_id>', methods=['PUT'])
+@supabase_bp.route("/scheduled-reminders/<reminder_id>", methods=["GET"])
+def get_scheduled_reminder(reminder_id):
+    """Get a specific scheduled reminder"""
+    try:
+        response = supabase.table("scheduled_reminders").select("*").eq("id", reminder_id).execute()
+        if not response.data:
+            return jsonify({"error": "Reminder not found"}), 404
+        return jsonify(response.data[0]), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_scheduled_reminder')
+
+@supabase_bp.route("/scheduled-reminders/<reminder_id>", methods=["PATCH"])
 def update_scheduled_reminder(reminder_id):
     """Update a scheduled reminder"""
     try:
-        data = request.json
+        updates = request.get_json()
+        response = supabase.table("scheduled_reminders").update(updates).eq("id", reminder_id).execute()
         
-        result = supabase.table('scheduled_reminders')\
-            .update(data)\
-            .eq('id', reminder_id)\
-            .execute()
-        
-        return jsonify(result.data[0] if result.data else {}), 200
-        
+        if not response.data:
+            return jsonify({"error": "Reminder not found"}), 404
+        return jsonify(response.data[0]), 200
     except Exception as e:
-        return handle_error(e, "Update scheduled reminder")
+        return handle_supabase_error(e, 'update_scheduled_reminder')
 
-
-@supabase_bp.route('/scheduled-reminders/<reminder_id>', methods=['DELETE'])
+@supabase_bp.route("/scheduled-reminders/<reminder_id>", methods=["DELETE"])
 def delete_scheduled_reminder(reminder_id):
     """Delete a scheduled reminder"""
     try:
-        supabase.table('scheduled_reminders')\
+        supabase.table("scheduled_reminders").delete().eq("id", reminder_id).execute()
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'delete_scheduled_reminder')
+
+@supabase_bp.route("/scheduled-reminders/plan/<plan_id>", methods=["DELETE"])
+def delete_reminders_by_plan(plan_id):
+    """Delete all scheduled reminders for a specific plan
+    
+    Query params:
+    - plan_type: Type of plan (e.g., 'meal_plan', 'training_plan')
+    """
+    try:
+        plan_type = request.args.get('plan_type')
+        
+        query = supabase.table("scheduled_reminders").delete().eq("plan_id", plan_id)
+        
+        if plan_type:
+            query = query.eq("plan_type", plan_type)
+        
+        response = query.execute()
+        return jsonify({"success": True, "deleted_count": len(response.data) if response.data else 0}), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'delete_reminders_by_plan')
+
+# ==================== USER MESSAGE PREFERENCES ENDPOINTS ====================
+
+@supabase_bp.route("/user-message-preferences", methods=["GET"])
+def list_user_message_preferences():
+    """List user message preferences with optional filters"""
+    try:
+        user_codes = request.args.get('user_codes')  # Comma-separated user codes
+        limit = request.args.get('limit', type=int)
+        offset = request.args.get('offset', type=int, default=0)
+        count = request.args.get('count', 'false').lower() == 'true'
+        
+        query = supabase.table("user_message_preferences").select("*" if not count else "*", count='exact' if count else None)
+        
+        if user_codes:
+            codes_list = user_codes.split(",")
+            query = query.in_("user_code", codes_list)
+        
+        if limit:
+            query = query.limit(limit)
+        
+        if offset:
+            query = query.range(offset, offset + (limit or 100) - 1)
+        
+        response = query.execute()
+        
+        if count:
+            return jsonify({
+                "data": response.data,
+                "count": response.count
+            }), 200
+        return jsonify(response.data), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'list_user_message_preferences')
+
+@supabase_bp.route("/user-message-preferences/<preference_id>", methods=["GET"])
+def get_user_message_preference(preference_id):
+    """Get a specific user message preference"""
+    try:
+        response = supabase.table("user_message_preferences").select("*").eq("id", preference_id).execute()
+        if not response.data:
+            return jsonify({"error": "Preference not found"}), 404
+        return jsonify(response.data[0]), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_user_message_preference')
+
+@supabase_bp.route("/user-message-preferences", methods=["POST"])
+def create_user_message_preference():
+    """Create a new user message preference"""
+    try:
+        data = request.get_json()
+        response = supabase.table("user_message_preferences").insert(data).execute()
+        return jsonify(response.data[0] if response.data else None), 201
+    except Exception as e:
+        return handle_supabase_error(e, 'create_user_message_preference')
+
+@supabase_bp.route("/user-message-preferences/<preference_id>", methods=["PATCH"])
+def update_user_message_preference(preference_id):
+    """Update a user message preference"""
+    try:
+        updates = request.get_json()
+        response = supabase.table("user_message_preferences").update(updates).eq("id", preference_id).execute()
+        
+        if not response.data:
+            return jsonify({"error": "Preference not found"}), 404
+        return jsonify(response.data[0]), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'update_user_message_preference')
+
+@supabase_bp.route("/user-message-preferences/<preference_id>", methods=["DELETE"])
+def delete_user_message_preference(preference_id):
+    """Delete a user message preference"""
+    try:
+        supabase.table("user_message_preferences").delete().eq("id", preference_id).execute()
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'delete_user_message_preference')
+
+# ==================== INGREDIENTS ====================
+
+@supabase_bp.route("/ingredients/search", methods=["GET"])
+def search_ingredients():
+    """Search ingredients with flexible query patterns
+    
+    Query params:
+    - query: Search query string
+    - page: Page number (default: 1)
+    - limit: Results per page (default: 50)
+    """
+    try:
+        query = request.args.get('query', '').strip()
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 50))
+        
+        if not query:
+            return jsonify({"error": "Query parameter is required"}), 400
+        
+        # Normalize query for better matching
+        query = query.strip().lower()
+        
+        # Calculate offset for pagination
+        offset = (page - 1) * limit
+        
+        # Split query into words for multi-word search
+        words = query.split()
+        
+        results = []
+        
+        # Query 1: Items that START with the query
+        starts_with_pattern = f"{query}%"
+        response1 = supabase.table("ingridientsroee")\
+            .select("id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g")\
+            .or_(f"name.ilike.{starts_with_pattern},english_name.ilike.{starts_with_pattern}")\
+            .limit(limit)\
+            .execute()
+        
+        if response1.data:
+            results.extend(response1.data)
+        
+        # Query 2: Items that CONTAIN the full query (if not enough results)
+        if len(results) < limit:
+            contains_pattern = f"%{query}%"
+            response2 = supabase.table("ingridientsroee")\
+                .select("id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g")\
+                .or_(f"name.ilike.{contains_pattern},english_name.ilike.{contains_pattern}")\
+                .limit(limit * 2)\
+                .execute()
+            
+            if response2.data:
+                # Filter out duplicates
+                existing_ids = {item['id'] for item in results}
+                for item in response2.data:
+                    if item['id'] not in existing_ids:
+                        results.append(item)
+                        existing_ids.add(item['id'])
+        
+        # Query 3: Items that contain ANY of the words (if multiple words)
+        if len(words) > 1 and len(results) < limit:
+            words_conditions = []
+            for word in words:
+                word_pattern = f"%{word}%"
+                words_conditions.append(f"name.ilike.{word_pattern}")
+                words_conditions.append(f"english_name.ilike.{word_pattern}")
+            
+            response3 = supabase.table("ingridientsroee")\
+                .select("id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g")\
+                .or_(",".join(words_conditions))\
+                .limit(200)\
+                .execute()
+            
+            if response3.data:
+                # Filter out duplicates
+                existing_ids = {item['id'] for item in results}
+                for item in response3.data:
+                    if item['id'] not in existing_ids:
+                        results.append(item)
+                        existing_ids.add(item['id'])
+        
+        # Apply pagination to final results
+        paginated_results = results[offset:offset + limit]
+        
+        return jsonify({
+            "data": paginated_results,
+            "page": page,
+            "limit": limit,
+            "total": len(results),
+            "has_more": len(results) > offset + limit
+        }), 200
+        
+    except Exception as e:
+        return handle_supabase_error(e, 'search_ingredients')
+
+# ==================== MEAL TEMPLATES ====================
+
+@supabase_bp.route("/meal-templates", methods=["GET"])
+def list_meal_templates():
+    """List meal templates with their variants
+    
+    Query params:
+    - language: 'he' or 'en' (default: 'en')
+    - dietitian_id: Filter by dietitian ID
+    """
+    try:
+        language = request.args.get('language', 'en')
+        dietitian_id = request.args.get('dietitian_id')
+        
+        order_column = 'hebrew_name' if language == 'he' else 'name'
+        
+        query = supabase.table("meal_templates")\
+            .select("*, variants:meal_template_variants(meals_per_day)")\
+            .order(order_column)
+        
+        if dietitian_id:
+            query = query.eq("dietitian_id", dietitian_id)
+        
+        response = query.execute()
+        return jsonify(response.data), 200
+        
+    except Exception as e:
+        return handle_supabase_error(e, 'list_meal_templates')
+
+@supabase_bp.route("/meal-templates/<template_id>", methods=["GET"])
+def get_meal_template(template_id):
+    """Get a specific meal template"""
+    try:
+        response = supabase.table("meal_templates")\
+            .select("*")\
+            .eq("id", template_id)\
+            .single()\
+            .execute()
+        return jsonify(response.data), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_meal_template')
+
+@supabase_bp.route("/meal-templates", methods=["POST"])
+def create_meal_template():
+    """Create a new meal template
+    
+    Body: {
+        name: string,
+        hebrew_name?: string,
+        tags?: array,
+        dietitian_id?: string,
+        company_id?: string
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        template_data = {
+            "name": data.get("name"),
+            "tags": data.get("tags", [])
+        }
+        
+        if data.get("hebrew_name"):
+            template_data["hebrew_name"] = data["hebrew_name"]
+        if data.get("dietitian_id"):
+            template_data["dietitian_id"] = data["dietitian_id"]
+        if data.get("company_id"):
+            template_data["company_id"] = data["company_id"]
+        
+        response = supabase.table("meal_templates")\
+            .insert(template_data)\
+            .execute()
+        
+        return jsonify(response.data[0]), 201
+        
+    except Exception as e:
+        return handle_supabase_error(e, 'create_meal_template')
+
+@supabase_bp.route("/meal-templates/<template_id>", methods=["PATCH"])
+def update_meal_template(template_id):
+    """Update a meal template
+    
+    Body: {
+        name?: string,
+        hebrew_name?: string,
+        tags?: array
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        update_data = {}
+        if "name" in data:
+            update_data["name"] = data["name"]
+        if "hebrew_name" in data:
+            update_data["hebrew_name"] = data["hebrew_name"]
+        if "tags" in data:
+            update_data["tags"] = data["tags"]
+        
+        response = supabase.table("meal_templates")\
+            .update(update_data)\
+            .eq("id", template_id)\
+            .execute()
+        
+        return jsonify(response.data[0]), 200
+        
+    except Exception as e:
+        return handle_supabase_error(e, 'update_meal_template')
+
+@supabase_bp.route("/meal-templates/<template_id>", methods=["DELETE"])
+def delete_meal_template(template_id):
+    """Delete a meal template and all its variants and meals"""
+    try:
+        # First, get all variants for this template
+        variants_response = supabase.table("meal_template_variants")\
+            .select("id")\
+            .eq("template_id", template_id)\
+            .execute()
+        
+        if variants_response.data:
+            # Delete all meals for each variant
+            for variant in variants_response.data:
+                supabase.table("meal_template_meals")\
+                    .delete()\
+                    .eq("variant_id", variant['id'])\
+                    .execute()
+            
+            # Delete all variants
+            supabase.table("meal_template_variants")\
+                .delete()\
+                .eq("template_id", template_id)\
+                .execute()
+        
+        # Finally, delete the template
+        supabase.table("meal_templates")\
             .delete()\
-            .eq('id', reminder_id)\
+            .eq("id", template_id)\
             .execute()
         
         return jsonify({"success": True}), 200
         
     except Exception as e:
-        return handle_error(e, "Delete scheduled reminder")
+        return handle_supabase_error(e, 'delete_meal_template')
 
+# ==================== MEAL TEMPLATE VARIANTS ====================
 
-# ============================================================================
-# HEALTH CHECK
-# ============================================================================
+@supabase_bp.route("/meal-template-variants", methods=["GET"])
+def list_meal_template_variants():
+    """List meal template variants
+    
+    Query params:
+    - template_id: Filter by template ID
+    - meals_per_day: Filter by meals per day
+    """
+    try:
+        template_id = request.args.get('template_id')
+        meals_per_day = request.args.get('meals_per_day')
+        
+        query = supabase.table("meal_template_variants").select("*")
+        
+        if template_id:
+            query = query.eq("template_id", template_id)
+        if meals_per_day:
+            query = query.eq("meals_per_day", int(meals_per_day))
+        
+        response = query.execute()
+        return jsonify(response.data), 200
+        
+    except Exception as e:
+        return handle_supabase_error(e, 'list_meal_template_variants')
 
-@supabase_bp.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
+@supabase_bp.route("/meal-template-variants/<variant_id>", methods=["GET"])
+def get_meal_template_variant(variant_id):
+    """Get a specific meal template variant"""
+    try:
+        response = supabase.table("meal_template_variants")\
+            .select("*")\
+            .eq("id", variant_id)\
+            .single()\
+            .execute()
+        return jsonify(response.data), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_meal_template_variant')
+
+@supabase_bp.route("/meal-template-variants", methods=["POST"])
+def create_meal_template_variant():
+    """Create a new meal template variant
+    
+    Body: {
+        template_id: string,
+        meals_per_day: number
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        variant_data = {
+            "template_id": data.get("template_id"),
+            "meals_per_day": data.get("meals_per_day")
+        }
+        
+        response = supabase.table("meal_template_variants")\
+            .insert(variant_data)\
+            .execute()
+        
+        return jsonify(response.data[0]), 201
+        
+    except Exception as e:
+        return handle_supabase_error(e, 'create_meal_template_variant')
+
+@supabase_bp.route("/meal-template-variants/<variant_id>", methods=["DELETE"])
+def delete_meal_template_variant(variant_id):
+    """Delete a meal template variant and all its meals"""
+    try:
+        # Delete all meals for this variant
+        supabase.table("meal_template_meals")\
+            .delete()\
+            .eq("variant_id", variant_id)\
+            .execute()
+        
+        # Delete the variant
+        supabase.table("meal_template_variants")\
+            .delete()\
+            .eq("id", variant_id)\
+            .execute()
+        
+        return jsonify({"success": True}), 200
+        
+    except Exception as e:
+        return handle_supabase_error(e, 'delete_meal_template_variant')
+
+# ==================== MEAL TEMPLATE MEALS ====================
+
+@supabase_bp.route("/meal-template-meals", methods=["GET"])
+def list_meal_template_meals():
+    """List meal template meals
+    
+    Query params:
+    - variant_id: Filter by variant ID (required)
+    """
+    try:
+        variant_id = request.args.get('variant_id')
+        
+        if not variant_id:
+            return jsonify({"error": "variant_id parameter is required"}), 400
+        
+        response = supabase.table("meal_template_meals")\
+            .select("*")\
+            .eq("variant_id", variant_id)\
+            .order("position")\
+            .execute()
+        
+        return jsonify(response.data), 200
+        
+    except Exception as e:
+        return handle_supabase_error(e, 'list_meal_template_meals')
+
+@supabase_bp.route("/meal-template-meals/<meal_id>", methods=["GET"])
+def get_meal_template_meal(meal_id):
+    """Get a specific meal template meal"""
+    try:
+        response = supabase.table("meal_template_meals")\
+            .select("*")\
+            .eq("id", meal_id)\
+            .single()\
+            .execute()
+        return jsonify(response.data), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_meal_template_meal')
+
+@supabase_bp.route("/meal-template-meals", methods=["POST"])
+def create_meal_template_meals():
+    """Create meal template meals (single or bulk)
+    
+    Body: {
+        meals: array of {
+            variant_id: string,
+            position: number,
+            meal_key: string,
+            name: string,
+            hebrew_name?: string,
+            calories_percentage: number,
+            emoji?: string
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        meals = data.get("meals", [])
+        
+        if not meals:
+            return jsonify({"error": "meals array is required"}), 400
+        
+        response = supabase.table("meal_template_meals")\
+            .insert(meals)\
+            .execute()
+        
+        return jsonify(response.data), 201
+        
+    except Exception as e:
+        return handle_supabase_error(e, 'create_meal_template_meals')
+
+@supabase_bp.route("/meal-template-meals/<meal_id>", methods=["PATCH"])
+def update_meal_template_meal(meal_id):
+    """Update a meal template meal"""
+    try:
+        data = request.get_json()
+        
+        response = supabase.table("meal_template_meals")\
+            .update(data)\
+            .eq("id", meal_id)\
+            .execute()
+        
+        return jsonify(response.data[0]), 200
+        
+    except Exception as e:
+        return handle_supabase_error(e, 'update_meal_template_meal')
+
+@supabase_bp.route("/meal-template-meals/<meal_id>", methods=["DELETE"])
+def delete_meal_template_meal(meal_id):
+    """Delete a meal template meal"""
+    try:
+        supabase.table("meal_template_meals")\
+            .delete()\
+            .eq("id", meal_id)\
+            .execute()
+        
+        return jsonify({"success": True}), 200
+        
+    except Exception as e:
+        return handle_supabase_error(e, 'delete_meal_template_meal')
+
+@supabase_bp.route("/meal-template-meals/variant/<variant_id>", methods=["DELETE"])
+def delete_meals_by_variant(variant_id):
+    """Delete all meals for a specific variant"""
+    try:
+        supabase.table("meal_template_meals")\
+            .delete()\
+            .eq("variant_id", variant_id)\
+            .execute()
+        
+        return jsonify({"success": True}), 200
+        
+    except Exception as e:
+        return handle_supabase_error(e, 'delete_meals_by_variant')
+
+# ==================== CLIENT MEAL PLANS ENDPOINTS (Second Supabase) ====================
+
+@supabase_bp.route("/client-meal-plans", methods=["GET"])
+def get_client_meal_plan():
+    """Get a client meal plan by original_meal_plan_id"""
+    try:
+        if not second_supabase:
+            return jsonify({"error": "Second Supabase client not configured"}), 500
+        
+        original_meal_plan_id = request.args.get('original_meal_plan_id')
+        if not original_meal_plan_id:
+            return jsonify({"error": "original_meal_plan_id is required"}), 400
+        
+        response = second_supabase.table("client_meal_plans")\
+            .select("*")\
+            .eq("original_meal_plan_id", original_meal_plan_id)\
+            .maybeSingle()\
+            .execute()
+        
+        return jsonify(response.data if response.data else None), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_client_meal_plan')
+
+@supabase_bp.route("/client-meal-plans", methods=["POST"])
+def create_client_meal_plan():
+    """Create a new client meal plan"""
+    try:
+        if not second_supabase:
+            return jsonify({"error": "Second Supabase client not configured"}), 500
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request body is required"}), 400
+        
+        response = second_supabase.table("client_meal_plans").insert(data).execute()
+        return jsonify(response.data[0] if response.data else None), 201
+    except Exception as e:
+        return handle_supabase_error(e, 'create_client_meal_plan')
+
+@supabase_bp.route("/client-meal-plans", methods=["PATCH"])
+def update_client_meal_plan():
+    """Update a client meal plan by original_meal_plan_id"""
+    try:
+        if not second_supabase:
+            return jsonify({"error": "Second Supabase client not configured"}), 500
+        
+        original_meal_plan_id = request.args.get('original_meal_plan_id')
+        if not original_meal_plan_id:
+            return jsonify({"error": "original_meal_plan_id is required"}), 400
+        
+        updates = request.get_json()
+        if not updates:
+            return jsonify({"error": "Request body is required"}), 400
+        
+        response = second_supabase.table("client_meal_plans")\
+            .update(updates)\
+            .eq("original_meal_plan_id", original_meal_plan_id)\
+            .execute()
+        
+        return jsonify(response.data[0] if response.data else None), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'update_client_meal_plan')
+
+@supabase_bp.route("/client-meal-plans", methods=["DELETE"])
+def delete_client_meal_plan():
+    """Delete a client meal plan by original_meal_plan_id"""
+    try:
+        if not second_supabase:
+            return jsonify({"error": "Second Supabase client not configured"}), 500
+        
+        original_meal_plan_id = request.args.get('original_meal_plan_id')
+        if not original_meal_plan_id:
+            return jsonify({"error": "original_meal_plan_id is required"}), 400
+        
+        second_supabase.table("client_meal_plans")\
+            .delete()\
+            .eq("original_meal_plan_id", original_meal_plan_id)\
+            .execute()
+        
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'delete_client_meal_plan')
+
+# ==================== CLIENTS ENDPOINTS (Second Supabase) ====================
+
+@supabase_bp.route("/clients", methods=["GET"])
+def get_client():
+    """Get a client by user_code from second Supabase"""
+    try:
+        if not second_supabase:
+            return jsonify({"error": "Second Supabase client not configured"}), 500
+        
+        user_code = request.args.get('user_code')
+        if not user_code:
+            return jsonify({"error": "user_code is required"}), 400
+        
+        # Get specific fields if requested
+        select_fields = request.args.get('select', '*')
+        
+        response = second_supabase.table("clients")\
+            .select(select_fields)\
+            .eq("user_code", user_code)\
+            .maybeSingle()\
+            .execute()
+        
+        return jsonify(response.data if response.data else None), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_client')
+
+@supabase_bp.route("/clients", methods=["DELETE"])
+def delete_client():
+    """Delete a client by user_code from second Supabase"""
+    try:
+        if not second_supabase:
+            return jsonify({"error": "Second Supabase client not configured"}), 500
+        
+        user_code = request.args.get('user_code')
+        if not user_code:
+            return jsonify({"error": "user_code is required"}), 400
+        
+        second_supabase.table("clients")\
+            .delete()\
+            .eq("user_code", user_code)\
+            .execute()
+        
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'delete_client')
+
+# ==================== TRAINING PLANS ENDPOINTS ====================
+
+@supabase_bp.route("/training-plans", methods=["GET"])
+def list_training_plans():
+    """List all training plans"""
+    try:
+        response = supabase.table("training_plans").select("*").order("created_at", desc=True).execute()
+        return jsonify(response.data or []), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'list_training_plans')
+
+@supabase_bp.route("/training-plans", methods=["POST"])
+def create_training_plan():
+    """Create a new training plan"""
+    try:
+        data = request.get_json()
+        response = supabase.table("training_plans").insert(data).execute()
+        return jsonify(response.data[0] if response.data else None), 201
+    except Exception as e:
+        return handle_supabase_error(e, 'create_training_plan')
+
+@supabase_bp.route("/training-plans/<plan_id>", methods=["PATCH"])
+def update_training_plan(plan_id):
+    """Update a training plan"""
+    try:
+        updates = request.get_json()
+        updates["updated_at"] = datetime.utcnow().isoformat()
+        response = supabase.table("training_plans").update(updates).eq("id", plan_id).execute()
+        
+        if not response.data:
+            return jsonify({"error": "Training plan not found"}), 404
+        
+        return jsonify(response.data[0]), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'update_training_plan')
+
+@supabase_bp.route("/training-plans/<plan_id>", methods=["DELETE"])
+def delete_training_plan(plan_id):
+    """Delete a training plan"""
+    try:
+        supabase.table("training_plans").delete().eq("id", plan_id).execute()
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'delete_training_plan')
+
+@supabase_bp.route("/training-plans/user/<user_code>", methods=["GET"])
+def get_training_plans_by_user_code(user_code):
+    """Get training plans for a specific user"""
+    try:
+        response = supabase.table("training_plans")\
+            .select("*")\
+            .eq("user_code", user_code)\
+            .order("created_at", desc=True)\
+            .execute()
+        return jsonify(response.data or []), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_training_plans_by_user_code')
+
+@supabase_bp.route("/training-plans/user/<user_code>/active", methods=["GET"])
+def get_active_training_plans_by_user_code(user_code):
+    """Get active training plans for a specific user"""
+    try:
+        response = supabase.table("training_plans")\
+            .select("*")\
+            .eq("user_code", user_code)\
+            .eq("status", "active")\
+            .order("created_at", desc=True)\
+            .execute()
+        return jsonify(response.data or []), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_active_training_plans_by_user_code')
+
+# ==================== TRAINING LOGS ENDPOINTS ====================
+
+@supabase_bp.route("/training-logs", methods=["GET"])
+def list_training_logs():
+    """List all training logs with optional limit"""
+    try:
+        limit = request.args.get('limit', type=int, default=100)
+        query = supabase.table("training_logs").select("*").order("session_date", desc=True)
+        
+        if limit:
+            query = query.limit(limit)
+        
+        response = query.execute()
+        return jsonify(response.data or []), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'list_training_logs')
+
+@supabase_bp.route("/training-logs/user/<user_code>", methods=["GET"])
+def get_training_logs_by_user_code(user_code):
+    """Get training logs for a specific user"""
+    try:
+        limit = request.args.get('limit', type=int, default=50)
+        query = supabase.table("training_logs")\
+            .select("*")\
+            .eq("user_code", user_code)\
+            .order("session_date", desc=True)
+        
+        if limit:
+            query = query.limit(limit)
+        
+        response = query.execute()
+        return jsonify(response.data or []), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_training_logs_by_user_code')
+
+@supabase_bp.route("/training-logs/user/<user_code>/date-range", methods=["GET"])
+def get_training_logs_by_date_range(user_code):
+    """Get training logs for a user within a date range"""
+    try:
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        
+        if not start_date or not end_date:
+            return jsonify({"error": "start_date and end_date are required"}), 400
+        
+        query = supabase.table("training_logs")\
+            .select("*")\
+            .eq("user_code", user_code)\
+            .gte("session_date", start_date)\
+            .lte("session_date", end_date)\
+            .order("session_date", desc=True)
+        
+        response = query.execute()
+        return jsonify(response.data or []), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_training_logs_by_date_range')
+
+# ==================== TRAINING REMINDERS ENDPOINTS ====================
+
+@supabase_bp.route("/training-reminders/pending", methods=["GET"])
+def get_pending_training_reminders():
+    """Get all pending training reminders"""
+    try:
+        now = datetime.utcnow().isoformat()
+        # Combine scheduled_date and scheduled_time for comparison
+        today = datetime.utcnow().date().isoformat()
+        response = supabase.table("scheduled_reminders")\
+            .select("*")\
+            .eq("plan_type", "training_plan")\
+            .eq("status", "pending")\
+            .lte("scheduled_date", today)\
+            .order("scheduled_date", desc=False)\
+            .order("scheduled_time", desc=False)\
+            .execute()
+        return jsonify(response.data or []), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_pending_training_reminders')
+
+@supabase_bp.route("/training-reminders/user/<user_code>", methods=["GET"])
+def get_training_reminders_by_user_code(user_code):
+    """Get training reminders for a specific user"""
+    try:
+        response = supabase.table("scheduled_reminders")\
+            .select("*")\
+            .eq("plan_type", "training_plan")\
+            .eq("user_code", user_code)\
+            .order("scheduled_date", desc=True)\
+            .order("scheduled_time", desc=True)\
+            .execute()
+        return jsonify(response.data or []), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_training_reminders_by_user_code')
+
+@supabase_bp.route("/training-reminders", methods=["POST"])
+def create_training_reminder():
+    """Create a new training reminder"""
+    try:
+        data = request.get_json()
+        # Ensure plan_type is set to "training_plan" for training reminders
+        if "plan_type" not in data:
+            data["plan_type"] = "training_plan"
+        response = supabase.table("scheduled_reminders").insert(data).execute()
+        return jsonify(response.data[0] if response.data else None), 201
+    except Exception as e:
+        return handle_supabase_error(e, 'create_training_reminder')
+
+@supabase_bp.route("/training-reminders/<reminder_id>", methods=["PATCH"])
+def update_training_reminder(reminder_id):
+    """Update a training reminder"""
+    try:
+        updates = request.get_json()
+        response = supabase.table("scheduled_reminders").update(updates).eq("id", reminder_id).execute()
+        
+        if not response.data:
+            return jsonify({"error": "Training reminder not found"}), 404
+        
+        return jsonify(response.data[0]), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'update_training_reminder')
+
+@supabase_bp.route("/training-reminders/<reminder_id>", methods=["DELETE"])
+def delete_training_reminder(reminder_id):
+    """Delete a training reminder"""
+    try:
+        supabase.table("scheduled_reminders").delete().eq("id", reminder_id).execute()
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'delete_training_reminder')
+
+# ==================== EXERCISE LIBRARY ENDPOINTS ====================
+
+@supabase_bp.route("/exercise-library", methods=["GET"])
+def list_exercise_library():
+    """List all exercises in the library"""
+    try:
+        response = supabase.table("exercise_library").select("*").order("exercise_name").execute()
+        return jsonify(response.data or []), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'list_exercise_library')
+
+@supabase_bp.route("/exercise-library", methods=["POST"])
+def create_exercise():
+    """Create a new exercise"""
+    try:
+        data = request.get_json()
+        response = supabase.table("exercise_library").insert(data).execute()
+        return jsonify(response.data[0] if response.data else None), 201
+    except Exception as e:
+        return handle_supabase_error(e, 'create_exercise')
+
+@supabase_bp.route("/exercise-library/<exercise_id>", methods=["PATCH"])
+def update_exercise(exercise_id):
+    """Update an exercise"""
+    try:
+        updates = request.get_json()
+        response = supabase.table("exercise_library").update(updates).eq("id", exercise_id).execute()
+        
+        if not response.data:
+            return jsonify({"error": "Exercise not found"}), 404
+        
+        return jsonify(response.data[0]), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'update_exercise')
+
+@supabase_bp.route("/exercise-library/<exercise_id>", methods=["DELETE"])
+def delete_exercise(exercise_id):
+    """Delete an exercise"""
+    try:
+        supabase.table("exercise_library").delete().eq("id", exercise_id).execute()
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'delete_exercise')
+
+@supabase_bp.route("/exercise-library/category/<category>", methods=["GET"])
+def get_exercises_by_category(category):
+    """Get exercises by category"""
+    try:
+        response = supabase.table("exercise_library")\
+            .select("*")\
+            .eq("category", category)\
+            .order("exercise_name")\
+            .execute()
+        return jsonify(response.data or []), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_exercises_by_category')
+
+@supabase_bp.route("/exercise-library/search", methods=["GET"])
+def search_exercises():
+    """Search exercises by query"""
+    try:
+        query = request.args.get('query', '')
+        if not query:
+            return jsonify([]), 200
+        
+        # Search in exercise_name, exercise_name_he, description
+        # Use ilike for case-insensitive search
+        search_pattern = f"%{query}%"
+        response = supabase.table("exercise_library")\
+            .select("*")\
+            .or_(f"exercise_name.ilike.{search_pattern},exercise_name_he.ilike.{search_pattern},description.ilike.{search_pattern}")\
+            .order("exercise_name")\
+            .execute()
+        return jsonify(response.data or []), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'search_exercises')
+
+# ==================== TRAINING PLAN TEMPLATES ENDPOINTS ====================
+
+@supabase_bp.route("/training-plan-templates", methods=["GET"])
+def list_training_plan_templates():
+    """List all training plan templates (both public and user's own)"""
+    try:
+        # Get user_id from request if available (for filtering user's templates)
+        user_id = request.args.get('user_id')
+        
+        query = supabase.table("training_plan_templates").select("*")
+        
+        if user_id:
+            # Get user's templates
+            query = query.eq("created_by", user_id)
+        else:
+            # Get all templates (public and user's own)
+            query = query.or_(f"is_public.eq.true,created_by.eq.{user_id}" if user_id else "is_public.eq.true")
+        
+        response = query.order("created_at", desc=True).execute()
+        return jsonify(response.data or []), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'list_training_plan_templates')
+
+@supabase_bp.route("/training-plan-templates/public", methods=["GET"])
+def get_public_training_plan_templates():
+    """Get all public training plan templates"""
+    try:
+        response = supabase.table("training_plan_templates")\
+            .select("*")\
+            .eq("is_public", True)\
+            .order("created_at", desc=True)\
+            .execute()
+        return jsonify(response.data or []), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_public_training_plan_templates')
+
+@supabase_bp.route("/training-plan-templates/search", methods=["GET"])
+def search_training_plan_templates():
+    """Search training plan templates by query"""
+    try:
+        query = request.args.get('query', '')
+        if not query:
+            return jsonify([]), 200
+        
+        # Search in template_name, template_name_he, description, description_he
+        search_pattern = f"%{query}%"
+        response = supabase.table("training_plan_templates")\
+            .select("*")\
+            .or_(f"template_name.ilike.{search_pattern},template_name_he.ilike.{search_pattern},description.ilike.{search_pattern},description_he.ilike.{search_pattern}")\
+            .order("created_at", desc=True)\
+            .execute()
+        return jsonify(response.data or []), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'search_training_plan_templates')
+
+@supabase_bp.route("/training-plan-templates", methods=["POST"])
+def create_training_plan_template():
+    """Create a new training plan template"""
+    try:
+        data = request.get_json()
+        response = supabase.table("training_plan_templates").insert(data).execute()
+        return jsonify(response.data[0] if response.data else None), 201
+    except Exception as e:
+        return handle_supabase_error(e, 'create_training_plan_template')
+
+@supabase_bp.route("/training-plan-templates/<template_id>", methods=["PATCH"])
+def update_training_plan_template(template_id):
+    """Update a training plan template"""
+    try:
+        updates = request.get_json()
+        response = supabase.table("training_plan_templates").update(updates).eq("id", template_id).execute()
+        
+        if not response.data:
+            return jsonify({"error": "Template not found"}), 404
+        
+        return jsonify(response.data[0]), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'update_training_plan_template')
+
+@supabase_bp.route("/training-plan-templates/<template_id>", methods=["DELETE"])
+def delete_training_plan_template(template_id):
+    """Delete a training plan template"""
+    try:
+        supabase.table("training_plan_templates").delete().eq("id", template_id).execute()
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'delete_training_plan_template')
+
+# ==================== HEALTH CHECK ====================
+
+@supabase_bp.route("/health", methods=["GET"])
+def api_health_check():
+    """API health check with CORS verification"""
+    origin = request.headers.get('Origin', 'Not provided')
+    
+    # Test second Supabase connection
+    second_status = "not_configured"
+    if second_supabase:
+        try:
+            second_supabase.table("client_meal_plans").select("id").limit(1).execute()
+            second_status = "connected"
+        except:
+            second_status = "error"
+    
     return jsonify({
         "status": "healthy",
-        "supabase_connected": supabase is not None
+        "service": "Supabase API Blueprint",
+        "supabase_configured": bool(SUPABASE_URL and SUPABASE_KEY),
+        "second_supabase_status": second_status,
+        "timestamp": datetime.utcnow().isoformat(),
+        "cors": {
+            "enabled": True,
+            "configured_in": "backend.py main app",
+            "request_origin": origin,
+            "allowed_origins": [
+                "http://localhost:5173",
+                "https://www.betterchoicefood.com",
+                "https://betterchoicefood.com",
+                "And others configured in backend.py"
+            ]
+        }
     }), 200
 
+logger.info("✅ Supabase API Blueprint initialized with all endpoints")

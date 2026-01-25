@@ -4,12 +4,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { ArrowLeft, Loader, Save, Search, Filter, Utensils, Edit, CalendarRange, Download, Trash2, Plus } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Menu } from '@/api/entities';
+import { Menu, ChatUser, ScheduledReminders, Ingredients, ClientMealPlans } from '@/api/entities';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { supabase, secondSupabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useClient } from '@/contexts/ClientContext';
 import { getMyProfile } from '@/utils/auth';
@@ -28,15 +28,11 @@ import {
 const getUserLanguage = async (userCode) => {
   try {
     console.log('🔍 Fetching language for user_code:', userCode);
-    const { data: userData, error: userError } = await supabase
-      .from('chat_users')
-      .select('language')
-      .eq('user_code', userCode)
-      .single();
+    const userData = await ChatUser.get(userCode, 'language');
     
-    console.log('📊 Language query result:', { userData, userError });
+    console.log('📊 Language query result:', userData);
     
-    if (!userError && userData?.language) {
+    if (userData?.language) {
       console.log('📝 User language preference found:', userData.language);
       return userData.language; // Return whatever is in the database
     } else {
@@ -75,14 +71,10 @@ const sendMealPlanActivationNotification = async (userCode, mealPlanName, client
     console.log('📝 Notification message to send:', notificationMessage);
 
     // Get phone number from chat_users table
-    const { data: clientData, error: clientError } = await supabase
-      .from('chat_users')
-      .select('phone_number')
-      .eq('user_code', userCode)
-      .single();
+    const clientData = await ChatUser.get(userCode, 'phone_number');
 
-    if (clientError || !clientData?.phone_number) {
-      console.error('Error fetching phone number from chat_users:', clientError);
+    if (!clientData?.phone_number) {
+      console.error('Error fetching phone number from chat_users');
       throw new Error(`Failed to get phone number for user ${userCode}`);
     }
 
@@ -133,14 +125,10 @@ const createWeeklyMealPlanReminders = async (userCode, mealPlanId, activeFrom, a
     }
 
     // Get client data including phone_number and telegram_chat_id
-    const { data: clientData, error: clientError } = await supabase
-      .from('chat_users')
-      .select('phone_number, telegram_chat_id, id')
-      .eq('user_code', userCode)
-      .single();
+    const clientData = await ChatUser.get(userCode, 'phone_number,telegram_chat_id,id');
     
-    if (clientError || !clientData) {
-      console.error('Error fetching client data for reminders:', clientError);
+    if (!clientData) {
+      console.error('Error fetching client data for reminders');
       return;
     }
     
@@ -254,14 +242,11 @@ const createWeeklyMealPlanReminders = async (userCode, mealPlanId, activeFrom, a
     }
     
     // Insert all reminders in batch
-    const { data, error } = await supabase
-      .from('scheduled_reminders')
-      .insert(reminders)
-      .select();
+    const data = await ScheduledReminders.create(reminders);
     
-    if (error) {
-      console.error('Error creating weekly reminders:', error);
-      throw error;
+    if (!data) {
+      console.error('Error creating weekly reminders');
+      throw new Error('Failed to create reminders');
     }
     
     console.log(`✅ Created ${reminders.length} weekly reminders successfully:`, data);
@@ -288,14 +273,13 @@ const checkAndSendFutureMealPlanNotifications = async () => {
     const threeDayTarget = threeDaysFromNow.toISOString().split('T')[0];
     
     // Find meal plans scheduled to be active in 2-3 days
-    const { data: futureMealPlans, error } = await supabase
-      .from('meal_plans_and_schemas')
-      .select('id, user_code, meal_plan_name, active_from, status')
-      .eq('status', 'scheduled')
-      .in('active_from', [twoDayTarget, threeDayTarget]);
+    const futureMealPlans = await Menu.filter({
+      status: 'scheduled',
+      active_from: [twoDayTarget, threeDayTarget]
+    });
     
-    if (error) {
-      console.error('Error fetching future meal plans:', error);
+    if (!futureMealPlans) {
+      console.error('Error fetching future meal plans');
       return;
     }
     
@@ -310,13 +294,9 @@ const checkAndSendFutureMealPlanNotifications = async () => {
     for (const mealPlan of futureMealPlans) {
       try {
         // Get client ID for notification
-        const { data: clientData, error: clientError } = await supabase
-          .from('chat_users')
-          .select('id')
-          .eq('user_code', mealPlan.user_code)
-          .single();
+        const clientData = await ChatUser.get(mealPlan.user_code, 'id');
         
-        if (clientData && !clientError) {
+        if (clientData?.id) {
           // Send advance notification
           await sendFutureMealPlanNotification(
             mealPlan.user_code, 
@@ -363,14 +343,10 @@ const sendFutureMealPlanNotification = async (userCode, mealPlanName, clientId, 
     console.log('📝 Future notification message to send:', notificationMessage);
 
     // Get phone number from chat_users table
-    const { data: clientData, error: clientError } = await supabase
-      .from('chat_users')
-      .select('phone_number')
-      .eq('user_code', userCode)
-      .single();
+    const clientData = await ChatUser.get(userCode, 'phone_number');
 
-    if (clientError || !clientData?.phone_number) {
-      console.error('Error fetching phone number from chat_users:', clientError);
+    if (!clientData?.phone_number) {
+      console.error('Error fetching phone number from chat_users');
       throw new Error(`Failed to get phone number for user ${userCode}`);
     }
 
@@ -500,67 +476,17 @@ const EditableIngredient = ({
 
     setIsLoading(true);
     try {
-      const queryWords = query.trim().split(/\s+/).filter(Boolean);
-      let allData = [];
-
-      if (queryWords.length === 1) {
-        const word = queryWords[0];
-        const startsWithPattern = `${word}%`;
-        const containsPattern = `%${word}%`;
-
-        const { data: startsWithData, error: startsWithError } = await supabase
-          .from('ingridientsroee')
-          .select('id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g')
-          .or([
-            `name.ilike.${startsWithPattern}`,
-            `english_name.ilike.${startsWithPattern}`
-          ].join(','))
-          .limit(50);
-
-        if (!startsWithError && startsWithData) {
-          allData = startsWithData;
-        }
-
-        if (allData.length < 20) {
-          const { data: containsData, error: containsError } = await supabase
-            .from('ingridientsroee')
-            .select('id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g')
-            .or([
-              `name.ilike.${containsPattern}`,
-              `english_name.ilike.${containsPattern}`
-            ].join(','))
-            .limit(50);
-
-          if (!containsError && containsData) {
-            const existingIds = new Set(allData.map(item => item.id));
-            const newItems = containsData.filter(item => !existingIds.has(item.id));
-            allData = [...allData, ...newItems];
-          }
-        }
-      } else {
-        const wordsConditions = [];
-        queryWords.forEach(word => {
-          const pattern = `%${word}%`;
-          wordsConditions.push(
-            `name.ilike.${pattern}`,
-            `english_name.ilike.${pattern}`
-          );
-        });
-
-        const { data: wordsData, error: wordsError } = await supabase
-          .from('ingridientsroee')
-          .select('id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g')
-          .or(wordsConditions.join(','))
-          .limit(200);
-
-        if (!wordsError && wordsData) {
-          const filteredWordsData = wordsData.filter(item => {
-            const combinedText = `${(item.name || '').toLowerCase()} ${(item.english_name || '').toLowerCase()}`;
-            return queryWords.every(word => combinedText.includes(word.toLowerCase()));
-          });
-          allData = filteredWordsData;
-        }
+      // Use the Ingredients API
+      const response = await Ingredients.search({ query, page: 1, limit: 50 });
+      
+      if (!response || !response.data) {
+        setSuggestions([]);
+        setIsLoading(false);
+        return;
       }
+
+      const allData = response.data;
+      const queryWords = query.trim().split(/\s+/).filter(Boolean);
 
       const rankedData = allData.map(ingredient => {
         const hebrewName = (ingredient.name || '').toLowerCase();
@@ -1329,44 +1255,25 @@ const MenuLoad = () => {
 
     try {
       console.log('🔍 Testing database connectivity...');
-      const { data: testData, error: testError } = await supabase
-        .from('chat_users')
-        .select('user_code')
-        .limit(1);
+      const testData = await ChatUser.list();
       
-      console.log('🔍 Database connectivity test:', { testData, testError });
+      console.log('🔍 Database connectivity test:', testData);
       
-      if (testError) {
-        console.error('❌ Database connectivity issue:', testError);
-        setError('Database connection issue: ' + testError.message);
+      if (!testData) {
+        console.error('❌ Database connectivity issue');
+        setError('Database connection issue');
         return null;
       }
 
       console.log('🔍 Fetching user targets for:', userCode);
 
-      const { data, error } = await supabase
-        .from('chat_users')
-        .select('daily_target_total_calories, macros, region, food_allergies, food_limitations, age, gender, weight_kg, height_cm, client_preference')
-        .eq('user_code', userCode)
-        .single();
+      const data = await ChatUser.get(userCode, 'daily_target_total_calories,macros,region,food_allergies,food_limitations,age,gender,weight_kg,height_cm,client_preference');
 
-      console.log('📊 Database response:', { data, error });
-
-      if (error) {
-        console.error('❌ Error fetching user targets:', error);
-        if (error.code === 'PGRST116') {
-          // No rows returned
-          console.error('❌ No user found with code:', userCode);
-          setError(`No user found with code: ${userCode}. Please check if the user exists in the database.`);
-        } else {
-          setError('Failed to load user targets: ' + error.message);
-        }
-        return null;
-      }
+      console.log('📊 Database response:', data);
 
       if (!data) {
-        console.error('❌ No data returned from database');
-        setError('No data returned from database for user: ' + userCode);
+        console.error('❌ No user found with code:', userCode);
+        setError(`No user found with code: ${userCode}. Please check if the user exists in the database.`);
         return null;
       }
 
@@ -1601,14 +1508,10 @@ const MenuLoad = () => {
     try {
       console.log('📋 Fetching client recommendations for user:', userCode);
 
-      const { data: userData, error } = await supabase
-        .from('chat_users')
-        .select('recommendations')
-        .eq('user_code', userCode)
-        .single();
+      const userData = await ChatUser.get(userCode, 'recommendations');
 
-      if (error) {
-        console.error('❌ Error fetching client recommendations:', error);
+      if (!userData) {
+        console.error('❌ Error fetching client recommendations');
         setClientRecommendations([]);
         return [];
       }
@@ -2353,31 +2256,23 @@ const MenuLoad = () => {
           console.log('🔄 Checking if meal plan exists in second database...');
           
           // Check if meal plan exists in client_meal_plans table
-          const { data: existingClientMealPlan, error: checkError } = await secondSupabase
-            .from('client_meal_plans')
-            .select('id')
-            .eq('original_meal_plan_id', selectedMenu.id)
-            .single();
+          const existingClientMealPlan = await ClientMealPlans.get(selectedMenu.id);
           
-          if (!checkError && existingClientMealPlan) {
+          if (existingClientMealPlan) {
             console.log('📝 Updating existing meal plan in second database...');
             
             // Update the dietitian_meal_plan with the new version
-            const { error: updateError } = await secondSupabase
-              .from('client_meal_plans')
-              .update({
+            try {
+              await ClientMealPlans.update(selectedMenu.id, {
                 meal_plan_name: updatedMenu.meal_plan_name,
                 dietitian_meal_plan: updatedMenu.meal_plan,
                 daily_total_calories: updatedMenu.daily_total_calories,
                 macros_target: updatedMenu.macros_target
-              })
-              .eq('id', existingClientMealPlan.id);
-            
-            if (updateError) {
+              });
+              console.log('✅ Meal plan synced to second database successfully');
+            } catch (updateError) {
               console.error('Error updating meal plan in second database:', updateError);
               console.warn('Main meal plan was saved, but failed to sync to second database');
-            } else {
-              console.log('✅ Meal plan synced to second database successfully');
             }
           } else {
             console.log('ℹ️ Meal plan not found in second database (will be created when activated)');
@@ -2478,16 +2373,7 @@ const MenuLoad = () => {
             console.log('🔄 Syncing meal plan to second database...');
             
             // Check if meal plan already exists in client_meal_plans table
-            const { data: existingClientMealPlan, error: checkError } = await secondSupabase
-              .from('client_meal_plans')
-              .select('id')
-              .eq('original_meal_plan_id', selectedMenuForStatus.id)
-              .maybeSingle();
-            
-            if (checkError) {
-              console.error('Error checking for existing meal plan:', checkError);
-              throw checkError;
-            }
+            const existingClientMealPlan = await ClientMealPlans.get(selectedMenuForStatus.id);
             
             // Prepare the data for client_meal_plans table
             const clientMealPlanData = {
@@ -2507,31 +2393,24 @@ const MenuLoad = () => {
             if (existingClientMealPlan) {
               // Update existing meal plan
               console.log('📝 Updating existing meal plan in second database...');
-              const { error: updateError } = await secondSupabase
-                .from('client_meal_plans')
-                .update(clientMealPlanData)
-                .eq('id', existingClientMealPlan.id);
-
-              if (updateError) {
+              try {
+                await ClientMealPlans.update(selectedMenuForStatus.id, clientMealPlanData);
+                console.log('✅ Meal plan updated in client_meal_plans table successfully');
+              } catch (updateError) {
                 console.error('Error updating client_meal_plans table:', updateError);
                 console.warn('Failed to update meal plan in client_meal_plans table, but status was updated successfully');
-              } else {
-                console.log('✅ Meal plan updated in client_meal_plans table successfully');
               }
             } else {
               // Insert new meal plan
               console.log('➕ Creating new meal plan in second database...');
               clientMealPlanData.client_edited_meal_plan = null; // Initially null for new plans
               
-              const { data: insertData, error: insertError } = await secondSupabase
-                .from('client_meal_plans')
-                .insert(clientMealPlanData);
-
-              if (insertError) {
+              try {
+                const insertData = await ClientMealPlans.create(clientMealPlanData);
+                console.log('✅ Meal plan added to client_meal_plans table successfully:', insertData);
+              } catch (insertError) {
                 console.error('Error inserting to client_meal_plans table:', insertError);
                 console.warn('Failed to add meal plan to client_meal_plans table, but status was updated successfully');
-              } else {
-                console.log('✅ Meal plan added to client_meal_plans table successfully:', insertData);
               }
             }
           } else {
@@ -2548,15 +2427,14 @@ const MenuLoad = () => {
               : [0, 1, 2, 3, 4, 5, 6]; // All days if null/empty
             
             // Fetch draft meal plans for the same user
-            const { data: draftPlans, error: draftCheckError } = await supabase
-              .from('meal_plans_and_schemas')
-              .select('id, meal_plan_name, active_days')
-              .eq('user_code', selectedMenuForStatus.user_code)
-              .eq('record_type', 'meal_plan')
-              .eq('status', 'draft')
-              .neq('id', selectedMenuForStatus.id);
+            const draftPlans = await Menu.filter({
+              user_code: selectedMenuForStatus.user_code,
+              record_type: 'meal_plan',
+              status: 'draft',
+              not_id: selectedMenuForStatus.id
+            });
             
-            if (!draftCheckError && draftPlans && draftPlans.length > 0) {
+            if (draftPlans && draftPlans.length > 0) {
               // Check which draft plans have overlapping days with the newly activated plan
               const conflictingDraftPlans = draftPlans.filter(plan => {
                 const planActiveDays = plan.active_days && plan.active_days.length > 0 
@@ -2573,18 +2451,10 @@ const MenuLoad = () => {
                 // Delete these conflicting plans from client_meal_plans
                 for (const deactivatedPlan of conflictingDraftPlans) {
                   try {
-                    const { error: deleteError } = await secondSupabase
-                      .from('client_meal_plans')
-                      .delete()
-                      .eq('original_meal_plan_id', deactivatedPlan.id);
-                    
-                    if (deleteError) {
-                      console.error(`Error deleting automatically deactivated meal plan ${deactivatedPlan.id} from client_meal_plans:`, deleteError);
-                    } else {
-                      console.log(`✅ Deleted automatically deactivated meal plan ${deactivatedPlan.id} (${deactivatedPlan.meal_plan_name}) from client_meal_plans`);
-                    }
+                    await ClientMealPlans.delete(deactivatedPlan.id);
+                    console.log(`✅ Deleted automatically deactivated meal plan ${deactivatedPlan.id} (${deactivatedPlan.meal_plan_name}) from client_meal_plans`);
                   } catch (deleteError) {
-                    console.error(`Error deleting automatically deactivated meal plan ${deactivatedPlan.id}:`, deleteError);
+                    console.error(`Error deleting automatically deactivated meal plan ${deactivatedPlan.id} from client_meal_plans:`, deleteError);
                   }
                 }
               }
@@ -2606,16 +2476,12 @@ const MenuLoad = () => {
           console.log('🔄 Deleting meal plan from client_meal_plans table (deactivation to draft/expired)...');
           
           // Delete the meal plan from client_meal_plans when deactivated to draft or expired
-          const { error: deleteError } = await secondSupabase
-            .from('client_meal_plans')
-            .delete()
-            .eq('original_meal_plan_id', selectedMenuForStatus.id);
-          
-          if (deleteError) {
+          try {
+            await ClientMealPlans.delete(selectedMenuForStatus.id);
+            console.log('✅ Meal plan deleted from client_meal_plans table successfully');
+          } catch (deleteError) {
             console.error('Error deleting meal plan from client_meal_plans:', deleteError);
             console.warn('Failed to delete from client_meal_plans, but status was updated successfully');
-          } else {
-            console.log('✅ Meal plan deleted from client_meal_plans table successfully');
           }
         } catch (deleteError) {
           console.error('Error deleting from client_meal_plans:', deleteError);
@@ -2627,20 +2493,8 @@ const MenuLoad = () => {
         try {
           console.log('🗑️ Deleting all reminders for deactivated meal plan...');
           
-          const { data: deletedReminders, error: deleteRemindersError } = await supabase
-            .from('scheduled_reminders')
-            .delete()
-            .eq('plan_id', selectedMenuForStatus.id)
-            .eq('plan_type', 'meal_plan')
-            .select('id');
-          
-          if (deleteRemindersError) {
-            console.error('Error deleting reminders:', deleteRemindersError);
-            console.warn('Failed to delete reminders, but status was updated successfully');
-          } else {
-            const deletedCount = deletedReminders?.length || 0;
-            console.log(`✅ Deleted ${deletedCount} reminder(s) for meal plan ${selectedMenuForStatus.id}`);
-          }
+          await ScheduledReminders.deleteByPlan(selectedMenuForStatus.id, 'meal_plan');
+          console.log(`✅ Deleted reminders for meal plan ${selectedMenuForStatus.id}`);
         } catch (deleteRemindersError) {
           console.error('Error deleting reminders:', deleteRemindersError);
           console.warn('Failed to delete reminders, but status was updated successfully');
@@ -2655,13 +2509,9 @@ const MenuLoad = () => {
           const mealPlanId = selectedMenuForStatus.id;
           
           // Get client ID for notification
-          const { data: clientData, error: clientError } = await supabase
-            .from('chat_users')
-            .select('id')
-            .eq('user_code', userCode)
-            .single();
+          const clientData = await ChatUser.get(userCode, 'id');
           
-          if (clientData && !clientError) {
+          if (clientData?.id) {
             await sendMealPlanActivationNotification(userCode, mealPlanName, clientData.id);
             
             // Create weekly progress reminders
@@ -2699,15 +2549,14 @@ const MenuLoad = () => {
       if (error.message && error.message.includes('Cannot activate meal plan')) {
         // Fetch conflicting active meal plans
         try {
-          const { data: conflictingPlans, error: fetchError } = await supabase
-            .from('meal_plans_and_schemas')
-            .select('id, meal_plan_name, active_days')
-            .eq('user_code', selectedMenuForStatus.user_code)
-            .eq('record_type', 'meal_plan')
-            .eq('status', 'active')
-            .neq('id', selectedMenuForStatus.id);
+          const conflictingPlans = await Menu.filter({
+            user_code: selectedMenuForStatus.user_code,
+            record_type: 'meal_plan',
+            status: 'active',
+            not_id: selectedMenuForStatus.id
+          });
           
-          if (!fetchError && conflictingPlans && conflictingPlans.length > 0) {
+          if (conflictingPlans && conflictingPlans.length > 0) {
             // Helper to convert day numbers to names
             const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
             const formatDays = (days) => {
@@ -2729,39 +2578,27 @@ const MenuLoad = () => {
             if (window.confirm(confirmMessage)) {
               // Deactivate conflicting plans
               const conflictingIds = conflictingPlans.map(p => p.id);
-              const { error: deactivateError } = await supabase
-                .from('meal_plans_and_schemas')
-                .update({
-                  status: 'draft',
-                  active_from: null,
-                  active_until: null,
-                  updated_at: new Date().toISOString()
-                })
-                .in('id', conflictingIds);
               
-              if (deactivateError) {
-                alert('Failed to deactivate conflicting meal plans: ' + deactivateError.message);
-                setError(null);
-                setUpdatingStatus(false);
-                return;
+              // Deactivate conflicting plans using Menu.update for each
+              for (const id of conflictingIds) {
+                try {
+                  await Menu.update(id, {
+                    status: 'draft',
+                    active_from: null,
+                    active_until: null,
+                    updated_at: new Date().toISOString()
+                  });
+                } catch (updateError) {
+                  console.error(`Failed to deactivate meal plan ${id}:`, updateError);
+                }
               }
               
               // Delete conflicting meal plans from client_meal_plans table (second Supabase)
               console.log('🗑️ Deleting conflicting meal plans from client_meal_plans table...');
               for (const conflictingPlan of conflictingPlans) {
                 try {
-                  const { error: deleteClientMealPlanError } = await secondSupabase
-                    .from('client_meal_plans')
-                    .delete()
-                    .eq('original_meal_plan_id', conflictingPlan.id);
-                  
-                  if (deleteClientMealPlanError) {
-                    console.error(`Error deleting meal plan ${conflictingPlan.id} from client_meal_plans:`, deleteClientMealPlanError);
-                    // Don't fail the entire operation, just log the error
-                    console.warn(`Failed to delete meal plan ${conflictingPlan.id} from client_meal_plans, but it was deactivated successfully`);
-                  } else {
-                    console.log(`✅ Deleted meal plan ${conflictingPlan.id} from client_meal_plans table`);
-                  }
+                  await ClientMealPlans.delete(conflictingPlan.id);
+                  console.log(`✅ Deleted meal plan ${conflictingPlan.id} from client_meal_plans table`);
                 } catch (deleteError) {
                   console.error(`Error deleting meal plan ${conflictingPlan.id} from client_meal_plans:`, deleteError);
                   // Don't fail the entire operation, just log the error
@@ -2773,17 +2610,8 @@ const MenuLoad = () => {
               console.log('🗑️ Deleting reminders for conflicting meal plans...');
               for (const conflictingPlan of conflictingPlans) {
                 try {
-                  const { error: deleteRemindersError } = await supabase
-                    .from('scheduled_reminders')
-                    .delete()
-                    .eq('plan_id', conflictingPlan.id)
-                    .eq('plan_type', 'meal_plan');
-                  
-                  if (deleteRemindersError) {
-                    console.error(`Error deleting reminders for plan ${conflictingPlan.id}:`, deleteRemindersError);
-                  } else {
-                    console.log(`✅ Deleted reminders for conflicting plan ${conflictingPlan.id}`);
-                  }
+                  await ScheduledReminders.deleteByPlan(conflictingPlan.id, 'meal_plan');
+                  console.log(`✅ Deleted reminders for conflicting plan ${conflictingPlan.id}`);
                 } catch (deleteError) {
                   console.error(`Error deleting reminders for plan ${conflictingPlan.id}:`, deleteError);
                 }
@@ -2823,39 +2651,28 @@ const MenuLoad = () => {
                   if (mealPlanData) {
                     console.log('🔄 Syncing meal plan to second database...');
                     
-                    const { data: existingClientMealPlan, error: checkError } = await secondSupabase
-                      .from('client_meal_plans')
-                      .select('id')
-                      .eq('original_meal_plan_id', selectedMenuForStatus.id)
-                      .maybeSingle();
+                    const existingClientMealPlan = await ClientMealPlans.get(selectedMenuForStatus.id);
                     
-                    if (!checkError) {
-                      const { data: { user } } = await supabase.auth.getUser();
-                      const clientMealPlanData = {
-                        user_code: selectedMenuForStatus.user_code,
-                        dietitian_id: user.id,
-                        original_meal_plan_id: selectedMenuForStatus.id,
-                        meal_plan_name: selectedMenuForStatus.meal_plan_name || 'Untitled Meal Plan',
-                        dietitian_meal_plan: mealPlanData,
-                        active: true,
-                        active_days: statusForm.active_days.length > 0 ? statusForm.active_days : null,
-                        active_from: statusForm.active_from ? new Date(statusForm.active_from).toISOString() : null,
-                        active_until: statusForm.active_until ? new Date(statusForm.active_until).toISOString() : null,
-                        daily_total_calories: selectedMenuForStatus.daily_total_calories || null,
-                        macros_target: selectedMenuForStatus.macros_target || null
-                      };
-                      
-                      if (existingClientMealPlan) {
-                        await secondSupabase
-                          .from('client_meal_plans')
-                          .update(clientMealPlanData)
-                          .eq('id', existingClientMealPlan.id);
-                      } else {
-                        clientMealPlanData.client_edited_meal_plan = null;
-                        await secondSupabase
-                          .from('client_meal_plans')
-                          .insert(clientMealPlanData);
-                      }
+                    const { data: { user } } = await supabase.auth.getUser();
+                    const clientMealPlanData = {
+                      user_code: selectedMenuForStatus.user_code,
+                      dietitian_id: user.id,
+                      original_meal_plan_id: selectedMenuForStatus.id,
+                      meal_plan_name: selectedMenuForStatus.meal_plan_name || 'Untitled Meal Plan',
+                      dietitian_meal_plan: mealPlanData,
+                      active: true,
+                      active_days: statusForm.active_days.length > 0 ? statusForm.active_days : null,
+                      active_from: statusForm.active_from ? new Date(statusForm.active_from).toISOString() : null,
+                      active_until: statusForm.active_until ? new Date(statusForm.active_until).toISOString() : null,
+                      daily_total_calories: selectedMenuForStatus.daily_total_calories || null,
+                      macros_target: selectedMenuForStatus.macros_target || null
+                    };
+                    
+                    if (existingClientMealPlan) {
+                      await ClientMealPlans.update(selectedMenuForStatus.id, clientMealPlanData);
+                    } else {
+                      clientMealPlanData.client_edited_meal_plan = null;
+                      await ClientMealPlans.create(clientMealPlanData);
                     }
                   }
                 } catch (secondTableError) {
@@ -2868,13 +2685,9 @@ const MenuLoad = () => {
                   const userCode = selectedMenuForStatus.user_code;
                   const mealPlanId = selectedMenuForStatus.id;
                   
-                  const { data: clientData, error: clientError } = await supabase
-                    .from('chat_users')
-                    .select('id')
-                    .eq('user_code', userCode)
-                    .single();
+                  const clientData = await ChatUser.get(userCode, 'id');
                   
-                  if (clientData && !clientError) {
+                  if (clientData?.id) {
                     const { data: { user } } = await supabase.auth.getUser();
                     await sendMealPlanActivationNotification(userCode, mealPlanName, clientData.id);
                     
@@ -2969,16 +2782,12 @@ const MenuLoad = () => {
       try {
         console.log('🔄 Checking if meal plan exists in second database to delete...');
         
-        const { error: deleteSecondDbError } = await secondSupabase
-          .from('client_meal_plans')
-          .delete()
-          .eq('original_meal_plan_id', menu.id);
-        
-        if (deleteSecondDbError) {
+        try {
+          await ClientMealPlans.delete(menu.id);
+          console.log('✅ Meal plan deleted from second database successfully');
+        } catch (deleteSecondDbError) {
           console.error('Error deleting from second database:', deleteSecondDbError);
           console.warn('Main meal plan was deleted, but failed to delete from second database');
-        } else {
-          console.log('✅ Meal plan deleted from second database successfully');
         }
       } catch (secondDbDeleteError) {
         console.error('Error deleting from second database:', secondDbDeleteError);
@@ -3702,14 +3511,13 @@ const MenuLoad = () => {
       const threeDayTarget = threeDaysFromNow.toISOString().split('T')[0];
       
       // Find meal plans scheduled to be active in 2-3 days
-      const { data: futureMealPlans, error } = await supabase
-        .from('meal_plans_and_schemas')
-        .select('id, user_code, meal_plan_name, active_from, status')
-        .eq('status', 'scheduled')
-        .in('active_from', [twoDayTarget, threeDayTarget]);
+      const futureMealPlans = await Menu.filter({
+        status: 'scheduled',
+        active_from: [twoDayTarget, threeDayTarget]
+      });
       
-      if (error) {
-        throw error;
+      if (!futureMealPlans) {
+        throw new Error('Failed to fetch future meal plans');
       }
       
       let notificationsSent = 0;
@@ -3722,13 +3530,9 @@ const MenuLoad = () => {
         for (const mealPlan of futureMealPlans) {
           try {
             // Get client ID for notification
-            const { data: clientData, error: clientError } = await supabase
-              .from('chat_users')
-              .select('id')
-              .eq('user_code', mealPlan.user_code)
-              .single();
+            const clientData = await ChatUser.get(mealPlan.user_code, 'id');
             
-            if (clientData && !clientError) {
+            if (clientData?.id) {
               // Send advance notification
               await sendFutureMealPlanNotification(
                 mealPlan.user_code, 
@@ -3773,16 +3577,15 @@ const MenuLoad = () => {
       const now = new Date().toISOString();
       
       // Find all active menus that have expired
-      const { data: expiredMenus, error } = await supabase
-        .from('meal_plans_and_schemas')
-        .select('id, meal_plan_name, active_until')
-        .eq('status', 'active')
-        .not('active_until', 'is', null)
-        .lt('active_until', now);
+      const expiredMenus = await Menu.filter({
+        status: 'active',
+        active_until_lt: now,
+        active_until_not_null: true
+      });
 
-      if (error) {
-        console.error('Error checking for expired menus:', error);
-        setError('Failed to check for expired menus: ' + error.message);
+      if (!expiredMenus) {
+        console.error('Error checking for expired menus');
+        setError('Failed to check for expired menus');
         return;
       }
 
@@ -3800,34 +3603,22 @@ const MenuLoad = () => {
             updated_at: new Date().toISOString()
           };
 
-          const { error: updateError } = await supabase
-            .from('meal_plans_and_schemas')
-            .update(updateData)
-            .eq('id', menu.id);
-
-          if (updateError) {
-            console.error(`Error updating expired menu ${menu.id}:`, updateError);
-            errorCount++;
-          } else {
+          try {
+            await Menu.update(menu.id, updateData);
             console.log(`✅ Updated expired menu: ${menu.meal_plan_name}`);
             updatedCount++;
             
             // Also delete from second Supabase client_meal_plans table
             try {
-              const { error: deleteSecondDbError } = await secondSupabase
-                .from('client_meal_plans')
-                .delete()
-                .eq('original_meal_plan_id', menu.id);
-              
-              if (deleteSecondDbError) {
-                console.error(`Error deleting expired meal plan ${menu.id} from client_meal_plans:`, deleteSecondDbError);
-                // Don't increment errorCount as main update succeeded
-              } else {
-                console.log(`✅ Deleted expired meal plan ${menu.id} from client_meal_plans table`);
-              }
+              await ClientMealPlans.delete(menu.id);
+              console.log(`✅ Deleted expired meal plan ${menu.id} from client_meal_plans table`);
             } catch (deleteError) {
               console.error(`Error deleting expired meal plan ${menu.id} from client_meal_plans:`, deleteError);
+              // Don't increment errorCount as main update succeeded
             }
+          } catch (updateError) {
+            console.error(`Error updating expired menu ${menu.id}:`, updateError);
+            errorCount++;
           }
         }
 

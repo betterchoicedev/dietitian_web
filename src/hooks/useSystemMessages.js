@@ -1,15 +1,12 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { SystemMessages } from '@/api/entities';
 
 // Helper function to get active system messages for a user
 const getActiveMessagesForUser = async (user_id) => {
   // Get all active messages (only fields needed for counting)
-  const { data: allMessages, error } = await supabase
-    .from('system_messages')
-    .select('id, start_date, end_date, priority, directed_to')
-    .eq('is_active', true);
+  const allMessages = await SystemMessages.list({ is_active: true });
   
-  if (error) throw error;
   if (!allMessages) return [];
   
   // Filter messages: broadcast (directed_to IS NULL) or directed to user

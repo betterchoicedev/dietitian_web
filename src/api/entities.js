@@ -17,6 +17,15 @@ export const TrainingPlanTemplates = entities.TrainingPlanTemplates;
 export const Profiles = entities.Profiles;
 export const Companies = entities.Companies;
 export const RegistrationInvites = entities.RegistrationInvites;
+export const ScheduledReminders = entities.ScheduledReminders;
+export const SystemMessages = entities.SystemMessages;
+export const UserMessagePreferences = entities.UserMessagePreferences;
+export const Ingredients = entities.Ingredients;
+export const MealTemplates = entities.MealTemplates;
+export const MealTemplateVariants = entities.MealTemplateVariants;
+export const MealTemplateMeals = entities.MealTemplateMeals;
+export const ClientMealPlans = entities.ClientMealPlans;
+export const Clients = entities.Clients;
 
 // auth sdk:
 export const User = auth;

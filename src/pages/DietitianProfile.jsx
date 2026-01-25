@@ -6,17 +6,20 @@ import { useClient } from '@/contexts/ClientContext';
 import { EventBus } from '@/utils/EventBus';
 import { useNavigate } from 'react-router-dom';
 import { entities } from '@/api/client';
+import { SystemMessages, Profiles, UserMessagePreferences, ChatConversation, ChatUser, ChatMessage, Menu, WeightLogs } from '@/api/entities';
 import { getMyProfile, getCompanyProfileIds } from '@/utils/auth';
 
 // Helper function to get system messages for dietitian with visibility filtering
 const getSystemMessagesForDietitian = async (user_id, user_role, user_company_id) => {
-  // Get all messages
-  const { data: allMessages, error: messagesError } = await supabase
-    .from('system_messages')
-    .select('*')
-    .order('created_at', { ascending: false });
+  // Get all messages via API
+  let allMessages = [];
+  try {
+    allMessages = await SystemMessages.list();
+  } catch (messagesError) {
+    console.error('Error fetching system messages:', messagesError);
+    throw messagesError;
+  }
   
-  if (messagesError) throw messagesError;
   if (!allMessages) return [];
   
   // If sys_admin, return all messages
@@ -27,12 +30,11 @@ const getSystemMessagesForDietitian = async (user_id, user_role, user_company_id
   // For non-sys_admin users, apply visibility filtering
   if (!user_id) return [];
   
-  // Get all profiles for company-based filtering
-  const { data: allProfiles, error: profilesError } = await supabase
-    .from('profiles')
-    .select('id, role, company_id');
-  
-  if (profilesError) {
+  // Get all profiles for company-based filtering via API
+  let allProfiles = [];
+  try {
+    allProfiles = await Profiles.getBasic();
+  } catch (profilesError) {
     console.warn('Could not fetch profiles, falling back to basic filtering:', profilesError);
     // Fallback to basic filtering
     return allMessages.filter(msg => 
@@ -173,7 +175,7 @@ const priorityColors = {
   urgent: 'bg-red-100 text-red-700'
 };
 
-const { Menu, ChatConversation, ChatMessage, ChatUser } = entities;
+// Menu, ChatConversation, ChatMessage, and ChatUser are already imported above
 
 // Cache utilities
 const CACHE_PREFIX = 'dietitian_profile_';
@@ -472,18 +474,16 @@ export default function DietitianProfile() {
         }
       }
       
-      // Get user message preferences with pagination
-      let query = supabase
-        .from('user_message_preferences')
-        .select('*', { count: 'exact' })
-        .in('user_code', finalUserCodes);
+      // Get user message preferences with pagination via API
+      const result = await UserMessagePreferences.list({
+        user_codes: finalUserCodes,
+        limit: PREFERENCES_PER_PAGE,
+        offset: from,
+        count: true
+      });
       
-      // Apply pagination
-      query = query.range(from, to);
-      
-      const { data, error, count } = await query;
-      
-      if (error) throw error;
+      const data = result.data || result; // Handle both formats
+      const count = result.count || 0;
       
       if (reset) {
         setUserPreferences(data || []);
@@ -516,12 +516,7 @@ export default function DietitianProfile() {
   const saveUserPreference = async (preference) => {
     try {
       setIsSavingPreference(true);
-      const { error } = await supabase
-        .from('user_message_preferences')
-        .update(preference)
-        .eq('id', preference.id);
-      
-      if (error) throw error;
+      await UserMessagePreferences.update(preference.id, preference);
       
       // Update the preference in the local state instead of reloading all
       setUserPreferences(prev => 
@@ -598,23 +593,15 @@ export default function DietitianProfile() {
         .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
       setRecentlyActivatedPlans(statusChanges);
       
-      // Load recent messages from all conversations
+      // Load recent messages from all conversations via API
       console.log('🔍 Loading conversations...');
-      const { data: conversationsData, error: conversationsError } = await supabase
-        .from('chat_conversations')
-        .select('id, user_id, started_at');
-      
-      if (conversationsError) throw conversationsError;
+      const conversationsData = await ChatConversation.list('id,user_id,started_at');
       
       console.log('✅ Conversations loaded:', conversationsData?.length || 0, 'records');
       
-      // Load user data separately to avoid foreign key conflicts
+      // Load user data separately to avoid foreign key conflicts via API
       console.log('🔍 Loading user data...');
-      const { data: usersData, error: usersError } = await supabase
-        .from('chat_users')
-        .select('id, user_code, full_name');
-      
-      if (usersError) throw usersError;
+      const usersData = await ChatUser.list('id,user_code,full_name');
       
       // Create a map of user_id to user data
       const userMap = {};
@@ -693,17 +680,13 @@ export default function DietitianProfile() {
       
       // Skip chat activity section - removed per user request
       
-      // Load recent weight logs ONLY for visible clients
+      // Load recent weight logs ONLY for visible clients via API
       let weightLogsData = [];
       try {
-        const { data: weightLogs, error: weightLogsError } = await supabase
-          .from('weight_logs')
-          .select('*')
-          .in('user_code', visibleUserCodes)
-          .order('measurement_date', { ascending: false })
-          .limit(50);
-        
-        if (weightLogsError) throw weightLogsError;
+        const weightLogs = await WeightLogs.list({
+          user_codes: visibleUserCodes.join(','),
+          limit: 50
+        });
         weightLogsData = weightLogs || [];
         console.log('📊 Weight logs loaded for visible clients:', weightLogsData.length);
         setRecentWeightLogs(weightLogsData);
@@ -815,12 +798,7 @@ export default function DietitianProfile() {
 
   const toggleActive = async (message) => {
     try {
-      const { error } = await supabase
-        .from('system_messages')
-        .update({ is_active: !message.is_active })
-        .eq('id', message.id);
-      
-      if (error) throw error;
+      await SystemMessages.update(message.id, { is_active: !message.is_active });
       await loadMessages();
       // Notify other components that system messages were updated
       EventBus.emit('systemMessagesUpdated');

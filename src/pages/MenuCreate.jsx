@@ -10,7 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 import { useNavigate, useLocation } from 'react-router-dom';
 
-import { Menu } from '@/api/entities';
+import { Menu, Ingredients, MealTemplates, MealTemplateVariants, MealTemplateMeals, ChatUser } from '@/api/entities';
 
 import { entities } from '@/api/client';
 
@@ -822,116 +822,31 @@ const EditableIngredient = ({ value, onChange, mealIndex, optionIndex, ingredien
 
     try {
 
-      console.log('🔍 Fetching suggestions from ingridientsroee table for query:', query);
+      console.log('🔍 Fetching suggestions from API for query:', query);
 
       
-
-      // Import supabase client
-      const { supabase } = await import('@/lib/supabase');
-
-      // Split query into individual words for better matching
-      const queryWords = query.trim().split(/\s+/).filter(word => word.length > 0);
-      console.log('🔍 Query words:', queryWords);
-
-      // Build search conditions - run multiple queries to catch different patterns
-      let allData = [];
-
-      if (queryWords.length === 1) {
-        // Single word: prioritize items that start with it, then contain it
-        const word = queryWords[0];
-        const startsWithPattern = `${word}%`;
-        const containsPattern = `%${word}%`;
-        
-        console.log('🎯 Query 1: items that START with the word');
-        const { data: startsWithData, error: startsWithError } = await supabase
-          .from('ingridientsroee')
-          .select('id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g')
-          .or([
-            `name.ilike.${startsWithPattern}`,
-            `english_name.ilike.${startsWithPattern}`
-          ].join(','))
-          .limit(50);
-
-        if (startsWithError) {
-          console.error('❌ Supabase error (starts with):', startsWithError);
-        } else if (startsWithData) {
-          console.log(`✅ Found ${startsWithData.length} items that START with the word`);
-          allData = startsWithData;
-        }
-        
-        // Also get items that contain the word (if we need more results)
-        if (allData.length < 20) {
-          console.log('🔍 Query 2: items that CONTAIN the word');
-          const { data: containsData, error: containsError } = await supabase
-            .from('ingridientsroee')
-            .select('id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g')
-            .or([
-              `name.ilike.${containsPattern}`,
-              `english_name.ilike.${containsPattern}`
-            ].join(','))
-            .limit(50);
-
-          if (containsError) {
-            console.error('❌ Supabase error (contains):', containsError);
-          } else if (containsData) {
-            console.log(`✅ Found ${containsData.length} items that CONTAIN the word`);
-            const existingIds = new Set(allData.map(item => item.id));
-            const newItems = containsData.filter(item => !existingIds.has(item.id));
-            allData = [...allData, ...newItems];
-          }
-        }
-      } else {
-        // Multi-word: Search for items containing ALL words (in any order, any position)
-        console.log('🔍 Searching for items containing ALL words');
-        const wordsConditions = [];
-        queryWords.forEach((word) => {
-          const containsPattern = `%${word}%`;
-          wordsConditions.push(
-            `name.ilike.${containsPattern}`,
-            `english_name.ilike.${containsPattern}`
-          );
-        });
-        
-        // Fetch items that contain at least one of the words
-        const { data: wordsData, error: wordsError } = await supabase
-          .from('ingridientsroee')
-          .select('id, name, english_name, calories_energy, protein_g, fat_g, carbohydrates_g')
-          .or(wordsConditions.join(','))
-          .limit(200); // Get many results to filter properly
-
-        if (wordsError) {
-          console.error('❌ Supabase error:', wordsError);
-        } else if (wordsData) {
-          console.log(`✅ Found ${wordsData.length} items (before filtering for all words)`);
-          
-          // Filter to only include items that have ALL words (in either name or english_name, or both combined)
-          const filteredWordsData = wordsData.filter(item => {
-            const hebrewName = (item.name || '').toLowerCase();
-            const englishName = (item.english_name || '').toLowerCase();
-            const combinedText = `${hebrewName} ${englishName}`;
-            
-            // Check if all words are present in the combined text
-            const hasAllWords = queryWords.every(word => 
-              combinedText.includes(word.toLowerCase())
-            );
-            
-            return hasAllWords;
-          });
-          
-          console.log(`🔎 After filtering for ALL words: ${filteredWordsData.length} items`);
-          allData = filteredWordsData;
-        }
+      // Use the new Ingredients API
+      const response = await Ingredients.search({ query, page, limit: 50 });
+      
+      if (!response || !response.data) {
+        setSuggestions([]);
+        setHasMore(false);
+        setIsLoading(false);
+        return;
       }
 
-      const data = allData;
-      console.log(`📋 Total raw ingredients data received: ${data.length} items`);
+      const data = response.data;
+      console.log(`📋 Total ingredients data received: ${data.length} items`);
+
+      // Split query into individual words for ranking
+      const queryWords = query.trim().split(/\s+/).filter(word => word.length > 0);
+      const queryLower = query.toLowerCase();
+      const queryWordsLower = queryWords.map(w => w.toLowerCase());
 
       // Apply ranking and sorting to the results
       const rankedData = data.map(ingredient => {
         const hebrewName = (ingredient.name || '').toLowerCase();
         const englishName = (ingredient.english_name || '').toLowerCase();
-        const queryLower = query.toLowerCase();
-        const queryWordsLower = queryWords.map(w => w.toLowerCase());
         
         let score = 0;
         let matchedInEnglish = false;
@@ -6734,22 +6649,11 @@ const MenuCreate = () => {
 
           console.log('💾 Saving default meal plan structure to database for user:', userCode);
 
-          const { error } = await supabase
-
-            .from('chat_users')
-
-            .update({ meal_plan_structure: mealPlanToSave })
-
-            .eq('user_code', userCode);
-
-          if (error) {
-
-            console.error('❌ Error saving default meal plan structure:', error);
-
-          } else {
-
+          try {
+            await ChatUser.update(userCode, { meal_plan_structure: mealPlanToSave });
             console.log('✅ Default meal plan structure saved successfully');
-
+          } catch (error) {
+            console.error('❌ Error saving default meal plan structure:', error);
           }
 
         } catch (err) {
@@ -8091,17 +7995,10 @@ const MenuCreate = () => {
         console.log('👤 Current dietitian:', user.id);
       }
       
-      // Fetch all meal templates with their variants
-      const orderColumn = language === 'he' ? 'hebrew_name' : 'name';
-      const { data: templates, error: templatesError } = await supabase
-        .from('meal_templates')
-        .select(`
-          *,
-          variants:meal_template_variants(meals_per_day)
-        `)
-        .order(orderColumn, { ascending: true, nullsFirst: false });
+      // Fetch all meal templates with their variants using the API
+      const templates = await MealTemplates.list({ language });
       
-      if (templatesError) throw templatesError;
+      if (!templates) throw new Error('Failed to fetch templates');
       
       // Process templates to include available meal counts and ownership
       const processedTemplates = templates?.map(template => ({
@@ -8124,29 +8021,21 @@ const MenuCreate = () => {
   // Fetch meals for a specific template variant
   const fetchTemplateVariant = async (templateId, mealsPerDay) => {
     try {
-      // Find the variant for this template with the specified meals_per_day
-      const { data: variants, error: variantError } = await supabase
-        .from('meal_template_variants')
-        .select('id')
-        .eq('template_id', templateId)
-        .eq('meals_per_day', mealsPerDay)
-        .single();
+      // Find the variant for this template with the specified meals_per_day using the API
+      const variants = await MealTemplateVariants.list({ 
+        template_id: templateId, 
+        meals_per_day: mealsPerDay 
+      });
       
-      if (variantError) throw variantError;
-      
-      if (!variants) {
+      if (!variants || variants.length === 0) {
         console.warn(`No variant found for template ${templateId} with ${mealsPerDay} meals`);
         return null;
       }
       
-      // Fetch all meals for this variant
-      const { data: meals, error: mealsError } = await supabase
-        .from('meal_template_meals')
-        .select('*')
-        .eq('variant_id', variants.id)
-        .order('position');
+      const variant = variants[0];
       
-      if (mealsError) throw mealsError;
+      // Fetch all meals for this variant
+      const meals = await MealTemplateMeals.list(variant.id);
       
       return meals;
     } catch (err) {
@@ -8264,18 +8153,14 @@ const MenuCreate = () => {
       
       console.log('👤 Creating template for dietitian:', user.id);
       
-      // Create the meal template with dietitian_id
-      const { data: template, error: templateError } = await supabase
-        .from('meal_templates')
-        .insert({
-          name: templateName,
-          tags: tags,
-          dietitian_id: user.id
-        })
-        .select()
-        .single();
+      // Create the meal template with dietitian_id using the API
+      const template = await MealTemplates.create({
+        name: templateName,
+        tags: tags,
+        dietitian_id: user.id
+      });
       
-      if (templateError) throw templateError;
+      if (!template) throw new Error('Failed to create template');
       
       console.log('✅ Created template:', template);
       
@@ -8299,17 +8184,13 @@ const MenuCreate = () => {
       const allMealCounts = [currentMealsPerDay, ...mealCountsToCreate];
       
       for (const mealsPerDay of allMealCounts) {
-        // Create the variant
-        const { data: variant, error: variantError } = await supabase
-          .from('meal_template_variants')
-          .insert({
-            template_id: template.id,
-            meals_per_day: mealsPerDay
-          })
-          .select()
-          .single();
+        // Create the variant using the API
+        const variant = await MealTemplateVariants.create({
+          template_id: template.id,
+          meals_per_day: mealsPerDay
+        });
         
-        if (variantError) throw variantError;
+        if (!variant) throw new Error(`Failed to create variant for ${mealsPerDay} meals`);
         
         console.log(`✅ Created variant for ${mealsPerDay} meals:`, variant);
         
@@ -8321,12 +8202,8 @@ const MenuCreate = () => {
           example: meal.description || null
         }));
         
-        // Insert meals for this variant
-        const { error: mealsError } = await supabase
-          .from('meal_template_meals')
-          .insert(mealsToSave);
-        
-        if (mealsError) throw mealsError;
+        // Insert meals for this variant using the API
+        await MealTemplateMeals.create(mealsToSave);
         
         console.log(`✅ Created ${mealsToSave.length} meals for ${mealsPerDay}-meal variant`);
       }
@@ -8447,17 +8324,13 @@ const MenuCreate = () => {
                             throw new Error('Could not fetch source variant meals');
                           }
                           
-                          // Create new variant
-                          const { data: variant, error: variantError } = await supabase
-                            .from('meal_template_variants')
-                            .insert({
-                              template_id: template.id,
-                              meals_per_day: currentMealCount
-                            })
-                            .select()
-                            .single();
+                          // Create new variant using the API
+                          const variant = await MealTemplateVariants.create({
+                            template_id: template.id,
+                            meals_per_day: currentMealCount
+                          });
                           
-                          if (variantError) throw variantError;
+                          if (!variant) throw new Error('Failed to create variant');
                           
                           // Create meals from source (take first N)
                           const meals = sourceMeals.slice(0, currentMealCount).map((meal, index) => ({
@@ -8467,11 +8340,7 @@ const MenuCreate = () => {
                             example: meal.example
                           }));
                           
-                          const { error: mealsError } = await supabase
-                            .from('meal_template_meals')
-                            .insert(meals);
-                          
-                          if (mealsError) throw mealsError;
+                          await MealTemplateMeals.create(meals);
                           
                           alert(`${currentMealCount}-meal variant created successfully!`);
                           await fetchMealTemplates();
@@ -8549,41 +8418,8 @@ const MenuCreate = () => {
     try {
       console.log('🗑️ Deleting template:', templateId);
       
-      // First, get all variants for this template
-      const { data: variants, error: variantsError } = await supabase
-        .from('meal_template_variants')
-        .select('id')
-        .eq('template_id', templateId);
-      
-      if (variantsError) throw variantsError;
-      
-      // Delete all meals for each variant
-      if (variants && variants.length > 0) {
-        for (const variant of variants) {
-          const { error: mealsError } = await supabase
-            .from('meal_template_meals')
-            .delete()
-            .eq('variant_id', variant.id);
-          
-          if (mealsError) throw mealsError;
-        }
-        
-        // Delete all variants
-        const { error: deleteVariantsError } = await supabase
-          .from('meal_template_variants')
-          .delete()
-          .eq('template_id', templateId);
-        
-        if (deleteVariantsError) throw deleteVariantsError;
-      }
-      
-      // Finally, delete the template
-      const { error: templateError } = await supabase
-        .from('meal_templates')
-        .delete()
-        .eq('id', templateId);
-      
-      if (templateError) throw templateError;
+      // Use the API to delete template (cascades to variants and meals)
+      await MealTemplates.delete(templateId);
       
       console.log('✅ Template deleted successfully');
       
@@ -8606,15 +8442,11 @@ const MenuCreate = () => {
     try {
       console.log('✏️ Updating template:', templateId);
       
-      const { error } = await supabase
-        .from('meal_templates')
-        .update({
-          name: newName,
-          tags: newTags
-        })
-        .eq('id', templateId);
-      
-      if (error) throw error;
+      // Use the API to update template
+      await MealTemplates.update(templateId, {
+        name: newName,
+        tags: newTags
+      });
       
       console.log('✅ Template updated successfully');
       
@@ -8938,33 +8770,15 @@ const MenuCreate = () => {
 
 
 
-      const { data, error } = await supabase
-
-        .from('chat_users')
-
-        .update({ meal_plan_structure: mealPlanToSave })
-
-        .eq('user_code', selectedClient.user_code)
-
-        .select();
-
-
-
-      if (error) {
-
+      try {
+        const data = await ChatUser.update(selectedClient.user_code, { meal_plan_structure: mealPlanToSave });
+        console.log('✅ Meal plan structure saved successfully:', data);
+        alert('Meal plan structure saved successfully!');
+      } catch (error) {
         console.error('❌ Error saving meal plan structure:', error);
-
         alert(`Failed to save meal plan structure: ${error.message}`);
-
         return;
-
       }
-
-
-
-      console.log('✅ Meal plan structure saved successfully:', data);
-
-      alert('Meal plan structure saved successfully!');
 
 
       
@@ -13723,44 +13537,42 @@ const MenuCreate = () => {
                       console.log('💾 Saving nutrition targets and meal plan structure:', saveData);
 
                       // Update the client in the database
-                      const { error } = await supabase
-                        .from('chat_users')
-                        .update({
+                      try {
+                        await ChatUser.update(selectedClient.user_code, {
                           daily_target_total_calories: saveData.daily_target_total_calories,
                           macros: saveData.macros,
                           meal_plan_structure: saveData.meal_plan_structure
-                        })
-                        .eq('user_code', selectedClient.user_code);
+                        });
 
-                      if (error) {
+                        console.log('✅ Nutrition targets and meal plan structure saved successfully');
+                        
+                        // Update the selectedClient to reflect the saved values
+                        // This will hide the "DB: original value" indicators
+                        if (window.updateClientContext) {
+                          window.updateClientContext({
+                            ...selectedClient,
+                            daily_target_total_calories: saveData.daily_target_total_calories,
+                            macros: saveData.macros,
+                            meal_plan_structure: saveData.meal_plan_structure
+                          });
+                        }
+
+                        // Refresh the Nutrition Targets tab by re-fetching latest targets/macros
+                        try {
+                          await fetchUserTargets(selectedClient.user_code);
+                        } catch (e) {
+                          console.warn('⚠️ Failed to refresh user targets after save:', e);
+                        }
+
+
+                        // Show success message (you could add a toast notification here)
+                        alert('Nutrition targets and meal plan structure saved successfully!');
+                      } catch (error) {
                         console.error('❌ Error saving nutrition targets:', error);
                         setError('Failed to save nutrition targets: ' + error.message);
                         return;
                       }
 
-                      console.log('✅ Nutrition targets and meal plan structure saved successfully');
-                      
-                      // Update the selectedClient to reflect the saved values
-                      // This will hide the "DB: original value" indicators
-                      if (window.updateClientContext) {
-                        window.updateClientContext({
-                          ...selectedClient,
-                          daily_target_total_calories: saveData.daily_target_total_calories,
-                          macros: saveData.macros,
-                          meal_plan_structure: saveData.meal_plan_structure
-                        });
-                      }
-
-                      // Refresh the Nutrition Targets tab by re-fetching latest targets/macros
-                      try {
-                        await fetchUserTargets(selectedClient.user_code);
-                      } catch (e) {
-                        console.warn('⚠️ Failed to refresh user targets after save:', e);
-                      }
-
-
-                      // Show success message (you could add a toast notification here)
-                      alert('Nutrition targets and meal plan structure saved successfully!');
                       
                     } catch (err) {
                       console.error('❌ Error saving nutrition targets:', err);
