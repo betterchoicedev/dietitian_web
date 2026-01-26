@@ -14,7 +14,7 @@ CORS Configuration:
 
 from flask import Blueprint, jsonify, request
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import logging
 from supabase import create_client, Client
@@ -142,6 +142,159 @@ def revoke_registration_invite(code):
         return jsonify({"success": True}), 200
     except Exception as e:
         return handle_supabase_error(e, 'revoke_registration_invite')
+
+# ==================== REGISTRATION LINKS ENDPOINTS ====================
+
+@supabase_bp.route("/registration-links", methods=["POST"])
+def create_registration_link():
+    """Create or update existing registration rule with optional max_slots and expires_at
+    Uses base64 encoded links, but stores record in DB for tracking current_count
+    Note: manager_id is UNIQUE, so we update existing or create new"""
+    try:
+        payload = request.get_json()
+        
+        if not payload.get('manager_id'):
+            return jsonify({"error": "manager_id is required"}), 400
+        
+        manager_id = payload.get('manager_id')
+        max_slots = payload.get('max_clients', 30)  # Frontend sends max_clients, we map to max_slots
+        expires_at = payload.get('expiry_date')  # Frontend sends expiry_date, we map to expires_at
+        
+        # Validate expires_at if provided
+        if expires_at:
+            try:
+                expiry_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                # Use timezone-aware datetime for comparison
+                now_utc = datetime.now(timezone.utc)
+                if expiry_dt < now_utc:
+                    return jsonify({"error": "expires_at must be in the future"}), 400
+            except ValueError:
+                return jsonify({"error": "Invalid expires_at format. Use ISO 8601 format."}), 400
+        
+        # Check if a record with this manager_id already exists (manager_id is UNIQUE)
+        existing = supabase.table("registration_rules")\
+            .select("*")\
+            .eq("manager_id", manager_id)\
+            .limit(1)\
+            .execute()
+        
+        if existing.data and len(existing.data) > 0:
+            # Update existing record
+            update_data = {
+                "max_slots": max_slots,
+                "expires_at": expires_at if expires_at else None,
+                "is_active": True,
+            }
+            
+            response = supabase.table("registration_rules")\
+                .update(update_data)\
+                .eq("manager_id", manager_id)\
+                .execute()
+            
+            link_data = response.data[0] if response.data else existing.data[0]
+        else:
+            # Create new record
+            link_record = {
+                "manager_id": manager_id,
+                "max_slots": max_slots,
+                "current_count": 0,
+                "expires_at": expires_at if expires_at else None,
+                "is_active": True,
+            }
+            
+            response = supabase.table("registration_rules").insert(link_record).execute()
+            link_data = response.data[0] if response.data else None
+        
+        # Return the record (link URL is generated client-side with base64)
+        return jsonify(link_data), 200 if existing.data and len(existing.data) > 0 else 201
+    except Exception as e:
+        return handle_supabase_error(e, 'create_registration_link')
+
+@supabase_bp.route("/registration-links/<link_id>", methods=["GET"])
+def get_registration_link(link_id):
+    """Get a registration rule by ID"""
+    try:
+        response = supabase.table("registration_rules").select("*").eq("id", link_id).execute()
+        if not response.data:
+            return jsonify({"error": "Registration rule not found"}), 404
+        return jsonify(response.data[0]), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'get_registration_link')
+
+@supabase_bp.route("/registration-links/manager/<manager_id>", methods=["GET"])
+def list_registration_links_by_manager(manager_id):
+    """Get registration rule for a manager (manager_id is UNIQUE, so returns single record)"""
+    try:
+        response = supabase.table("registration_rules")\
+            .select("*")\
+            .eq("manager_id", manager_id)\
+            .limit(1)\
+            .execute()
+        if not response.data or len(response.data) == 0:
+            return jsonify({"error": "Registration rule not found"}), 404
+        return jsonify(response.data[0]), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'list_registration_links_by_manager')
+
+@supabase_bp.route("/registration-links/find", methods=["POST"])
+def find_registration_link():
+    """Find a registration rule by manager_id
+    Used during registration to find the matching record and increment current_count
+    Note: manager_id is UNIQUE, so we only need manager_id to find the record"""
+    try:
+        payload = request.get_json()
+        manager_id = payload.get('manager_id')
+        
+        if not manager_id:
+            return jsonify({"error": "manager_id is required"}), 400
+        
+        response = supabase.table("registration_rules")\
+            .select("*")\
+            .eq("manager_id", manager_id)\
+            .limit(1)\
+            .execute()
+        
+        if not response.data or len(response.data) == 0:
+            return jsonify({"error": "Registration rule not found"}), 404
+        
+        return jsonify(response.data[0]), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'find_registration_link')
+
+@supabase_bp.route("/registration-links/<link_id>/increment", methods=["POST"])
+def increment_registration_link_count(link_id):
+    """Increment the current_count for a registration rule
+    Used when a client successfully registers"""
+    try:
+        # First get the current record to check limits
+        current = supabase.table("registration_rules")\
+            .select("*")\
+            .eq("id", link_id)\
+            .limit(1)\
+            .execute()
+        
+        if not current.data or len(current.data) == 0:
+            return jsonify({"error": "Registration rule not found"}), 404
+        
+        link_record = current.data[0]
+        
+        # Check if limit reached
+        if link_record['current_count'] >= link_record['max_slots']:
+            return jsonify({
+                "error": f"Maximum registrations ({link_record['max_slots']}) reached",
+                "current_count": link_record['current_count'],
+                "max_slots": link_record['max_slots']
+            }), 403
+        
+        # Increment count
+        response = supabase.table("registration_rules")\
+            .update({"current_count": link_record['current_count'] + 1})\
+            .eq("id", link_id)\
+            .execute()
+        
+        return jsonify(response.data[0] if response.data else None), 200
+    except Exception as e:
+        return handle_supabase_error(e, 'increment_registration_link_count')
 
 # ==================== MENU / MEAL PLANS ENDPOINTS ====================
 

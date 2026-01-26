@@ -64,6 +64,8 @@ import {
 import { useToast } from '@/components/ui/use-toast';
 import QRCode from 'react-qr-code';
 import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Label } from '@/components/ui/label';
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -90,6 +92,12 @@ export default function Layout() {
   const [userProfile, setUserProfile] = useState(null);
   const [referralLinkDialogOpen, setReferralLinkDialogOpen] = useState(false);
   const qrCodeRef = useRef(null);
+  const limitedQrCodeRef = useRef(null);
+  const [linkType, setLinkType] = useState('simple'); // 'simple' or 'limited'
+  const [maxClients, setMaxClients] = useState(30);
+  const [expiryDate, setExpiryDate] = useState('');
+  const [expiryTime, setExpiryTime] = useState('');
+  const [limitedLinkUrl, setLimitedLinkUrl] = useState('');
 
   // Debug sidebar state changes
   useEffect(() => {
@@ -252,8 +260,134 @@ export default function Layout() {
     return `https://betterchoice.one/signup#d=${encodedId}`;
   };
 
+  const generateLimitedLink = () => {
+    if (!userProfile?.id) return '';
+    
+    // Combine date and time into ISO format
+    let expiryDateTime = null;
+    if (expiryDate && expiryTime) {
+      const dateTimeString = `${expiryDate}T${expiryTime}:00`;
+      expiryDateTime = new Date(dateTimeString).toISOString();
+    } else if (expiryDate) {
+      // If only date is provided, set to end of day
+      const dateTimeString = `${expiryDate}T23:59:59`;
+      expiryDateTime = new Date(dateTimeString).toISOString();
+    }
+
+    // Create a data object with manager_id and optional limits
+    const linkData = {
+      manager_id: userProfile.id,
+      max_clients: parseInt(maxClients) || 30,
+      ...(expiryDateTime && { expiry_date: expiryDateTime })
+    };
+
+    // Encode the entire object in base64
+    const encodedData = btoa(JSON.stringify(linkData));
+    return `https://betterchoice.one/signup#d=${encodedData}`;
+  };
+
+  const [isGeneratingLink, setIsGeneratingLink] = useState(false);
+
+  const handleGenerateLimitedLink = async () => {
+    if (!userProfile?.id || !expiryDate) {
+      toast({
+        title: translations?.error || 'Error',
+        description: translations?.expiryDateRequired || 'Expiry date is required for limited links.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsGeneratingLink(true);
+    try {
+      // Combine date and time into ISO format
+      let expiryDateTime = null;
+      if (expiryDate && expiryTime) {
+        const dateTimeString = `${expiryDate}T${expiryTime}:00`;
+        expiryDateTime = new Date(dateTimeString).toISOString();
+      } else if (expiryDate) {
+        // If only date is provided, set to end of day
+        const dateTimeString = `${expiryDate}T23:59:59`;
+        expiryDateTime = new Date(dateTimeString).toISOString();
+      }
+
+      // Create a data object with manager_id and optional limits
+      const linkData = {
+        manager_id: userProfile.id,
+        max_clients: parseInt(maxClients) || 30,
+        ...(expiryDateTime && { expiry_date: expiryDateTime })
+      };
+
+      // Call API to create/get registration link record in database
+      const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://dietitian-be.azurewebsites.net';
+      const response = await fetch(`${API_BASE_URL}/api/db/registration-links`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(linkData),
+      });
+
+      if (response.ok) {
+        // Encode the entire object in base64 for the URL
+        const encodedData = btoa(JSON.stringify(linkData));
+        const link = `https://betterchoice.one/signup#d=${encodedData}`;
+        setLimitedLinkUrl(link);
+        toast({
+          title: translations?.linkGenerated || 'Link Generated',
+          description: translations?.limitedLinkGenerated || 'Limited registration link generated successfully.',
+        });
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to create registration link record' }));
+        console.error('Failed to create registration link record:', errorData);
+        toast({
+          title: translations?.error || 'Error',
+          description: errorData.error || translations?.failedToGenerateLink || 'Failed to generate link.',
+          variant: 'destructive',
+        });
+        // Still generate the link even if DB call fails
+        const encodedData = btoa(JSON.stringify(linkData));
+        const link = `https://betterchoice.one/signup#d=${encodedData}`;
+        setLimitedLinkUrl(link);
+      }
+    } catch (err) {
+      console.error('Error creating registration link record:', err);
+      toast({
+        title: translations?.error || 'Error',
+        description: err.message || translations?.failedToGenerateLink || 'Failed to generate link.',
+        variant: 'destructive',
+      });
+      // Still generate the link even if DB call fails
+      let expiryDateTime = null;
+      if (expiryDate && expiryTime) {
+        const dateTimeString = `${expiryDate}T${expiryTime}:00`;
+        expiryDateTime = new Date(dateTimeString).toISOString();
+      } else if (expiryDate) {
+        const dateTimeString = `${expiryDate}T23:59:59`;
+        expiryDateTime = new Date(dateTimeString).toISOString();
+      }
+      const linkData = {
+        manager_id: userProfile.id,
+        max_clients: parseInt(maxClients) || 30,
+        ...(expiryDateTime && { expiry_date: expiryDateTime })
+      };
+      const encodedData = btoa(JSON.stringify(linkData));
+      const link = `https://betterchoice.one/signup#d=${encodedData}`;
+      setLimitedLinkUrl(link);
+    } finally {
+      setIsGeneratingLink(false);
+    }
+  };
+
+  // Clear limited link when switching tabs or clearing expiry date
+  useEffect(() => {
+    if (linkType !== 'limited' || !expiryDate) {
+      setLimitedLinkUrl('');
+    }
+  }, [linkType, expiryDate]);
+
   const handleCopyReferralLink = async () => {
-    const link = generateClientReferralLink();
+    const link = linkType === 'limited' ? limitedLinkUrl : generateClientReferralLink();
     if (!link) {
       toast({
         title: translations?.error || 'Error',
@@ -278,9 +412,16 @@ export default function Layout() {
     }
   };
 
+  const getCurrentLink = () => {
+    if (linkType === 'limited') {
+      return limitedLinkUrl || '';
+    }
+    return generateClientReferralLink();
+  };
+
   const handleCopyQRCodeImage = async () => {
     try {
-      const qrContainer = qrCodeRef.current;
+      const qrContainer = linkType === 'limited' ? limitedQrCodeRef.current : qrCodeRef.current;
       if (!qrContainer) {
         throw new Error('QR code container not found');
       }
@@ -488,7 +629,17 @@ export default function Layout() {
       <SystemMessageModal />
 
       {/* Client Referral Link Dialog */}
-      <Dialog open={referralLinkDialogOpen} onOpenChange={setReferralLinkDialogOpen}>
+      <Dialog open={referralLinkDialogOpen} onOpenChange={(open) => {
+        setReferralLinkDialogOpen(open);
+        if (!open) {
+          // Reset form when dialog closes
+          setLinkType('simple');
+          setMaxClients(30);
+          setExpiryDate('');
+          setExpiryTime('');
+          setLimitedLinkUrl('');
+        }
+      }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -501,49 +652,165 @@ export default function Layout() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="flex flex-col gap-4 md:flex-row md:items-start">
-              <div className="flex-1">
-                <Input
-                  value={generateClientReferralLink()}
-                  readOnly
-                  className="font-mono text-sm"
-                  onClick={(e) => e.target.select()}
-                />
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {translations?.referralLinkHint ||
-                    'Click to select and copy, or use the copy button. Clients who sign up using this link will be automatically assigned to you.'}
-                </p>
-                <Button
-                  onClick={handleCopyReferralLink}
-                  className="mt-4 gap-2"
-                  disabled={!userProfile?.id}
-                >
-                  <Copy className="h-4 w-4" />
-                  {translations?.copyLink || 'Copy Link'}
-                </Button>
-              </div>
-              {userProfile?.id && (
-                <div className={cn("flex flex-col items-center gap-2", isRTL ? "md:mr-4" : "md:ml-4")}>
-                  <div ref={qrCodeRef} className="bg-white p-3 rounded-lg border border-gray-200">
-                    <QRCode
+            <Tabs value={linkType} onValueChange={setLinkType} className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="simple">
+                  {translations?.simpleLink || 'Simple Link'}
+                </TabsTrigger>
+                <TabsTrigger value="limited">
+                  {translations?.limitedLink || 'Limited Link'}
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="simple" className="space-y-4">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start">
+                  <div className="flex-1">
+                    <Input
                       value={generateClientReferralLink()}
-                      size={128}
-                      style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                      viewBox={`0 0 256 256`}
+                      readOnly
+                      className="font-mono text-sm"
+                      onClick={(e) => e.target.select()}
                     />
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {translations?.referralLinkHint ||
+                        'Click to select and copy, or use the copy button. Clients who sign up using this link will be automatically assigned to you.'}
+                    </p>
+                    <Button
+                      onClick={handleCopyReferralLink}
+                      className="mt-4 gap-2"
+                      disabled={!userProfile?.id}
+                    >
+                      <Copy className="h-4 w-4" />
+                      {translations?.copyLink || 'Copy Link'}
+                    </Button>
                   </div>
-                  <Button
-                    onClick={handleCopyQRCodeImage}
-                    variant="outline"
-                    size="sm"
-                    className="gap-2"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                    {translations?.copyQRCode || 'Copy QR Code'}
-                  </Button>
+                  {userProfile?.id && (
+                    <div className={cn("flex flex-col items-center gap-2", isRTL ? "md:mr-4" : "md:ml-4")}>
+                      <div ref={qrCodeRef} className="bg-white p-3 rounded-lg border border-gray-200">
+                        <QRCode
+                          value={generateClientReferralLink()}
+                          size={128}
+                          style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                          viewBox={`0 0 256 256`}
+                        />
+                      </div>
+                      <Button
+                        onClick={handleCopyQRCodeImage}
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        {translations?.copyQRCode || 'Copy QR Code'}
+                      </Button>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </TabsContent>
+              
+              <TabsContent value="limited" className="space-y-4">
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="max-clients">
+                        {translations?.maxClients || 'Max Clients'} (1-30)
+                      </Label>
+                      <Input
+                        id="max-clients"
+                        type="number"
+                        min="1"
+                        max="30"
+                        value={maxClients}
+                        onChange={(e) => {
+                          const value = parseInt(e.target.value) || 1;
+                          setMaxClients(Math.min(Math.max(value, 1), 30));
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="expiry-date">
+                        {translations?.expiryDate || 'Expiry Date'}
+                      </Label>
+                      <Input
+                        id="expiry-date"
+                        type="date"
+                        value={expiryDate}
+                        onChange={(e) => setExpiryDate(e.target.value)}
+                        min={new Date().toISOString().split('T')[0]}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="expiry-time">
+                      {translations?.expiryTime || 'Expiry Time'} ({translations?.optional || 'Optional'})
+                    </Label>
+                      <Input
+                        id="expiry-time"
+                        type="time"
+                        value={expiryTime}
+                        onChange={(e) => setExpiryTime(e.target.value)}
+                      />
+                  </div>
+                  
+                  <Button
+                    onClick={handleGenerateLimitedLink}
+                    className="w-full gap-2"
+                    disabled={!userProfile?.id || !expiryDate || isGeneratingLink}
+                  >
+                    {isGeneratingLink 
+                      ? (translations?.generating || 'Generating...')
+                      : (translations?.generateLink || 'Generate Limited Link')
+                    }
+                  </Button>
+                  
+                  {limitedLinkUrl && (
+                    <div className="space-y-2">
+                      <Label>{translations?.generatedLink || 'Generated Link'}</Label>
+                      <Input
+                        value={limitedLinkUrl}
+                        readOnly
+                        className="font-mono text-sm"
+                        onClick={(e) => e.target.select()}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {translations?.limitedLinkHint ||
+                          'This link includes max clients and expiry date limits.'}
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          onClick={handleCopyReferralLink}
+                          className="flex-1 gap-2"
+                        >
+                          <Copy className="h-4 w-4" />
+                          {translations?.copyLink || 'Copy Link'}
+                        </Button>
+                        {userProfile?.id && (
+                          <div className="flex flex-col items-center gap-2">
+                            <div ref={limitedQrCodeRef} className="bg-white p-3 rounded-lg border border-gray-200">
+                              <QRCode
+                                value={limitedLinkUrl}
+                                size={128}
+                                style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                                viewBox={`0 0 256 256`}
+                              />
+                            </div>
+                            <Button
+                              onClick={handleCopyQRCodeImage}
+                              variant="outline"
+                              size="sm"
+                              className="gap-2"
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                              {translations?.copyQRCode || 'Copy QR Code'}
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
         </DialogContent>
       </Dialog>
