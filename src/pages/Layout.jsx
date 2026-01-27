@@ -744,17 +744,17 @@ export default function Layout() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="max-clients">
-                        {translations?.maxClients || 'Max Clients'} (1-30)
+                        {translations?.maxClients || 'Max Clients'} (1-200)
                       </Label>
                       <Input
                         id="max-clients"
                         type="number"
                         min="1"
-                        max="30"
+                        max="200"
                         value={maxClients}
                         onChange={(e) => {
                           const value = parseInt(e.target.value) || 1;
-                          setMaxClients(Math.min(Math.max(value, 1), 30));
+                          setMaxClients(Math.min(Math.max(value, 1), 200));
                         }}
                       />
                     </div>
