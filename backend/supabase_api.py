@@ -147,12 +147,19 @@ def revoke_registration_invite(code):
 
 @supabase_bp.route("/registration-links", methods=["POST"])
 def create_registration_link():
-    """Create or update existing registration rule with optional max_slots and expires_at
-    Uses base64 encoded links, but stores record in DB for tracking current_count
-    Note: manager_id is UNIQUE, so we update existing or create new"""
+    """Create a new registration rule (one DB row per limited link).
+    Each call inserts a new row. Requires link_id (UUID from frontend) and manager_id.
+    Table registration_rules must have: link_id (uuid, unique), and manager_id must NOT be
+    unique (multiple rows per manager). See migration:
+    - ALTER TABLE registration_rules ADD COLUMN IF NOT EXISTS link_id uuid UNIQUE;
+    - ALTER TABLE registration_rules DROP CONSTRAINT IF EXISTS registration_rules_manager_id_key;
+    """
     try:
         payload = request.get_json()
         
+        link_id = payload.get('link_id')
+        if not link_id:
+            return jsonify({"error": "link_id is required (UUID for this link)"}), 400
         if not payload.get('manager_id'):
             return jsonify({"error": "manager_id is required"}), 400
         
@@ -164,57 +171,34 @@ def create_registration_link():
         if expires_at:
             try:
                 expiry_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
-                # Use timezone-aware datetime for comparison
                 now_utc = datetime.now(timezone.utc)
                 if expiry_dt < now_utc:
                     return jsonify({"error": "expires_at must be in the future"}), 400
             except ValueError:
                 return jsonify({"error": "Invalid expires_at format. Use ISO 8601 format."}), 400
         
-        # Check if a record with this manager_id already exists (manager_id is UNIQUE)
-        existing = supabase.table("registration_rules")\
-            .select("*")\
-            .eq("manager_id", manager_id)\
-            .limit(1)\
-            .execute()
-        
-        if existing.data and len(existing.data) > 0:
-            # Update existing record
-            update_data = {
-                "max_slots": max_slots,
-                "expires_at": expires_at if expires_at else None,
-                "is_active": True,
-            }
-            
-            response = supabase.table("registration_rules")\
-                .update(update_data)\
-                .eq("manager_id", manager_id)\
-                .execute()
-            
-            link_data = response.data[0] if response.data else existing.data[0]
-        else:
-            # Create new record
-            link_record = {
-                "manager_id": manager_id,
-                "max_slots": max_slots,
-                "current_count": 0,
-                "expires_at": expires_at if expires_at else None,
-                "is_active": True,
-            }
-            
-            response = supabase.table("registration_rules").insert(link_record).execute()
-            link_data = response.data[0] if response.data else None
-        
-        # Return the record (link URL is generated client-side with base64)
-        return jsonify(link_data), 200 if existing.data and len(existing.data) > 0 else 201
+        # Always INSERT a new row (one slot per limited link)
+        link_record = {
+            "link_id": link_id,
+            "manager_id": manager_id,
+            "max_slots": max_slots,
+            "current_count": 0,
+            "expires_at": expires_at if expires_at else None,
+            "is_active": True,
+        }
+        response = supabase.table("registration_rules").insert(link_record).execute()
+        link_data = response.data[0] if response.data else None
+        return jsonify(link_data), 201
     except Exception as e:
         return handle_supabase_error(e, 'create_registration_link')
 
 @supabase_bp.route("/registration-links/<link_id>", methods=["GET"])
 def get_registration_link(link_id):
-    """Get a registration rule by ID"""
+    """Get a registration rule by id or link_id"""
     try:
         response = supabase.table("registration_rules").select("*").eq("id", link_id).execute()
+        if not response.data or len(response.data) == 0:
+            response = supabase.table("registration_rules").select("*").eq("link_id", link_id).execute()
         if not response.data:
             return jsonify({"error": "Registration rule not found"}), 404
         return jsonify(response.data[0]), 200
@@ -238,21 +222,27 @@ def list_registration_links_by_manager(manager_id):
 
 @supabase_bp.route("/registration-links/find", methods=["POST"])
 def find_registration_link():
-    """Find a registration rule by manager_id
-    Used during registration to find the matching record and increment current_count
-    Note: manager_id is UNIQUE, so we only need manager_id to find the record"""
+    """Find a registration rule by link_id (preferred for limited links) or manager_id.
+    Signup should send link_id when the URL contains it (limited links)."""
     try:
-        payload = request.get_json()
+        payload = request.get_json() or {}
+        link_id = payload.get('link_id')
         manager_id = payload.get('manager_id')
         
-        if not manager_id:
-            return jsonify({"error": "manager_id is required"}), 400
-        
-        response = supabase.table("registration_rules")\
-            .select("*")\
-            .eq("manager_id", manager_id)\
-            .limit(1)\
-            .execute()
+        if link_id:
+            response = supabase.table("registration_rules")\
+                .select("*")\
+                .eq("link_id", link_id)\
+                .limit(1)\
+                .execute()
+        elif manager_id:
+            response = supabase.table("registration_rules")\
+                .select("*")\
+                .eq("manager_id", manager_id)\
+                .limit(1)\
+                .execute()
+        else:
+            return jsonify({"error": "link_id or manager_id is required"}), 400
         
         if not response.data or len(response.data) == 0:
             return jsonify({"error": "Registration rule not found"}), 404
@@ -263,22 +253,28 @@ def find_registration_link():
 
 @supabase_bp.route("/registration-links/<link_id>/increment", methods=["POST"])
 def increment_registration_link_count(link_id):
-    """Increment the current_count for a registration rule
-    Used when a client successfully registers"""
+    """Increment the current_count for a registration rule. Path param can be the
+    row's id (legacy) or the link_id (UUID in the URL)."""
     try:
-        # First get the current record to check limits
+        # Resolve row: try by id first (legacy), then by link_id
         current = supabase.table("registration_rules")\
             .select("*")\
             .eq("id", link_id)\
             .limit(1)\
             .execute()
+        if not current.data or len(current.data) == 0:
+            current = supabase.table("registration_rules")\
+                .select("*")\
+                .eq("link_id", link_id)\
+                .limit(1)\
+                .execute()
         
         if not current.data or len(current.data) == 0:
             return jsonify({"error": "Registration rule not found"}), 404
         
         link_record = current.data[0]
+        row_id = link_record['id']
         
-        # Check if limit reached
         if link_record['current_count'] >= link_record['max_slots']:
             return jsonify({
                 "error": f"Maximum registrations ({link_record['max_slots']}) reached",
@@ -286,10 +282,9 @@ def increment_registration_link_count(link_id):
                 "max_slots": link_record['max_slots']
             }), 403
         
-        # Increment count
         response = supabase.table("registration_rules")\
             .update({"current_count": link_record['current_count'] + 1})\
-            .eq("id", link_id)\
+            .eq("id", row_id)\
             .execute()
         
         return jsonify(response.data[0] if response.data else None), 200

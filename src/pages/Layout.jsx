@@ -27,7 +27,8 @@ import {
   Dumbbell,
   Shield,
   ExternalLink,
-  Copy
+  Copy,
+  Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -92,12 +93,12 @@ export default function Layout() {
   const [userProfile, setUserProfile] = useState(null);
   const [referralLinkDialogOpen, setReferralLinkDialogOpen] = useState(false);
   const qrCodeRef = useRef(null);
-  const limitedQrCodeRef = useRef(null);
+  const limitedQrCodeRefs = useRef({});
   const [linkType, setLinkType] = useState('simple'); // 'simple' or 'limited'
   const [maxClients, setMaxClients] = useState(30);
   const [expiryDate, setExpiryDate] = useState('');
   const [expiryTime, setExpiryTime] = useState('');
-  const [limitedLinkUrl, setLimitedLinkUrl] = useState('');
+  const [limitedLinks, setLimitedLinks] = useState([]); // array of { id, url, maxClients, expiryDate, createdAt }
 
   // Debug sidebar state changes
   useEffect(() => {
@@ -311,14 +312,16 @@ export default function Layout() {
         expiryDateTime = new Date(dateTimeString).toISOString();
       }
 
-      // Create a data object with manager_id and optional limits
+      const linkId = crypto.randomUUID?.() || `link-${Date.now()}`;
+      // link_id ties this link to a DB row so each limited link gets its own slot (current_count, max_slots, expires_at)
       const linkData = {
+        link_id: linkId,
         manager_id: userProfile.id,
         max_clients: parseInt(maxClients) || 30,
         ...(expiryDateTime && { expiry_date: expiryDateTime })
       };
 
-      // Call API to create/get registration link record in database
+      // Call API to create registration link record in database (INSERTs one row per link)
       const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://dietitian-be.azurewebsites.net';
       const response = await fetch(`${API_BASE_URL}/api/db/registration-links`, {
         method: 'POST',
@@ -328,11 +331,19 @@ export default function Layout() {
         body: JSON.stringify(linkData),
       });
 
+      // Encode the entire object in base64 for the URL (signup decodes and uses link_id for find/increment)
+      const encodedData = btoa(JSON.stringify(linkData));
+      const link = `https://betterchoice.one/signup#d=${encodedData}`;
+      const newEntry = {
+        id: linkId,
+        url: link,
+        maxClients: parseInt(maxClients) || 30,
+        expiryDate: expiryDateTime || expiryDate || null,
+        createdAt: Date.now(),
+      };
+
       if (response.ok) {
-        // Encode the entire object in base64 for the URL
-        const encodedData = btoa(JSON.stringify(linkData));
-        const link = `https://betterchoice.one/signup#d=${encodedData}`;
-        setLimitedLinkUrl(link);
+        setLimitedLinks(prev => [...prev, newEntry]);
         toast({
           title: translations?.linkGenerated || 'Link Generated',
           description: translations?.limitedLinkGenerated || 'Limited registration link generated successfully.',
@@ -345,10 +356,8 @@ export default function Layout() {
           description: errorData.error || translations?.failedToGenerateLink || 'Failed to generate link.',
           variant: 'destructive',
         });
-        // Still generate the link even if DB call fails
-        const encodedData = btoa(JSON.stringify(linkData));
-        const link = `https://betterchoice.one/signup#d=${encodedData}`;
-        setLimitedLinkUrl(link);
+        // Still add the link even if DB call fails
+        setLimitedLinks(prev => [...prev, newEntry]);
       }
     } catch (err) {
       console.error('Error creating registration link record:', err);
@@ -357,7 +366,7 @@ export default function Layout() {
         description: err.message || translations?.failedToGenerateLink || 'Failed to generate link.',
         variant: 'destructive',
       });
-      // Still generate the link even if DB call fails
+      // Still add the link even if DB call fails (URL will have link_id; signup may 404 on find until DB is up)
       let expiryDateTime = null;
       if (expiryDate && expiryTime) {
         const dateTimeString = `${expiryDate}T${expiryTime}:00`;
@@ -366,28 +375,37 @@ export default function Layout() {
         const dateTimeString = `${expiryDate}T23:59:59`;
         expiryDateTime = new Date(dateTimeString).toISOString();
       }
+      const linkId = crypto.randomUUID?.() || `link-${Date.now()}`;
       const linkData = {
+        link_id: linkId,
         manager_id: userProfile.id,
         max_clients: parseInt(maxClients) || 30,
         ...(expiryDateTime && { expiry_date: expiryDateTime })
       };
       const encodedData = btoa(JSON.stringify(linkData));
       const link = `https://betterchoice.one/signup#d=${encodedData}`;
-      setLimitedLinkUrl(link);
+      const newEntry = {
+        id: linkId,
+        url: link,
+        maxClients: parseInt(maxClients) || 30,
+        expiryDate: expiryDateTime || expiryDate || null,
+        createdAt: Date.now(),
+      };
+      setLimitedLinks(prev => [...prev, newEntry]);
     } finally {
       setIsGeneratingLink(false);
     }
   };
 
-  // Clear limited link when switching tabs or clearing expiry date
+  // Clear limited links list when switching away from limited tab
   useEffect(() => {
-    if (linkType !== 'limited' || !expiryDate) {
-      setLimitedLinkUrl('');
+    if (linkType !== 'limited') {
+      setLimitedLinks([]);
     }
-  }, [linkType, expiryDate]);
+  }, [linkType]);
 
-  const handleCopyReferralLink = async () => {
-    const link = linkType === 'limited' ? limitedLinkUrl : generateClientReferralLink();
+  const handleCopyReferralLink = async (linkUrl) => {
+    const link = linkUrl ?? (linkType === 'limited' ? '' : generateClientReferralLink());
     if (!link) {
       toast({
         title: translations?.error || 'Error',
@@ -414,14 +432,27 @@ export default function Layout() {
 
   const getCurrentLink = () => {
     if (linkType === 'limited') {
-      return limitedLinkUrl || '';
+      return limitedLinks[0]?.url || '';
     }
     return generateClientReferralLink();
   };
 
-  const handleCopyQRCodeImage = async () => {
+  const removeLimitedLink = (id) => {
+    setLimitedLinks(prev => prev.filter(l => l.id !== id));
+    delete limitedQrCodeRefs.current?.[id];
+  };
+
+  const formatExpiry = (expiry) => {
+    if (!expiry) return '';
     try {
-      const qrContainer = linkType === 'limited' ? limitedQrCodeRef.current : qrCodeRef.current;
+      const d = new Date(expiry);
+      return isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+    } catch { return ''; }
+  };
+
+  const handleCopyQRCodeImage = async (linkId) => {
+    try {
+      const qrContainer = linkType === 'limited' && linkId != null ? limitedQrCodeRefs.current?.[linkId] : qrCodeRef.current;
       if (!qrContainer) {
         throw new Error('QR code container not found');
       }
@@ -637,7 +668,7 @@ export default function Layout() {
           setMaxClients(30);
           setExpiryDate('');
           setExpiryTime('');
-          setLimitedLinkUrl('');
+          setLimitedLinks([]);
         }
       }}>
         <DialogContent className="max-w-2xl">
@@ -763,48 +794,76 @@ export default function Layout() {
                     }
                   </Button>
                   
-                  {limitedLinkUrl && (
-                    <div className="space-y-2">
-                      <Label>{translations?.generatedLink || 'Generated Link'}</Label>
-                      <Input
-                        value={limitedLinkUrl}
-                        readOnly
-                        className="font-mono text-sm"
-                        onClick={(e) => e.target.select()}
-                      />
+                  {limitedLinks.length > 0 && (
+                    <div className="space-y-4">
+                      <Label>{translations?.generatedLinks || 'Generated Links'}</Label>
                       <p className="text-xs text-muted-foreground">
                         {translations?.limitedLinkHint ||
-                          'This link includes max clients and expiry date limits.'}
+                          'Each link includes max clients and expiry date limits. Generate more with different settings.'}
                       </p>
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={handleCopyReferralLink}
-                          className="flex-1 gap-2"
-                        >
-                          <Copy className="h-4 w-4" />
-                          {translations?.copyLink || 'Copy Link'}
-                        </Button>
-                        {userProfile?.id && (
-                          <div className="flex flex-col items-center gap-2">
-                            <div ref={limitedQrCodeRef} className="bg-white p-3 rounded-lg border border-gray-200">
-                              <QRCode
-                                value={limitedLinkUrl}
-                                size={128}
-                                style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                                viewBox={`0 0 256 256`}
-                              />
+                      <div className="space-y-3 max-h-[280px] overflow-y-auto">
+                        {limitedLinks.map((item) => (
+                          <div key={item.id} className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                            <div className="flex justify-between items-start gap-2">
+                              <div className="flex-1 min-w-0">
+                                <Input
+                                  value={item.url}
+                                  readOnly
+                                  className="font-mono text-sm"
+                                  onClick={(e) => e.target.select()}
+                                />
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  {translations?.maxClients || 'Max'} {item.maxClients} {translations?.clients || 'clients'}
+                                  {item.expiryDate ? ` · ${translations?.expires || 'expires'} ${formatExpiry(item.expiryDate)}` : ''}
+                                </p>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="flex-shrink-0 text-muted-foreground hover:text-destructive"
+                                onClick={() => removeLimitedLink(item.id)}
+                                aria-label={translations?.remove || 'Remove'}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
                             </div>
-                            <Button
-                              onClick={handleCopyQRCodeImage}
-                              variant="outline"
-                              size="sm"
-                              className="gap-2"
-                            >
-                              <Copy className="h-3.5 w-3.5" />
-                              {translations?.copyQRCode || 'Copy QR Code'}
-                            </Button>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                onClick={() => handleCopyReferralLink(item.url)}
+                                size="sm"
+                                className="gap-2"
+                              >
+                                <Copy className="h-3.5 w-3.5" />
+                                {translations?.copyLink || 'Copy Link'}
+                              </Button>
+                              {userProfile?.id && (
+                                <>
+                                  <div
+                                    ref={(el) => { if (el) limitedQrCodeRefs.current[item.id] = el; }}
+                                    className="bg-white p-2 rounded border border-gray-200 inline-flex"
+                                  >
+                                    <QRCode
+                                      value={item.url}
+                                      size={96}
+                                      style={{ height: 'auto', maxWidth: '100%', width: '100%' }}
+                                      viewBox="0 0 256 256"
+                                    />
+                                  </div>
+                                  <Button
+                                    onClick={() => handleCopyQRCodeImage(item.id)}
+                                    variant="outline"
+                                    size="sm"
+                                    className="gap-2"
+                                  >
+                                    <Copy className="h-3.5 w-3.5" />
+                                    {translations?.copyQRCode || 'Copy QR Code'}
+                                  </Button>
+                                </>
+                              )}
+                            </div>
                           </div>
-                        )}
+                        ))}
                       </div>
                     </div>
                   )}
