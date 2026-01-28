@@ -417,6 +417,7 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex, alternativeInd
     return (
       <h4
         onClick={() => setIsEditing(true)}
+        dir="auto"
         className="font-medium text-gray-900 cursor-pointer hover:bg-gray-100 px-2 py-1 rounded"
         title="Click to edit meal name"
       >
@@ -433,6 +434,7 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex, alternativeInd
       onChange={(e) => setEditValue(e.target.value)}
       onBlur={handleSubmit}
       onKeyDown={handleKeyDown}
+      dir="auto"
       className="font-medium text-gray-900 bg-white border border-gray-300 rounded px-2 py-1 w-full"
     />
   );
@@ -1866,31 +1868,31 @@ const MenuLoad = () => {
   };
 
   const handleTitleChange = (newTitle, mealIndex, optionIndex, alternativeIndex = null) => {
-    setEditedMenu(prev => {
-      const updated = JSON.parse(JSON.stringify(prev));
-      const meal = updated.meals[mealIndex];
-      let option;
-      if (alternativeIndex !== null) {
-        option = meal.alternatives?.[alternativeIndex];
-      } else {
-        option = optionIndex === 'main' ? meal.main : meal.alternative;
-      }
+    const applyTitleEdit = (menu) => {
+      if (!menu) return menu;
+      const updated = JSON.parse(JSON.stringify(menu));
+      const meal = updated.meals?.[mealIndex];
+      if (!meal) return menu;
+      const option = alternativeIndex !== null
+        ? meal.alternatives?.[alternativeIndex]
+        : optionIndex === 'main' ? meal.main : meal.alternative;
       if (option) option.meal_title = newTitle;
       return updated;
-    });
-    setOriginalMenu(prevOriginal => {
-      if (!prevOriginal) return prevOriginal;
-      const updated = JSON.parse(JSON.stringify(prevOriginal));
-      const meal = updated.meals[mealIndex];
-      let option;
-      if (alternativeIndex !== null) {
-        option = meal.alternatives?.[alternativeIndex];
-      } else {
-        option = optionIndex === 'main' ? meal.main : meal.alternative;
-      }
-      if (option) option.meal_title = newTitle;
-      return updated;
-    });
+    };
+
+    setEditedMenu(prev => applyTitleEdit(prev));
+
+    if (language === 'en') {
+      setOriginalMenu(prev => (prev ? applyTitleEdit(prev) : prev));
+    }
+
+    if (language === 'he') {
+      setTranslatedMenus(prev => {
+        const he = prev.he;
+        if (!he) return prev;
+        return { ...prev, he: applyTitleEdit(he) };
+      });
+    }
   };
 
   const handleIngredientChange = (newValues, mealIndex, optionIndex, ingredientIndex, alternativeIndex = null) => {
