@@ -38,6 +38,7 @@ export default function Chat() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [conversationId, setConversationId] = useState(null);
   const [firstMessageId, setFirstMessageId] = useState(null); // for pagination
+  const [isUserAtBottom, setIsUserAtBottom] = useState(true);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [currentImageUrl, setCurrentImageUrl] = useState(null);
   const [isUserActive, setIsUserActive] = useState(true); // Track if user is active
@@ -71,6 +72,8 @@ export default function Chat() {
   // Use refs to store intervals to prevent recreation issues
   const autoRefreshIntervalRef = useRef(null);
   const simpleRefreshIntervalRef = useRef(null);
+  // Ref for load-more condition in handleScroll (avoids stale closures)
+  const loadMoreStateRef = useRef({});
 
   // Helper function to filter messages based on role and content
   const filterValidMessages = (messages) => {
@@ -354,16 +357,12 @@ export default function Chat() {
     const scrollArea = scrollAreaRef.current;
     if (!scrollArea) return;
 
-    // Find the viewport element within ScrollArea
     const viewport = scrollArea.querySelector('[data-radix-scroll-area-viewport]');
     if (viewport) {
-      viewport.addEventListener('scroll', trackScrollPosition, { passive: true });
-      
-      return () => {
-        viewport.removeEventListener('scroll', trackScrollPosition);
-      };
+      viewport.addEventListener('scroll', handleScroll, { passive: true });
+      return () => viewport.removeEventListener('scroll', handleScroll);
     }
-  }, [scrollAreaRef.current]);
+  }, [conversationId, isFetchingData]);
 
   // Track user activity (less aggressive)
   useEffect(() => {
@@ -1092,40 +1091,28 @@ export default function Chat() {
     return { text: content, imageUrl: null };
   };
 
-  // Function to track scroll position and determine user location
-  const trackScrollPosition = () => {
-    const scrollArea = scrollAreaRef.current;
-    if (!scrollArea) return;
-    
-    // Find the viewport element within ScrollArea
-    const viewport = scrollArea.querySelector('[data-radix-scroll-area-viewport]');
-    if (!viewport) return;
-    
-    const { scrollTop, scrollHeight, clientHeight } = viewport;
-    const scrollBottom = scrollHeight - clientHeight;
-    const distanceFromBottom = scrollBottom - scrollTop;
-    
-    // Update last scroll position
+  // Handle scroll: update isUserAtBottom and auto-load older messages when near top
+  // (Logic aligned with ProfilePage: scrollTop <= 50 triggers load more)
+  const handleScroll = (e) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.target;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    const nearBottom = distanceFromBottom < 100; // Within 100px of bottom
+    setIsUserAtBottom(nearBottom);
     setLastScrollTop(scrollTop);
-    
-    // Determine if user is at bottom, middle, or top
-    if (distanceFromBottom <= 50) {
+
+    if (nearBottom) {
       setUserScrollPosition('bottom');
-      // Clear new message indicator when user scrolls to bottom
       setHasNewMessages(false);
-      console.log('📍 User scrolled to bottom, cleared new message indicator');
     } else if (scrollTop <= 50) {
       setUserScrollPosition('top');
-      console.log('📍 User scrolled to top');
-      
-      // Auto-load more messages when reaching the top
-      if (hasMoreMessages && !isLoadingMore && conversationId && firstMessageId) {
+      // Auto-load more messages when scrolling to top
+      const { hasMoreMessages: hm, isLoadingMore: loading, conversationId: cid, firstMessageId: fid, handleLoadMore: loadMore } = loadMoreStateRef.current;
+      if (hm && !loading && cid && fid && typeof loadMore === 'function') {
         console.log('🔄 Auto-loading more messages at top...');
-        handleLoadMore();
+        loadMore();
       }
     } else {
       setUserScrollPosition('middle');
-      console.log('📍 User scrolled to middle, distance from bottom:', distanceFromBottom);
     }
   };
 
@@ -1752,6 +1739,17 @@ export default function Chat() {
       setIsLoadingMore(false);
     }
   };
+
+  // Keep loadMoreStateRef updated for handleScroll (avoids stale closures when auto-loading at top)
+  useEffect(() => {
+    loadMoreStateRef.current = {
+      hasMoreMessages,
+      isLoadingMore,
+      conversationId,
+      firstMessageId,
+      handleLoadMore,
+    };
+  }, [hasMoreMessages, isLoadingMore, conversationId, firstMessageId, handleLoadMore]);
 
   if (isFetchingData) {
     return (

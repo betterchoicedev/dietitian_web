@@ -607,7 +607,7 @@ export const entities = {
     listByConversation: async (conversation_id, { limit = 20, beforeMessageId = null } = {}) => {
       try {
         const params = new URLSearchParams({ limit: limit.toString() });
-        if (beforeMessageId) params.append('before_message_id', beforeMessageId);
+        if (beforeMessageId) params.append('beforeMessageId', beforeMessageId);
         return await apiCall(`/chat-messages/conversation/${conversation_id}?${params.toString()}`);
       } catch (err) {
         handleApiError(err, 'ChatMessage.listByConversation');
