@@ -381,13 +381,13 @@ const sendFutureMealPlanNotification = async (userCode, mealPlanName, clientId, 
   }
 };
 
-const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
+const EditableTitle = ({ value, onChange, mealIndex, optionIndex, alternativeIndex }) => {
   const [isEditing, setIsEditing] = useState(false);
-  const [editValue, setEditValue] = useState(value);
+  const [editValue, setEditValue] = useState(value ?? '');
   const inputRef = useRef(null);
 
   useEffect(() => {
-    setEditValue(value);
+    setEditValue(value ?? '');
   }, [value]);
 
   useEffect(() => {
@@ -398,27 +398,29 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
   }, [isEditing]);
 
   const handleSubmit = () => {
-    onChange(editValue, mealIndex, optionIndex);
+    onChange(editValue, mealIndex, optionIndex, alternativeIndex);
     setIsEditing(false);
   };
 
-  const handleKeyPress = (e) => {
+  const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
       handleSubmit();
     } else if (e.key === 'Escape') {
-      setEditValue(value);
+      setEditValue(value ?? '');
       setIsEditing(false);
     }
   };
 
   if (!isEditing) {
     return (
-      <h4 
+      <h4
         onClick={() => setIsEditing(true)}
         className="font-medium text-gray-900 cursor-pointer hover:bg-gray-100 px-2 py-1 rounded"
         title="Click to edit meal name"
       >
-        {value}
+        {value ?? ''}
       </h4>
     );
   }
@@ -430,7 +432,7 @@ const EditableTitle = ({ value, onChange, mealIndex, optionIndex }) => {
       value={editValue}
       onChange={(e) => setEditValue(e.target.value)}
       onBlur={handleSubmit}
-      onKeyDown={handleKeyPress}
+      onKeyDown={handleKeyDown}
       className="font-medium text-gray-900 bg-white border border-gray-300 rounded px-2 py-1 w-full"
     />
   );
@@ -1863,13 +1865,30 @@ const MenuLoad = () => {
     setError(null);
   };
 
-  const handleTitleChange = (newTitle, mealIndex, optionIndex) => {
+  const handleTitleChange = (newTitle, mealIndex, optionIndex, alternativeIndex = null) => {
     setEditedMenu(prev => {
       const updated = JSON.parse(JSON.stringify(prev));
-      const option = optionIndex === 'main' ? updated.meals[mealIndex].main : updated.meals[mealIndex].alternative;
-      option.meal_title = newTitle;
-      updated.meals[mealIndex].meal = newTitle;
-      updated.totals = calculateMainTotals(updated);
+      const meal = updated.meals[mealIndex];
+      let option;
+      if (alternativeIndex !== null) {
+        option = meal.alternatives?.[alternativeIndex];
+      } else {
+        option = optionIndex === 'main' ? meal.main : meal.alternative;
+      }
+      if (option) option.meal_title = newTitle;
+      return updated;
+    });
+    setOriginalMenu(prevOriginal => {
+      if (!prevOriginal) return prevOriginal;
+      const updated = JSON.parse(JSON.stringify(prevOriginal));
+      const meal = updated.meals[mealIndex];
+      let option;
+      if (alternativeIndex !== null) {
+        option = meal.alternatives?.[alternativeIndex];
+      } else {
+        option = optionIndex === 'main' ? meal.main : meal.alternative;
+      }
+      if (option) option.meal_title = newTitle;
       return updated;
     });
   };
@@ -3656,11 +3675,12 @@ const MenuLoad = () => {
     return (
       <div className={`p-4 rounded-lg ${isAlternative ? 'bg-blue-50' : 'bg-green-50'}`}>
         <div className="flex justify-between items-start mb-3">
-          <EditableTitle 
+          <EditableTitle
             value={option.meal_title}
             onChange={handleTitleChange}
             mealIndex={option.mealIndex}
             optionIndex={isAlternative ? 'alternative' : 'main'}
+            alternativeIndex={option.alternativeIndex}
           />
           <div className="flex gap-2">
             <Badge variant="outline" className={`${isAlternative ? 'bg-blue-100 border-blue-200' : 'bg-green-100 border-green-200'}`}>
