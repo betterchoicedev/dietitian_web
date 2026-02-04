@@ -1156,7 +1156,7 @@ def load_user_preferences(user_code=None):
         # logger.info(f"Supabase Key exists: {bool(supabase_key)}")
 
         # Define the specific fields we need to reduce data transfer
-        selected_fields = "user_code,food_allergies,daily_target_total_calories,recommendations,food_limitations,goal,number_of_meals,client_preference,macros,region,meal_plan_structure"
+        selected_fields = "user_code,food_allergies,daily_target_total_calories,recommendations,food_limitations,medical_conditions,goal,number_of_meals,client_preference,macros,region,meal_plan_structure"
 
         if user_code:
             # Fetch specific user by user_code
@@ -1196,11 +1196,14 @@ def load_user_preferences(user_code=None):
                     "macros": {"protein": "150g", "fat": "80g", "carbs": "250g"},
                     "allergies": [],
                     "limitations": [],
+                    "medical_conditions": "",
                     "diet_type": "personalized",
                     "meal_count": 5,
                     "client_preference": {},
                     "region": "israel",  # Default region
                     "meal_plan_structure": {},
+                    "food_allergies": "",
+                    "food_limitations": "",
                 }
 
         # Debug: Log the raw user data
@@ -1231,6 +1234,11 @@ def load_user_preferences(user_code=None):
 
         allergies = parse_array_field(user_data.get("food_allergies", []))
         limitations = parse_array_field(user_data.get("food_limitations", []))
+        
+        # Get medical conditions as string (for DSPy constraints)
+        medical_conditions = user_data.get("medical_conditions", "")
+        if not isinstance(medical_conditions, str):
+            medical_conditions = str(medical_conditions) if medical_conditions else ""
 
         # Parse client_preference
         client_preference = user_data.get("client_preference", {})
@@ -1279,12 +1287,16 @@ def load_user_preferences(user_code=None):
             "macros": macros,
             "allergies": allergies,
             "limitations": limitations,
+            "medical_conditions": medical_conditions,
             "diet_type": "personalized",
             "meal_count": meal_count,
             "client_preference": client_preference,
             "region": user_data.get("region", "israel"),  # Default to israel if not specified
             "meal_plan_structure": meal_plan_structure,
             "recommendations": recommendations,
+            # Store raw strings for DSPy constraints (in addition to parsed arrays)
+            "food_allergies": user_data.get("food_allergies", ""),
+            "food_limitations": user_data.get("food_limitations", ""),
         }
 
         # logger.info(f"✅ Loaded user preferences for user_code: {user_data.get('user_code')}")
@@ -2170,22 +2182,27 @@ def _build_option_with_retries(
     # Try DSPy approach first
     if use_dspy:
         try:
-            from meal_builder_dspy import build_meal_with_dspy
+            from meal_builder_dspy_v2 import build_single_meal_with_constraints
 
-            logger.info(f"🚀 Using DSPy pipeline for {option_type} '{meal_name}'")
+            logger.info(f"🚀 Using DSPy v2 pipeline with constraints for {option_type} '{meal_name}'")
 
-            # Prepare preferences with avoid lists
-            enhanced_prefs = dict(preferences)
-            enhanced_prefs["avoid_proteins"] = avoid_proteins or []
-            enhanced_prefs["avoid_ingredients"] = avoid_ingredients or []
+            # Prepare user constraints from preferences
+            user_constraints = {
+                "food_allergies": preferences.get("food_allergies", ""),
+                "food_limitations": preferences.get("food_limitations", ""),
+                "medical_conditions": preferences.get("medical_conditions", "")
+            }
+            
+            # Get region from preferences
+            user_region = preferences.get("region", "")
 
-            # Call DSPy pipeline
-            result = build_meal_with_dspy(
+            # Call DSPy v2 pipeline with constraints
+            result = build_single_meal_with_constraints(
                 meal_type=meal_name,
                 macro_targets=macro_targets,
                 required_protein_source=required_protein_source,
-                preferences=enhanced_prefs,
-                max_retries=max_attempts,
+                user_constraints=user_constraints,
+                user_region=user_region,
                 option_type=option_type,
             )
 
@@ -2278,68 +2295,71 @@ def _build_option_with_retries(
 
         else:
             # RETRY ATTEMPTS: Focused correction prompt
+            validation_issues = "\n".join([f"• {issue}" for issue in previous_issues]) if previous_issues else "No specific issues captured"
             prompt = f"""
+*** CRITICAL MEAL REPAIR PROTOCOL ***
 
-**MEAL CORRECTION REQUIRED**
+Your previous attempt to generate a meal failed validation. You must now act as a **Senior Clinical Nutritionist** to fix the errors while maintaining culinary excellence.
 
-Your previous meal attempt failed validation. Review the failed meal and issues below, then return a corrected version.
+---------------------------------------------------------
+1. DIAGNOSTIC REPORT (READ CAREFULLY)
+---------------------------------------------------------
+FAILED MEAL: {meal_name}
+THE EXACT ERRORS: {validation_issues}
 
-**CORRECTION INSTRUCTIONS:**
+---------------------------------------------------------
+2. CORRECTION STRATEGY
+---------------------------------------------------------
+You must fix the errors above using the following logic:
 
-* Read the validation issues carefully - they tell you EXACTLY what's wrong *
-* Adjust ingredient portions to hit the exact macro targets *
-* Fix any dietary restriction violations (kosher, allergies, etc.) *
-* Ensure all text fields are in ENGLISH only *
-* Use real brand names (not "generic") *
-* Keep the same JSON structure*
-* Return ONLY the corrected JSON meal (no markdown, no explanations) *
+A. IF MACRO TARGETS MISSED (Physics Check):
+   - **Protein too low?** DO NOT just increase the portion of a low-protein item (like beans). ADD a high-density side: Egg Whites, Tuna, Seitan, or Protein Powder.
+   - **Carbs too high?** Swap the carb source for a lower-density option (e.g., Swap Rice for Quinoa, or Bread for Lite Bread).
+   - **Calories too high?** Reduce FATS first (Oil/Nuts), then Carbs. Keep Protein high.
+   - **CRITICAL:** Use REAL USDA standard nutrition densities. Do not invent "magic food" (e.g., Bread that is 50% protein does not exist).
 
-**IMPORTANT REMINDERS:**
+B. IF DIETARY VIOLATION (Safety Check):
+   - **Kosher Violation?** (Meat+Dairy): Immediately remove the Dairy item. Replace fats with Olive Oil/Tahini/Avocado.
+   - **Allergy Violation?** REMOVE the ingredient entirely. Do not just rename it. Swap for a safe alternative.
+   - **Vegan/Veg Violation?** Check hidden ingredients (e.g., Caesar dressing has anchovies). Use explicit Vegan alternatives.
 
-* You MUST hit macro targets exactly (calories, protein, fat, carbs) * 
-* Target macros: {macro_targets} *
-* Maximum 7 ingredients per meal *
-* Required protein source: {required_protein_source} *
-* Avoid these proteins: {avoid_proteins} *
-* Avoid these ingredients: {avoid_ingredients} *
-* Regional brands: {region_instruction} *
-* **CRITICAL: STRICTLY AVOID ALL FOODS IN ALLERGIES LIST** - This is life-threatening: {allergies_list} *
-* **CRITICAL: STRICTLY FOLLOW ALL DIETARY LIMITATIONS** - Never include these foods/ingredients: {limitations_list} *
+C. IF REGIONAL/BRAND ERROR:
+   - Client Region: **{region_instruction}**
+   - **Israel:** Use Tnuva, Tara, Strauss, Osem, Angel, Elite, Yad Mordechai.
+   - **USA:** Use Kraft, Dannon, Quaker, Chobani, Tyson.
+   - NEVER mix regions.
 
-**EXPECTED OUTPUT FORMAT:**
+---------------------------------------------------------
+3. CONSTRAINTS & TARGETS
+---------------------------------------------------------
+* Target Macros (HIT EXACTLY): {macro_targets}
+* Required Protein Source: {required_protein_source}
+* Avoid Proteins: {avoid_proteins}
+* Avoid Ingredients: {avoid_ingredients}
+* Allergies (LIFE THREATENING - ZERO TOLERANCE): {allergies_list}
+* Limitations: {limitations_list}
 
+---------------------------------------------------------
+4. OUTPUT FORMAT
+---------------------------------------------------------
+Return ONLY valid JSON. No markdown, no "Here is the fixed meal".
+Format:
 {{{{
-
   "meal_name": "{meal_name}",
-
-  "meal_title": "<dish name in English>",
-
+  "meal_title": "<Appetizing Name in English>",
   "ingredients": [
-
     {{{{
-
-      "item": "<ingredient name in English>",
-
-      "portionSI(gram)": <number>,
-
-      "household_measure": "<realistic measure in English>",
-
+      "item": "<Specific Name in English (e.g. Tnuva Cottage Cheese)>",
+      "portionSI(gram)": <float>,
+      "household_measure": "<e.g. 1 cup, 2 slices>",
       "calories": <int>,
-
       "protein": <int>,
-
       "fat": <int>,
-
       "carbs": <int>,
-
-      "brand of pruduct": "<real brand name in English>"
-
+      "brand of pruduct": "<Brand Name or 'Fresh'>"
     }}}}
-
   ]
-
 }}}}
-
 """
             user_payload = validation_feedback  # String with failed meal + issues
 
@@ -2465,14 +2485,16 @@ def _build_single_meal_option(
             carbs = round(carbs)
 
         targets = {
+            "name": template_meal_title,  # CRITICAL: Pass dish name for Chef (e.g. "Chickpea Omelette with Avocado")
             "calories": calories,
             "protein": protein,
             "fat": fat,
             "carbs": carbs,
         }
 
-        # Validate targets
-        if any(v is None for k, v in targets.items()):
+        # Validate targets (only macros required; name is optional)
+        macro_keys = ("calories", "protein", "fat", "carbs")
+        if any(targets.get(k) is None for k in macro_keys):
             logger.error(f"❌ Template missing macro targets for {option_type} '{meal_name}'")
             return (meal_name, option_type, None, f"Missing macro targets: {targets}")
 
@@ -2953,6 +2975,16 @@ def api_validate_menu():
 
                 # Check limitations (exact or substring match)
                 for limitation in limitations_normalized:
+                    # "X-free" means diet must avoid X; flag only if item contains X and is not explicitly X-free
+                    if limitation.endswith("-free") and len(limitation) > 5:
+                        substance = limitation[:-5].strip()  # e.g. "gluten-free" -> "gluten"
+                        safe_phrases = (limitation.replace("-", " "), limitation)  # "gluten free", "gluten-free"
+                        if substance in item_name:
+                            if not any(phrase in item_name for phrase in safe_phrases):
+                                issues.append(
+                                    f"DIETARY LIMITATION VIOLATION: Contains '{ing.get('item', '')}' which violates limitation '{limitation}'"
+                                )
+                        continue
                     # Handle common patterns like "no chicken", "no beef", etc.
                     if limitation.startswith("no ") or limitation.startswith("avoid "):
                         # Extract the food item from "no chicken" -> "chicken"
@@ -2963,7 +2995,7 @@ def api_validate_menu():
                                 f"DIETARY LIMITATION VIOLATION: Contains '{ing.get('item', '')}' which violates limitation '{limitation}'"
                             )
                     else:
-                        # Direct match (e.g., "chicken", "beef")
+                        # Direct match (e.g., "chicken", "beef") — things to avoid
                         if limitation in item_name or item_name in limitation:
                             issues.append(
                                 f"DIETARY LIMITATION VIOLATION: Contains '{ing.get('item', '')}' which violates limitation '{limitation}'"

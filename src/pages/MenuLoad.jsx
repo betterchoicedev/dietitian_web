@@ -1930,8 +1930,12 @@ const MenuLoad = () => {
       return updated;
     };
 
-    setEditedMenu(prev => updateMenu(prev) || prev);
-    setOriginalMenu(prev => updateMenu(prev) || prev);
+    const applyUpdate = (menu) => updateMenu(menu) || menu;
+    setEditedMenu(prev => applyUpdate(prev));
+    setOriginalMenu(prev => applyUpdate(prev));
+    if (language === 'he') {
+      setTranslatedMenus(prev => (prev['he'] ? { ...prev, 'he': applyUpdate(prev['he']) } : prev));
+    }
   };
 
   const handleAddIngredient = (mealIndex, optionIndex, alternativeIndex = null) => {
@@ -1965,8 +1969,12 @@ const MenuLoad = () => {
       return updated;
     };
 
-    setEditedMenu(prev => addIngredient(prev) || prev);
-    setOriginalMenu(prev => addIngredient(prev) || prev);
+    const applyAdd = (menu) => addIngredient(menu) || menu;
+    setEditedMenu(prev => applyAdd(prev));
+    setOriginalMenu(prev => applyAdd(prev));
+    if (language === 'he') {
+      setTranslatedMenus(prev => (prev['he'] ? { ...prev, 'he': applyAdd(prev['he']) } : prev));
+    }
   };
 
   const handleHouseholdMeasureChange = (newMeasure, mealIndex, optionIndex, ingredientIndex, alternativeIndex = null) => {
@@ -1990,8 +1998,12 @@ const MenuLoad = () => {
       return updated;
     };
 
-    setEditedMenu(prev => updateMenu(prev) || prev);
-    setOriginalMenu(prev => updateMenu(prev) || prev);
+    const applyUpdate = (menu) => updateMenu(menu) || menu;
+    setEditedMenu(prev => applyUpdate(prev));
+    setOriginalMenu(prev => applyUpdate(prev));
+    if (language === 'he') {
+      setTranslatedMenus(prev => (prev['he'] ? { ...prev, 'he': applyUpdate(prev['he']) } : prev));
+    }
   };
 
   const handleOpenPortionDialog = (ingredient, mealIndex, optionIndex, ingredientIndex, alternativeIndex = null) => {
@@ -2052,7 +2064,7 @@ const MenuLoad = () => {
       if (!meal) return menuData;
 
       const option =
-        alternativeIndex !== null
+        alternativeIndex != null && Number.isInteger(alternativeIndex)
           ? meal.alternatives?.[alternativeIndex]
           : optionIndex === 'main'
             ? meal.main
@@ -2084,8 +2096,12 @@ const MenuLoad = () => {
       return updated;
     };
 
-    setEditedMenu(prev => updateMenu(prev) || prev);
-    setOriginalMenu(prev => updateMenu(prev) || prev);
+    const applyUpdate = (menu) => updateMenu(menu) || menu;
+    setEditedMenu(prev => applyUpdate(prev));
+    setOriginalMenu(prev => applyUpdate(prev));
+    if (language === 'he') {
+      setTranslatedMenus(prev => (prev['he'] ? { ...prev, 'he': applyUpdate(prev['he']) } : prev));
+    }
   };
 
   async function generateAlternativeMeal(main, alternative) {
