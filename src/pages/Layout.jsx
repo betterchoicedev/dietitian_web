@@ -89,6 +89,7 @@ export default function Layout() {
   const [userData, setUserData] = useState(null);
   const [clientSearchTerm, setClientSearchTerm] = useState('');
   const [isClientSelectOpen, setIsClientSelectOpen] = useState(false);
+  const clientSearchInputRef = useRef(null);
   const dataLoadedRef = useRef(false);
   const [userProfile, setUserProfile] = useState(null);
   const [referralLinkDialogOpen, setReferralLinkDialogOpen] = useState(false);
@@ -632,6 +633,33 @@ export default function Layout() {
     return name.includes(searchTerm) || userCode.includes(searchTerm);
   });
 
+  // Maintain focus on search input when select is open
+  useEffect(() => {
+    if (isClientSelectOpen && clientSearchInputRef.current) {
+      // Small delay to ensure the input is rendered
+      const timer = setTimeout(() => {
+        if (clientSearchInputRef.current && document.activeElement !== clientSearchInputRef.current) {
+          clientSearchInputRef.current.focus();
+        }
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isClientSelectOpen, clientSearchTerm]);
+
+  // Handle select open change - prevent closing when input is focused
+  const handleSelectOpenChange = (open) => {
+    // If trying to close and input is focused, keep it open
+    if (!open) {
+      const activeElement = document.activeElement;
+      if (activeElement === clientSearchInputRef.current || 
+          (clientSearchInputRef.current && clientSearchInputRef.current.contains(activeElement))) {
+        return; // Don't close if input is focused
+      }
+      setClientSearchTerm('');
+    }
+    setIsClientSelectOpen(open);
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -923,22 +951,62 @@ export default function Layout() {
                 value={selectedUserCode || ''} 
                 onValueChange={handleClientChange}
                 open={isClientSelectOpen}
-                onOpenChange={setIsClientSelectOpen}
+                onOpenChange={handleSelectOpenChange}
               >
-                <SelectTrigger className="w-full max-w-[150px] sm:max-w-[200px] md:max-w-[280px] bg-white/90 backdrop-blur-sm border border-border/60 shadow-sm hover:border-primary/40 transition-all duration-300 text-xs sm:text-sm md:text-base h-9 sm:h-10 md:h-11 px-3 md:px-4 rounded-lg">
+                <SelectTrigger 
+                  className="w-full max-w-[150px] sm:max-w-[200px] md:max-w-[280px] bg-white/90 backdrop-blur-sm border border-border/60 shadow-sm hover:border-primary/40 transition-all duration-300 text-xs sm:text-sm md:text-base h-9 sm:h-10 md:h-11 px-3 md:px-4 rounded-lg"
+                  dir={isRTL ? 'rtl' : 'ltr'}
+                >
                   <SelectValue placeholder={translations.selectClient || 'Select Client'} />
                 </SelectTrigger>
-                <SelectContent className="bg-white/95 backdrop-blur-xl border-border/60 shadow-lg rounded-lg w-[280px] max-w-[90vw]">
+                <SelectContent 
+                  className="bg-white/95 backdrop-blur-xl border-border/60 shadow-lg rounded-lg w-[280px] max-w-[90vw]"
+                  dir={isRTL ? 'rtl' : 'ltr'}
+                >
                   {/* Search Input */}
-                  <div className="p-3 border-b border-border/30">
+                  <div 
+                    className="p-3 border-b border-border/30"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                  >
                     <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Search className={`absolute ${isRTL ? 'right-3' : 'left-3'} top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground`} />
                       <Input
+                        ref={clientSearchInputRef}
                         placeholder="Search by name or code..."
                         value={clientSearchTerm}
-                        onChange={(e) => setClientSearchTerm(e.target.value)}
-                        className="pl-10 h-9 bg-white/80 border-border/40 focus:border-primary/60"
+                        onChange={(e) => {
+                          setClientSearchTerm(e.target.value);
+                          // Keep select open when typing
+                          if (!isClientSelectOpen) {
+                            setIsClientSelectOpen(true);
+                          }
+                        }}
+                        className={`${isRTL ? 'pr-10 text-right' : 'pl-10'} h-9 bg-white/80 border-border/40 focus:border-primary/60`}
+                        dir={isRTL ? 'rtl' : 'ltr'}
                         onClick={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          // Prevent select from closing
+                        }}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                        }}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          // Prevent select from closing on Escape if there's text
+                          if (e.key === 'Escape' && clientSearchTerm) {
+                            e.preventDefault();
+                            setClientSearchTerm('');
+                          }
+                        }}
+                        autoFocus
                       />
                     </div>
                   </div>
@@ -950,17 +1018,17 @@ export default function Layout() {
                         <SelectItem 
                           key={client.user_code} 
                           value={client.user_code} 
-                          className="hover:bg-primary/5 rounded-md mx-2 mb-1"
+                          className={`hover:bg-primary/5 rounded-md mx-2 mb-1 cursor-pointer ${isRTL ? 'text-right' : ''}`}
                         >
-                          <div className="flex items-center gap-3 w-full min-w-0">
+                          <div className={`flex items-center gap-3 w-full min-w-0 ${isRTL ? 'flex-row-reverse' : ''}`}>
                             <div className="w-6 h-6 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
                               <User className="h-3 w-3 text-primary" />
                             </div>
-                            <div className="flex-1 min-w-0 overflow-hidden">
+                            <div className={`flex-1 min-w-0 overflow-hidden ${isRTL ? 'text-right' : 'text-left'}`}>
                               <div className="font-medium text-gray-800 truncate">
                                 {client.full_name || 'No Name'}
                               </div>
-                              <div className="text-xs text-gray-500 truncate">
+                              <div className={`text-xs text-gray-500 truncate ${isRTL ? 'text-right' : 'text-left'}`}>
                                 {translations.clientCode}: {client.user_code}
                               </div>
                             </div>
@@ -968,7 +1036,7 @@ export default function Layout() {
                         </SelectItem>
                       ))
                     ) : (
-                      <div className="p-4 text-center text-sm text-muted-foreground">
+                      <div className={`p-4 text-center text-sm text-muted-foreground ${isRTL ? 'text-right' : 'text-left'}`}>
                         {clientSearchTerm ? 'No clients found matching your search.' : 'No clients available.'}
                       </div>
                     )}
