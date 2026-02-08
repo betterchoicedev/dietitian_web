@@ -123,6 +123,125 @@ export default function NutritionAnalytics() {
   // Check if current language is Hebrew (RTL)
   const isRTL = language === 'he';
 
+  // Add RTL-specific styles for charts
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      /* Force LTR for all chart elements */
+      .chart-container-override {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      .chart-container-override * {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      /* Override all recharts elements */
+      .chart-container-override .recharts-wrapper {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      .chart-container-override .recharts-surface {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      .chart-container-override .recharts-cartesian-axis {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      .chart-container-override .recharts-cartesian-grid {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      /* Fix axis labels */
+      .chart-container-override .recharts-cartesian-axis-tick-value {
+        direction: ltr !important;
+        text-anchor: middle !important;
+        unicode-bidi: plaintext !important;
+        transform: none !important;
+      }
+      
+      .chart-container-override .recharts-cartesian-axis-tick-value tspan {
+        direction: ltr !important;
+        unicode-bidi: plaintext !important;
+        text-anchor: inherit !important;
+      }
+      
+      /* Fix Y-axis specifically */
+      .chart-container-override .recharts-yAxis .recharts-cartesian-axis-tick-value {
+        direction: ltr !important;
+      }
+      
+      /* Fix X-axis specifically */
+      .chart-container-override .recharts-xAxis .recharts-cartesian-axis-tick-value {
+        text-anchor: middle !important;
+        direction: ltr !important;
+        unicode-bidi: plaintext !important;
+      }
+      
+      /* Fix hover line and cursor */
+      .chart-container-override .recharts-cartesian-axis-tick-line {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      .chart-container-override .recharts-cartesian-grid-horizontal line,
+      .chart-container-override .recharts-cartesian-grid-vertical line {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      /* Fix tooltip positioning */
+      .chart-container-override .recharts-tooltip-wrapper {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      /* Fix legend */
+      .chart-container-override .recharts-legend-wrapper {
+        direction: ${isRTL ? 'rtl' : 'ltr'} !important;
+        text-align: ${isRTL ? 'right' : 'left'} !important;
+      }
+      
+      .chart-container-override .recharts-legend-item {
+        direction: ${isRTL ? 'rtl' : 'ltr'} !important;
+      }
+      
+      /* Prevent any RTL transformations */
+      .chart-container-override svg {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      .chart-container-override g {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      /* Force cursor and hover elements to LTR */
+      .chart-container-override .recharts-cursor {
+        direction: ltr !important;
+        transform: none !important;
+      }
+      
+      .chart-container-override .recharts-active-dot {
+        direction: ltr !important;
+        transform: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+    
+    return () => {
+      document.head.removeChild(style);
+    };
+  }, [isRTL]);
+
   // Available metrics for selection
   const availableMetrics = [
     { key: 'total_calories', label: translations.calories || 'Calories', icon: Flame, color: CHART_COLORS.calories },
@@ -557,15 +676,36 @@ export default function NutritionAnalytics() {
     return [Math.max(0, min - padding), max + padding];
   };
 
-  // Custom tooltip for charts
+  // Custom tooltip for charts with RTL support
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
-        <div className="bg-white/95 backdrop-blur-xl border border-border/40 rounded-xl p-4 shadow-xl">
-          <p className="font-semibold text-foreground mb-2">{label}</p>
+        <div 
+          className="bg-white/95 backdrop-blur-xl border border-border/40 rounded-xl p-4 shadow-xl"
+          style={{ 
+            direction: isRTL ? 'rtl' : 'ltr',
+            textAlign: isRTL ? 'right' : 'left',
+            maxWidth: '200px'
+          }}
+        >
+          <p className="font-semibold text-foreground mb-2" style={{ 
+            direction: 'ltr', 
+            unicodeBidi: 'plaintext',
+            textAlign: isRTL ? 'right' : 'left'
+          }}>
+            {label}
+          </p>
           {payload.map((entry, index) => (
-            <p key={index} style={{ color: entry.color }} className="text-sm">
-              {entry.value} {entry.name}
+            <p key={index} style={{ 
+              color: entry.color, 
+              direction: isRTL ? 'rtl' : 'ltr',
+              textAlign: isRTL ? 'right' : 'left'
+            }} className="text-sm">
+              <span style={{ direction: 'ltr', unicodeBidi: 'plaintext' }}>
+                {entry.value}
+              </span>
+              {isRTL ? ' :' : ': '}
+              {entry.name}
             </p>
           ))}
         </div>
@@ -687,16 +827,33 @@ export default function NutritionAnalytics() {
       );
     }
 
+    // For RTL: reverse data array so oldest is on right, newest on left
+    // This creates the right-to-left data flow
+    const chartDataForRender = isRTL 
+      ? [...chartDataWithTargets].reverse() 
+      : chartDataWithTargets;
+
+    // Adjust margins for RTL: swap left/right margins
+    // In RTL, Y-axis is on the right, so we need more right margin
+    const chartMargins = isRTL
+      ? { top: 20, right: 60, left: 20, bottom: 20 }
+      : { top: 20, right: 20, left: 60, bottom: 20 };
+
     const commonProps = {
-      data: chartDataWithTargets,
-      margin: { top: 20, right: 60, left: 60, bottom: 20 }
+      data: chartDataForRender,
+      margin: chartMargins
     };
 
     const commonAxisProps = {
       stroke: "#6b7280",
       fontSize: 11,
       tickLine: false,
-      axisLine: false
+      axisLine: false,
+      style: {
+        direction: 'ltr', // Always keep chart elements in LTR direction
+        textAnchor: isRTL ? 'end' : 'start',
+        unicodeBidi: 'plaintext' // Prevent number reversal
+      }
     };
 
     switch (chartType) {
@@ -705,10 +862,29 @@ export default function NutritionAnalytics() {
           <ResponsiveContainer width="100%" height={400}>
             <LineChart {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="date" {...commonAxisProps} />
-              <YAxis {...commonAxisProps} />
+              <XAxis 
+                dataKey="date" 
+                {...commonAxisProps}
+                style={{
+                  ...commonAxisProps.style,
+                  textAnchor: 'middle'
+                }}
+              />
+              <YAxis 
+                {...commonAxisProps}
+                orientation={isRTL ? "right" : "left"}
+                style={{
+                  ...commonAxisProps.style,
+                  textAnchor: isRTL ? 'end' : 'start'
+                }}
+              />
               <Tooltip content={<CustomTooltip />} />
-              <Legend />
+              <Legend 
+                wrapperStyle={{
+                  direction: isRTL ? 'rtl' : 'ltr',
+                  textAlign: isRTL ? 'right' : 'left'
+                }}
+              />
               {selectedMetrics.map((metric, index) => {
                 const metricInfo = availableMetrics.find(m => m.key === metric);
                 const targetKey = `target_${metric}`;
@@ -747,10 +923,29 @@ export default function NutritionAnalytics() {
           <ResponsiveContainer width="100%" height={400}>
             <AreaChart {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="date" {...commonAxisProps} />
-              <YAxis {...commonAxisProps} />
+              <XAxis 
+                dataKey="date" 
+                {...commonAxisProps}
+                style={{
+                  ...commonAxisProps.style,
+                  textAnchor: 'middle'
+                }}
+              />
+              <YAxis 
+                {...commonAxisProps}
+                orientation={isRTL ? "right" : "left"}
+                style={{
+                  ...commonAxisProps.style,
+                  textAnchor: isRTL ? 'end' : 'start'
+                }}
+              />
               <Tooltip content={<CustomTooltip />} />
-              <Legend />
+              <Legend 
+                wrapperStyle={{
+                  direction: isRTL ? 'rtl' : 'ltr',
+                  textAlign: isRTL ? 'right' : 'left'
+                }}
+              />
               {selectedMetrics.map((metric, index) => {
                 const metricInfo = availableMetrics.find(m => m.key === metric);
                 return (
@@ -774,10 +969,29 @@ export default function NutritionAnalytics() {
           <ResponsiveContainer width="100%" height={400}>
             <BarChart {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="date" {...commonAxisProps} />
-              <YAxis {...commonAxisProps} />
+              <XAxis 
+                dataKey="date" 
+                {...commonAxisProps}
+                style={{
+                  ...commonAxisProps.style,
+                  textAnchor: 'middle'
+                }}
+              />
+              <YAxis 
+                {...commonAxisProps}
+                orientation={isRTL ? "right" : "left"}
+                style={{
+                  ...commonAxisProps.style,
+                  textAnchor: isRTL ? 'end' : 'start'
+                }}
+              />
               <Tooltip content={<CustomTooltip />} />
-              <Legend />
+              <Legend 
+                wrapperStyle={{
+                  direction: isRTL ? 'rtl' : 'ltr',
+                  textAlign: isRTL ? 'right' : 'left'
+                }}
+              />
               {selectedMetrics.map((metric, index) => {
                 const metricInfo = availableMetrics.find(m => m.key === metric);
                 return (
@@ -1171,7 +1385,14 @@ export default function NutritionAnalytics() {
                 </div>
               </div>
             ) : (
-              <div>
+              <div 
+                style={{ 
+                  direction: 'ltr', // Force LTR direction for chart container
+                  transform: 'none', // Prevent any transforms
+                  textAlign: 'left' // Always left align
+                }}
+                className="chart-container-override"
+              >
                 {renderChart()}
               </div>
             )}
