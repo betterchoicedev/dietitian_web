@@ -728,6 +728,8 @@ def configure_dspy(force: bool = False) -> bool:
             # Default to gemini-2.0-flash (matches REST API format from curl command)
             gemini_model = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
             
+
+            
             # DSPy uses LiteLLM internally, which requires gemini/ prefix for Gemini models
             # Force Google AI Studio endpoint (not Vertex AI) by setting api_base
             if gemini_model.startswith('gemini/'):
