@@ -686,9 +686,23 @@ class MealPlanBuilder(dspy.Module):
 
 def configure_dspy(force: bool = False) -> bool:
     """
-    Configure DSPy with Azure OpenAI (same as original meal_builder_dspy).
+    Configure DSPy with Gemini API or Azure OpenAI.
     
-    Uses AZURE_OPENAI_API_KEY, AZURE_OPENAI_API_BASE, AZURE_OPENAI_DEPLOYMENT.
+    Priority:
+    1. Gemini API (if GEMINI_API_KEY is set)
+    2. Azure OpenAI (if AZURE_OPENAI_API_KEY is set)
+    
+    Environment variables for Gemini:
+    - GEMINI_API_KEY: Your Gemini API key from Google AI Studio
+    - GEMINI_MODEL: Model name (default: "gemini-2.0-flash")
+      Examples: "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-1.5-pro"
+    
+    Uses Gemini REST API via LiteLLM:
+    - Endpoint: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
+    - Authentication: X-goog-api-key header (handled automatically by LiteLLM)
+    
+    Environment variables for Azure OpenAI:
+    - AZURE_OPENAI_API_KEY, AZURE_OPENAI_API_BASE, AZURE_OPENAI_DEPLOYMENT
     
     Args:
         force: Force reconfiguration even if already configured
@@ -708,14 +722,50 @@ def configure_dspy(force: bool = False) -> bool:
         if _dspy_configured and not force:
             return True
         
-        # Azure OpenAI configuration (same as backend and original meal_builder_dspy)
+        # Try Gemini API first (if API key is provided)
+        gemini_api_key = os.getenv('GEMINI_API_KEY')
+        if gemini_api_key:
+            # Default to gemini-2.0-flash (matches REST API format from curl command)
+            gemini_model = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
+            
+            # DSPy uses LiteLLM internally, which requires gemini/ prefix for Gemini models
+            # Force Google AI Studio endpoint (not Vertex AI) by setting api_base
+            if gemini_model.startswith('gemini/'):
+                model_name = gemini_model
+            elif gemini_model.startswith('google/'):
+                # Convert google/ prefix to gemini/ for LiteLLM compatibility
+                model_name = gemini_model.replace('google/', 'gemini/', 1)
+            else:
+                # Add gemini/ prefix for LiteLLM
+                model_name = f"gemini/{gemini_model}"
+            
+            # Force Google AI Studio endpoint (not Vertex AI)
+            # This matches the curl command: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
+            api_base = "https://generativelanguage.googleapis.com/v1beta"
+            
+            # Configure DSPy LM with Gemini API key and explicit API base
+            # This forces LiteLLM to use Google AI Studio REST API, not Vertex AI
+            lm = dspy.LM(
+                model=model_name,
+                api_key=gemini_api_key,
+                api_base=api_base,
+                max_tokens=2048,
+                temperature=0.7
+            )
+            dspy.configure(lm=lm)
+            
+            _dspy_configured = True
+            logger.info(f"DSPy configured successfully with Gemini REST API: {model_name} at {api_base} (API key via X-goog-api-key)")
+            return True
+        
+        # Fall back to Azure OpenAI configuration
         deployment = os.getenv('AZURE_OPENAI_DEPLOYMENT', 'obi2')
         api_base = os.getenv('AZURE_OPENAI_API_BASE')
         api_key = os.getenv('AZURE_OPENAI_API_KEY')
         api_version = os.getenv('AZURE_OPENAI_API_VERSION', '2024-12-01-preview')
         
         if not api_key:
-            logger.error("AZURE_OPENAI_API_KEY not found in environment")
+            logger.error("Neither GEMINI_API_KEY nor AZURE_OPENAI_API_KEY found in environment")
             return False
         
         if not api_base:
