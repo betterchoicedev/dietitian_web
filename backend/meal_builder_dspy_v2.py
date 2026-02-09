@@ -500,6 +500,7 @@ class MealPlanBuilder(dspy.Module):
         else:
             return 0.3  # 30% for values > 30
     
+    
     def _validate_meal(self, ingredients: List[Ingredient], targets: dict) -> List[str]:
         """
         Audit the meal and return specific error messages.
