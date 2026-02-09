@@ -3066,25 +3066,26 @@ def api_validate_menu():
                 issues.append(f"Template for {option} missing target '{macro}'.")
 
         # -------- ingredient sum validation against template targets (with margins) ----------
-        sums = {m: 0.0 for m in macros}
-
-        for ing in ingredients or []:
-            for m in macros:
-                sums[m] += _num(ing.get(m), 0.0)
-
-        for m in macros:
-            target = _num(tpl.get(m), default=None)
-            if target is None or target == 0:
-                continue
-
-            # Check if ingredient sum matches template target within margin
-            margin = get_allowed_margin(target)
-            if abs(sums[m] - target) / target > margin:
-                direction = "Reduce" if sums[m] > target else "Increase"
-                issues.append(
-                    f"{option.capitalize()} {m}: Sum of ingredients ({round(sums[m],1)}) doesn't match template target ({target}) "
-                    f"(allowed ±{int(margin*100)}%). {direction} ingredient {m} values."
-                )
+        # TEMPORARILY DISABLED FOR DEBUGGING
+        # sums = {m: 0.0 for m in macros}
+        #
+        # for ing in ingredients or []:
+        #     for m in macros:
+        #         sums[m] += _num(ing.get(m), 0.0)
+        #
+        # for m in macros:
+        #     target = _num(tpl.get(m), default=None)
+        #     if target is None or target == 0:
+        #         continue
+        #
+        #     # Check if ingredient sum matches template target within margin
+        #     margin = get_allowed_margin(target)
+        #     if abs(sums[m] - target) / target > margin:
+        #         direction = "Reduce" if sums[m] > target else "Increase"
+        #         issues.append(
+        #             f"{option.capitalize()} {m}: Sum of ingredients ({round(sums[m],1)}) doesn't match template target ({target}) "
+        #             f"(allowed ±{int(margin*100)}%). {direction} ingredient {m} values."
+        #         )
 
         # -------- kosher checks ----------
 

@@ -1,23 +1,29 @@
 """
-DSPy Meal Builder v14: The "Discrete Unit" Engine
--------------------------------------------------
-Adds "Unit Physics" to prevent awkward portions (e.g., 1.4 eggs).
+DSPy Meal Builder v15: Data-Driven Unit Physics
+------------------------------------------------
+Replaces hardcoded heuristics with AI-defined unit definitions.
 
 Features:
 1. AGGRESSIVE TITLE EXTRACTION:
    - Checks: name, meal_title, dish_name, title (in order)
    
-2. CHEF (Stage 1): "CONSTITUTION" + UNIT DEFINITION
+2. CHEF (Stage 1): "CONSTITUTION" + DATA-DRIVEN UNIT DEFINITION
    - Title deconstruction: "Chickpea Omelette with Avocado" -> [Chickpea Flour, Avocado]
    - Mandatory inclusion: Every food in title MUST appear in ingredients
-   - typical_unit_gram: Discrete items (Egg=55, Strawberry=15, Slice=30). Continuous (Rice/Oil)=0.
+   - Unit Physics: AI defines typical_unit_gram (weight) AND unit_label (name)
+     * Example: "Mini Tortilla" -> 25g, "tortilla" vs "Large Wrap" -> 60g, "wrap"
+     * Continuous items (Rice/Oil) -> 0g, ""
    
 3. SOLVER (Stage 2): "Magnetic" Gradient Descent
    - Protein 2.5x, Carbs 1.5x priority
    - Magnetic snap: portions near whole units (e.g. 1.8 eggs) snap to 2 eggs
    - Hard floor: discrete items min = 1 unit (no "5g of Egg")
    
-4. LIST SUPPORT: Handles constraints as strings or lists
+4. FORMATTER (Stage 3): Math-Based Measure Generator
+   - Replaces 30-line if/else with simple division: grams / unit_weight
+   - Handles pluralization and rounding automatically
+   
+5. LIST SUPPORT: Handles constraints as strings or lists
 """
 
 import dspy
@@ -59,7 +65,11 @@ class IngredientDensity(BaseModel):
     typical_unit_gram: float = Field(
         default=0,
         ge=0,
-        description="Weight of 1 unit (Egg=55, Slice=30). 0 if continuous (Rice/Oil)."
+        description="Weight of 1 unit (e.g. 55 for Egg, 30 for Slice). 0 for continuous foods (Rice, Chicken)."
+    )
+    unit_label: str = Field(
+        default="",
+        description="The name of the unit (e.g. 'large', 'slice', 'clove', 'tortilla'). Leave empty for continuous items."
     )
 
     class Config:
@@ -130,10 +140,14 @@ class IdentifyIngredients(dspy.Signature):
     Step 1: The Iron Chef (Unit Aware).
     Generate a precise ingredient list (max 7 items) for the requested dish.
     
-    ⚠️ PROTOCOL 1: UNIT DEFINITION (typical_unit_gram)
-    - You MUST specify typical_unit_gram for discrete items.
-    - EXAMPLES: "Egg" 55, "Strawberry" 15, "Slice of Bread" 30, "Tortilla" 50.
-    - FOR CONTINUOUS ITEMS (Rice, Oats, Oil, Meat cuts, Cheese blocks): set typical_unit_gram = 0.
+    ⚠️ PROTOCOL: UNIT PHYSICS
+    - For DISCRETE items (Eggs, Bread, Fruit, Tortillas), you MUST specify:
+      1. typical_unit_gram: The weight of ONE piece (e.g. Egg=55, Slice=30, Clove=5).
+      2. unit_label: The name of the unit (e.g. "large", "slice", "clove", "whole").
+      
+    - For CONTINUOUS items (Rice, Chicken, Oil, Yogurt):
+      1. typical_unit_gram: Set to 0.
+      2. unit_label: Leave empty.
     
     ⚠️ PROTOCOL 2: THE "TUNER" STRATEGY (CRITICAL)
     To ensure the math engine can hit exact targets, you MUST include "Pure Macro" sources:
@@ -296,8 +310,14 @@ class MealPlanBuilder(dspy.Module):
         final_totals = {'protein': 0.0, 'fat': 0.0, 'carbs': 0.0, 'calories': 0.0}
         for d in densities:
             final_grams = round(current_grams[d.item], 1)
+            
+            # Extract new fields from the AI model
             unit_w = getattr(d, "typical_unit_gram", 0) or 0
-            measure = self._generate_household_measure(d.item, final_grams, unit_w)
+            unit_l = getattr(d, "unit_label", "") or ""  # <--- Get the label
+            
+            # Call the new math function with unit_label
+            measure = self._generate_household_measure(d.item, final_grams, unit_w, unit_l)
+            
             result.append(IngredientPortion(
                 item=d.item,
                 portion_grams=final_grams,
@@ -318,40 +338,59 @@ class MealPlanBuilder(dspy.Module):
         
         return result
     
-    def _generate_household_measure(self, item_name: str, grams: float, unit_weight: float = 0) -> str:
-        """Generate realistic household measure. Uses unit_weight for discrete items (e.g. eggs, slices)."""
+    def _generate_household_measure(self, item_name: str, grams: float, unit_weight: float = 0, unit_label: str = "") -> str:
+        """
+        Generates measure using AI-provided 'Unit Physics' if available.
+        
+        Args:
+            item_name: Name of the ingredient
+            grams: Calculated portion weight in grams
+            unit_weight: Weight of 1 unit (from AI), 0 if continuous
+            unit_label: Name of the unit (from AI), e.g. "slice", "large", "clove"
+        
+        Returns:
+            Human-readable measure string
+        """
+        # --- PATH A: Discrete Units (Math Logic) ---
         if unit_weight > 0:
-            units = grams / unit_weight
-            if abs(units - round(units)) < 0.15:
-                return f"{int(round(units))} unit{'s' if round(units) != 1 else ''}"
-            return f"{round(units, 1)} units"
+            # 1. Calculate raw count (e.g., 100g / 55g = 1.81)
+            raw_count = grams / unit_weight
+            
+            # 2. Rounding Logic: 0.8 -> 1, 1.2 -> 1, 1.6 -> 2
+            count = round(raw_count)
+            
+            # 3. Safety: Never return 0 for non-zero grams
+            if count == 0:
+                count = 1
+            
+            # 4. Format Label
+            # If label is "large" -> "2 large" (for eggs)
+            # If label is "slice" -> "2 slices"
+            label = unit_label.strip() if unit_label else "piece"
+            
+            # Pluralize if needed (simple 's' addition)
+            if count > 1 and not label.endswith('s'):
+                label += "s"
+            
+            return f"{count} {label}"
+        
+        # --- PATH B: Continuous Items (Fallback Heuristics) ---
         if grams < 10:
             return "1 tsp"
         if grams < 25:
             return "1 tbsp"
+        
         item_lower = item_name.lower()
-        if any(x in item_lower for x in ['oil', 'sauce', 'honey', 'seeds', 'mayo', 'tahini']):
+        
+        # Liquids (Oil, Soy Sauce, Honey) - approx 14g per tbsp
+        if any(x in item_lower for x in ['oil', 'sauce', 'honey', 'vinegar', 'syrup', 'seeds', 'mayo', 'tahini']):
             return f"{round(grams / 14, 1)} tbsp"
+        
+        # Grains (Rice, Oats, Quinoa) - approx 180-200g per cup cooked
         if any(x in item_lower for x in ['rice', 'quinoa', 'oats', 'lentils', 'beans', 'stew']):
             return f"{round(grams / 190, 1)} cups cooked"
-        if 'bread' in item_lower or 'toast' in item_lower:
-            return f"{round(grams / 35, 1)} slices"
-        if 'pita' in item_lower:
-            return f"{round(grams / 50, 1)} pitas"
-        if 'egg' in item_lower:
-            return f"{round(grams / 50, 1)} large"
-        if any(x in item_lower for x in ['apple', 'banana', 'orange', 'fruit']):
-            return f"{round(grams / 150, 1)} medium"
-        if 'cottage cheese' in item_lower or 'ricotta' in item_lower:
-            return f"{round(grams / 225, 1)} cup{'s' if grams >= 225 else ''}"
-        if 'cheese' in item_lower:
-            return f"{round(grams / 28, 1)} oz"
-        if 'yogurt' in item_lower:
-            return f"{round(grams / 245, 1)} cup{'s' if grams >= 245 else ''}"
-        if 'pasta' in item_lower:
-            return f"{round(grams / 160, 1)} cups cooked"
-        if any(word in item_lower for word in ['tomato', 'cucumber', 'pepper', 'lettuce', 'spinach', 'carrot']):
-            return f"{round(grams / 150, 1)} cup{'s' if grams >= 150 else ''}"
+        
+        # Standard Weight for everything else (Meat, Veggies, Cheese)
         return f"{int(grams)}g"
     
     def _get_allowed_margin(self, target_val: float) -> float:
