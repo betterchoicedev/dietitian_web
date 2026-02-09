@@ -9,6 +9,9 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-dietitian-be
+      cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +50,29 @@ jobs:
             exit 1
           fi
 
-      - name: Deploy to App Service
+      - name: Wait before deployment to avoid conflicts
+        run: |
+          echo "Waiting 30 seconds to avoid deployment conflicts..."
+          sleep 30
+
+      - name: Deploy to App Service (with retry)
+        id: deploy
+        continue-on-error: true
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: dietitian-be
+          slot-name: Production
+          package: ${{ github.workspace }}/backend.zip
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_E89ED6E4A48748E299AEA7F7A5E3AD42 }}
+
+      - name: Retry deployment if first attempt failed with 409
+        if: steps.deploy.outcome == 'failure'
+        run: |
+          echo "First deployment attempt failed. Waiting 90 seconds before retry..."
+          sleep 90
+
+      - name: Deploy to App Service (retry attempt)
+        if: steps.deploy.outcome == 'failure'
         uses: azure/webapps-deploy@v3
         with:
           app-name: dietitian-be
