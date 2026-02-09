@@ -1,7 +1,7 @@
 """
-DSPy Meal Builder v15: Data-Driven Unit Physics
-------------------------------------------------
-Replaces hardcoded heuristics with AI-defined unit definitions.
+DSPy Meal Builder v16: Data-Driven Unit Physics + LLM Measure Refinement
+--------------------------------------------------------------------------
+Replaces hardcoded heuristics with AI-defined unit definitions and natural language measures.
 
 Features:
 1. AGGRESSIVE TITLE EXTRACTION:
@@ -19,9 +19,10 @@ Features:
    - Magnetic snap: portions near whole units (e.g. 1.8 eggs) snap to 2 eggs
    - Hard floor: discrete items min = 1 unit (no "5g of Egg")
    
-4. FORMATTER (Stage 3): Math-Based Measure Generator
-   - Replaces 30-line if/else with simple division: grams / unit_weight
-   - Handles pluralization and rounding automatically
+4. FORMATTER (Stage 3): Two-Phase Measure Generation
+   - Phase A: Math-based initial calculation (grams / unit_weight)
+   - Phase B: LLM refinement for natural language (considers brand, packaging, common measures)
+   - Example: Math says "2 eggs" -> LLM refines to "2 large eggs" or "1 3/4 cups" for continuous items
    
 5. LIST SUPPORT: Handles constraints as strings or lists
 """
@@ -189,6 +190,25 @@ class IdentifyIngredients(dspy.Signature):
 # Stage 2 is now PURE PYTHON (removed LLM-based CalculatePortions signature)
 # See _calculate_portions_with_python() method below
 
+class MeasureConverter(dspy.Signature):
+    """
+    Convert a specific weight in grams and brand information into the 
+    closest common household measurement (e.g., '1/2 cup', '2 tbsp', '1 medium piece').
+    
+    Consider:
+    - Brand-specific packaging sizes (e.g., Tnuva cheese comes in specific slice sizes)
+    - Natural language formatting (e.g., "2 large eggs" vs "2 eggs")
+    - Common kitchen measurements (cups, tbsp, tsp, pieces, slices)
+    - Rounding to practical amounts (e.g., 1.8 cups -> "1 3/4 cups" or "1.75 cups")
+    """
+    ingredient_name: str = dspy.InputField(desc="Name of the ingredient")
+    grams: float = dspy.InputField(desc="Calculated portion weight in grams")
+    brand_info: str = dspy.InputField(desc="Brand name if applicable, empty string if none")
+    unit_weight: float = dspy.InputField(desc="Weight of 1 unit (0 for continuous items)")
+    unit_label: str = dspy.InputField(desc="Name of the unit from Stage 1 (e.g., 'slice', 'large'), empty for continuous")
+    
+    household_measure: str = dspy.OutputField(desc="Natural household measurement (e.g., '1.5 cups', '2 large eggs', '3 slices', '100g')")
+
 
 # ============================================================================
 # DSPy Module
@@ -211,6 +231,8 @@ class MealPlanBuilder(dspy.Module):
         # Stage 1: Ingredient selection with FIXED densities
         self.chef = dspy.ChainOfThought(IdentifyIngredients)
         # Stage 2: Pure Python math (no LLM needed!)
+        # Stage 3: LLM-based household measure refinement
+        self.measure_converter = dspy.Predict(MeasureConverter)
     
     def _calculate_nutrition(self, ingredients: List[Ingredient]) -> Nutrition:
         """Calculate nutrition totals from ingredient list."""
@@ -393,6 +415,76 @@ class MealPlanBuilder(dspy.Module):
         # Standard Weight for everything else (Meat, Veggies, Cheese)
         return f"{int(grams)}g"
     
+    def _refine_household_measures(
+        self,
+        densities: List[IngredientDensity],
+        calculated_portions: List[IngredientPortion]
+    ) -> List[IngredientPortion]:
+        """
+        STAGE 3: LLM-Based Measure Refinement
+        
+        Refines the math-generated household measures using an LLM call.
+        The LLM considers brand information, natural language formatting,
+        and common kitchen measurements to produce more natural measures.
+        
+        Args:
+            densities: List of IngredientDensity from Stage 1 (contains unit_weight, unit_label, brand)
+            calculated_portions: List of IngredientPortion from Stage 2 (contains math-generated measures)
+        
+        Returns:
+            List of IngredientPortion with refined household_measure values
+        """
+        # Create a lookup map for densities (by item name)
+        densities_map = {d.item: d for d in densities}
+        
+        refined_portions = []
+        
+        for portion in calculated_portions:
+            # Find matching density to get unit_weight, unit_label, and brand
+            density = densities_map.get(portion.item)
+            if not density:
+                logger.warning(f"⚠️ No density found for '{portion.item}', keeping math-generated measure")
+                refined_portions.append(portion)
+                continue
+            
+            try:
+                # Extract unit information from density
+                unit_weight = getattr(density, "typical_unit_gram", 0) or 0
+                unit_label = getattr(density, "unit_label", "") or ""
+                brand_info = getattr(density, "brand_of_product", "") or ""
+                
+                # Call LLM to refine the measure
+                logger.debug(f"🔍 Refining measure for {portion.item}: {portion.portion_grams}g (unit: {unit_label}, brand: {brand_info})")
+                
+                prediction = self.measure_converter(
+                    ingredient_name=portion.item,
+                    grams=portion.portion_grams,
+                    brand_info=brand_info,
+                    unit_weight=unit_weight,
+                    unit_label=unit_label
+                )
+                
+                # Update the household measure with LLM output
+                refined_measure = prediction.household_measure.strip()
+                if refined_measure:
+                    refined_portions.append(IngredientPortion(
+                        item=portion.item,
+                        portion_grams=portion.portion_grams,
+                        household_measure=refined_measure
+                    ))
+                    logger.debug(f"✅ Refined '{portion.item}': {portion.household_measure} -> {refined_measure}")
+                else:
+                    # Fallback to math-generated measure if LLM returns empty
+                    logger.warning(f"⚠️ LLM returned empty measure for '{portion.item}', using math-generated")
+                    refined_portions.append(portion)
+            
+            except Exception as e:
+                # On error, keep the math-generated measure
+                logger.warning(f"⚠️ Error refining measure for '{portion.item}': {str(e)}, using math-generated")
+                refined_portions.append(portion)
+        
+        return refined_portions
+    
     def _get_allowed_margin(self, target_val: float) -> float:
         """
         MUST match backend's get_allowed_margin exactly.
@@ -557,10 +649,18 @@ class MealPlanBuilder(dspy.Module):
                 main_protein_source=option_data['main_protein_source']
             )
             
-            # Create lookup map for portions
-            portions_map = {p.item: p for p in calculated_portions}
+            # ===== STAGE 3: LLM-BASED MEASURE REFINEMENT =====
+            # Refine math-generated measures with natural language using LLM
+            logger.info(f"✨ Stage 3 (LLM Formatter): Refining household measures for {len(calculated_portions)} ingredients")
+            refined_portions = self._refine_household_measures(
+                densities=densities,
+                calculated_portions=calculated_portions
+            )
             
-            # ===== STAGE 3: PYTHON ASSEMBLY - Truth Calculation =====
+            # Create lookup map for portions (using refined measures)
+            portions_map = {p.item: p for p in refined_portions}
+            
+            # ===== STAGE 4: PYTHON ASSEMBLY - Truth Calculation =====
             # Use Python math (not LLM math) for final nutrition
             final_ingredients = []
             
