@@ -1607,10 +1607,10 @@ def get_client_meal_plan():
         response = second_supabase.table("client_meal_plans")\
             .select("*")\
             .eq("original_meal_plan_id", original_meal_plan_id)\
-            .maybeSingle()\
+            .limit(1)\
             .execute()
         
-        return jsonify(response.data if response.data else None), 200
+        return jsonify(response.data[0] if response.data and len(response.data) > 0 else None), 200
     except Exception as e:
         return handle_supabase_error(e, 'get_client_meal_plan')
 
@@ -1693,10 +1693,10 @@ def get_client():
         response = second_supabase.table("clients")\
             .select(select_fields)\
             .eq("user_code", user_code)\
-            .maybeSingle()\
+            .limit(1)\
             .execute()
         
-        return jsonify(response.data if response.data else None), 200
+        return jsonify(response.data[0] if response.data and len(response.data) > 0 else None), 200
     except Exception as e:
         return handle_supabase_error(e, 'get_client')
 
