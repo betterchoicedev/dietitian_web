@@ -735,7 +735,7 @@ export default function Layout() {
                         'Click to select and copy, or use the copy button. Clients who sign up using this link will be automatically assigned to you.'}
                     </p>
                     <Button
-                      onClick={handleCopyReferralLink}
+                      onClick={() => handleCopyReferralLink()}
                       className="mt-4 gap-2"
                       disabled={!userProfile?.id}
                     >
