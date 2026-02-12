@@ -1499,453 +1499,295 @@ def require_api_key(f):
     return decorated_function
 
 
+def _calculate_macros_from_calories(calories, calories_pct, daily_calories, daily_protein, daily_fat):
+    """
+    Calculate macros for a meal based on calories percentage (Python-based calculation).
+    
+    Args:
+        calories: Meal calories (can be calculated from calories_pct)
+        calories_pct: Percentage of daily calories for this meal (0-100)
+        daily_calories: Total daily calories target
+        daily_protein: Total daily protein target (grams)
+        daily_fat: Total daily fat target (grams)
+    
+    Returns:
+        Dict with calories, protein, fat, and carbs
+    """
+    # Calculate meal calories from percentage if not provided
+    if calories is None or calories == 0:
+        calories = (daily_calories * calories_pct) / 100.0
+    
+    # Calculate protein and fat based on calories percentage
+    protein = (daily_protein * calories_pct) / 100.0
+    fat = (daily_fat * calories_pct) / 100.0
+    
+    # Calculate carbs from remaining calories
+    # Formula: calories = (protein * 4) + (fat * 9) + (carbs * 4)
+    # So: carbs = (calories - (protein * 4) - (fat * 9)) / 4
+    carbs = (calories - (protein * 4) - (fat * 9)) / 4.0
+    
+    # Ensure carbs is not negative
+    if carbs < 0:
+        carbs = 0
+    
+    return {
+        "calories": round(calories, 1),
+        "protein": round(protein, 1),
+        "fat": round(fat, 1),
+        "carbs": round(carbs, 1)
+    }
+
+
 @app.route("/api/template", methods=["POST"])
 def api_template():
-
+    """
+    New template generation approach:
+    1. Get meal plan structure
+    2. Generate meal names (main and alternative) using AI
+    3. Calculate macros using Python (like DSPy)
+    4. Return template JSON
+    """
     try:
         data = request.get_json()
         user_code = data.get("user_code") if data else None
 
-        # Check if meal_plan_structure is provided with main + alternative already defined
+        # Get meal plan structure
         meal_structure = data.get("meal_structure") or data.get("meal_plan_structure")
 
         # If not provided in request, load from preferences
         if not meal_structure:
             preferences = load_user_preferences(user_code)
             meal_structure = preferences.get("meal_plan_structure", [])
-
-        # TYPE 1: If structure already has main + alternative, just format and return
-        if meal_structure and len(meal_structure) > 0:
-            first_meal = meal_structure[0]
-            if "main" in first_meal and "alternative" in first_meal:
-                logger.info(
-                    "📋 Type 1: Main and alternative already provided in meal_plan_structure, formatting..."
-                )
-
-                template = []
-                for meal_data in meal_structure:
-                    meal_name = meal_data.get("meal", "Unnamed Meal")
-                    main = meal_data.get("main", {})
-                    alternative = meal_data.get("alternative", {})
-
-                    # Extract protein source from description
-                    def extract_protein(desc):
-                        desc_lower = desc.lower() if desc else ""
-                        proteins = [
-                            "chicken",
-                            "beef",
-                            "steak",
-                            "turkey",
-                            "fish",
-                            "salmon",
-                            "tuna",
-                            "eggs",
-                            "egg",
-                            "tofu",
-                            "cottage cheese",
-                            "cheese",
-                            "yogurt",
-                        ]
-                        for protein in proteins:
-                            if protein in desc_lower:
-                                return protein
-                        return "protein"
-
-                    # Build main option
-                    main_option = {
-                        "name": main.get("description", f"{meal_name} Main"),
-                        "calories": main.get("calories", 0),
-                        "protein": main.get("protein", 0),
-                        "fat": main.get("fat", 0),
-                        "carbs": main.get("carbs", 0),
-                        "main_protein_source": extract_protein(main.get("description", "")),
-                    }
-
-                    # Build alternative option
-                    alt_option = {
-                        "name": alternative.get("description", f"{meal_name} Alternative"),
-                        "calories": alternative.get("calories", 0),
-                        "protein": alternative.get("protein", 0),
-                        "fat": alternative.get("fat", 0),
-                        "carbs": alternative.get("carbs", 0),
-                        "main_protein_source": extract_protein(alternative.get("description", "")),
-                    }
-
-                    template.append(
-                        {"meal": meal_name, "main": main_option, "alternative": alt_option}
-                    )
-
-                logger.info(f"✅ Type 1 template formatted with {len(template)} meals")
-                return jsonify({"template": template})
-
-    except Exception as e:
-        logger.error(f"❌ Exception checking Type 1 format: {e}")
-        # If Type 1 check fails, fall through to normal generation
-
-    # TYPE 2: Normal template generation with AI
-    max_retries = 4  # Build 4 templates before giving up
-    previous_issues = []  # Track issues from previous attempts
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            logger.info(f"🔄 Attempt {attempt}/{max_retries} to generate template")
-
-            if previous_issues:
-                logger.info(f"📋 Previous issues to address: {previous_issues}")
-
-            data = request.get_json()
-            user_code = data.get("user_code") if data else None
-            preferences = load_user_preferences(user_code)
-            # logger.info("🔹 Received user preferences for template:\n%s", json.dumps(preferences, indent=2, ensure_ascii=False))
-
-            region = preferences.get("region", "israel").lower()
-
-            # Region-specific ingredient instructions
-            region_instructions = {
-                "israel": "Focus on Israeli cuisine and products. Use Israeli brands (Tnuva, Osem, Strauss, Elite, Telma) and local foods (hummus, falafel, tahini, pita, sabich, shakshuka). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 150g-200g containers, hummus in 400g containers, pita bread is typically 60-80g per piece, Israeli cheese slices are 20-25g each, Bamba comes in 80g bags, Bissli in 100g bags. Use realistic Israeli portion sizes.",
-                "us": "Focus on American cuisine and products. Use American brands (Kraft, General Mills, Kellogg's, Pepsi) and typical American foods (bagels, cereals, sandwiches, burgers, mac and cheese). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 16oz (454g) containers, yogurt in 6-8oz (170-227g) containers, cream cheese in 8oz (227g) packages, American cheese slices are 21g each, bagels are 95-105g each.",
-                "uk": "Focus on British cuisine and products. Use British brands (Tesco, Sainsbury's, Heinz UK, Cadbury) and typical British foods (beans on toast, fish and chips, bangers and mash). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 300g containers, yogurt in 150-170g pots, British cheese slices are 25g each, bread slices are 35-40g each.",
-                "canada": "Focus on Canadian cuisine and products. Use Canadian brands (Loblaws, President's Choice, Tim Hortons) and typical Canadian foods (maple syrup dishes, poutine elements). IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 500g containers, yogurt in 175g containers, Canadian cheese slices are 22g each.",
-                "australia": "Focus on Australian cuisine and products. Use Australian brands (Woolworths, Coles, Arnott's, Vegemite) and typical Australian foods. IMPORTANT PORTION GUIDELINES: Cottage cheese comes in 250g containers, yogurt in 170g tubs, Australian cheese slices are 25g each.",
-            }
-
-            region_instruction = region_instructions.get(region, region_instructions["israel"])
-
-            # Build system prompt with previous issues feedback
-            previous_issues_text = ""
-
-            if previous_issues:
-                previous_issues_text = f"""
-
-**CRITICAL: PREVIOUS ATTEMPT FAILURES TO AVOID:**
-
-{chr(10).join([f"• {issue}" for issue in previous_issues])}
-
-**IMPORTANT: The above issues caused previous template generation to fail.**
-
-**You MUST address these specific problems in your new template.**
-
-**If the previous template had macro distribution issues, adjust your calculations accordingly.**
-
-**If there were dietary restriction violations, ensure strict compliance.**
-
-"""
-
-            system_prompt = f"""
-
-You are an expert nutritionist creating meal templates for users with specific dietary needs.
+        
+        if not meal_structure or len(meal_structure) == 0:
+            return jsonify({"error": "No meal plan structure provided"}), 400
+        
+        # Load user preferences for macro targets
+        preferences = load_user_preferences(user_code)
+        
+        # Get daily macro targets
+        def parse_macro(value):
+            if value is None:
+                return 0.0
+            try:
+                return float(str(value).replace("g", "").strip())
+            except (ValueError, TypeError):
+                return 0.0
+        
+        daily_calories = preferences.get("calories_per_day", 2000)
+        if daily_calories is None:
+            daily_calories = 2000
+        
+        macros = preferences.get("macros", {})
+        if not macros:
+            macros = {"protein": "150g", "fat": "80g"}
+        
+        daily_protein = parse_macro(macros.get("protein", "150g"))
+        daily_fat = parse_macro(macros.get("fat", "80g"))
+        
+        # Get region and constraints for AI
+        region = preferences.get("region", "israel").lower()
+        allergies = preferences.get("allergies", []) or []
+        limitations = preferences.get("limitations", []) or []
+        
+        allergies_list = ", ".join(allergies) if allergies else "None"
+        limitations_list = ", ".join(limitations) if limitations else "None"
+        
+        # Region-specific instructions
+        region_instructions = {
+            "israel": "Focus on Israeli cuisine and products. Use Israeli brands (Tnuva, Osem, Strauss, Elite, Telma) and local foods (hummus, falafel, tahini, pita, sabich, shakshuka).",
+            "us": "Focus on American cuisine and products. Use American brands (Kraft, General Mills, Kellogg's, Pepsi) and typical American foods (bagels, cereals, sandwiches, burgers, mac and cheese).",
+            "uk": "Focus on British cuisine and products. Use British brands (Tesco, Sainsbury's, Heinz UK, Cadbury) and typical British foods (beans on toast, fish and chips, bangers and mash).",
+            "canada": "Focus on Canadian cuisine and products. Use Canadian brands (Loblaws, President's Choice, Tim Hortons) and typical Canadian foods (maple syrup dishes, poutine elements).",
+            "australia": "Focus on Australian cuisine and products. Use Australian brands (Woolworths, Coles, Arnott's, Vegemite) and typical Australian foods.",
+        }
+        region_instruction = region_instructions.get(region, region_instructions["israel"])
+        
+        # Build system prompt for meal name generation
+        system_prompt = f"""You are an expert nutritionist generating meal names for a meal plan.
 
 **CRITICAL: ALL OUTPUT MUST BE IN ENGLISH ONLY**
-• All meal names MUST be in English (e.g., "Breakfast", "Lunch", "Dinner", "Morning Snack")
-• All dish names MUST be in English (e.g., "Scrambled Eggs with Toast", "Grilled Chicken Salad")
+• All meal names MUST be in English (e.g., "Scrambled Eggs with Toast", "Grilled Chicken Salad")
 • All protein sources MUST be in English (e.g., "eggs", "chicken", "yogurt", "salmon")
 • NEVER use Hebrew, Arabic, or any other language
-• Even for regional foods, use English names (e.g., "Pita Bread" not "פיתה", "Hummus" not "חומוס")
 
-{region_instructions}
+{region_instruction}
 
-──────────────────────  MEAL STRUCTURE & NAMING  ─────────────────────
+**DIETARY CONSTRAINTS:**
+• ALLERGIES (LIFE THREATENING - ZERO TOLERANCE): {allergies_list}
+• DIETARY LIMITATIONS: {limitations_list}
 
-• Always include the three main meals – Breakfast, Lunch, Dinner – unless
+**MAIN vs ALTERNATIVE RULES:**
+• Alternative meal must differ from main meal in:
+  1. Protein source (different protein)
+  2. Carb base (different carb source)
+  3. Cooking method (different preparation)
+  4. Flavour profile (different cuisine style)
+• Never repeat the same core ingredient in both options
 
-the user specifies a different pattern (e.g., two meals a day, six meals, etc.).• Add snacks exactly where the user prefers (before/after any main meal).🔹 Meal names must be unique – no duplicates across the day.• If the user supplies custom names/times, honour them exactly.• If the user provides no names at all, generate clear, logical defaults (e.g., "Breakfast", "Morning Snack", "Lunch", "Afternoon Snack", "Dinner", "Pre-Workout Snack") while respecting how many meals were requested (1 – 10).
-
-• Main meals = Breakfast, Lunch, Dinner.
-
-Anything else is treated as a snack.
-
-───────────────────────────  NEW INPUTS  ────────────────────────────
-
-• meal_structure  – array of objects, each with:
-
-    – meal            (string, unique)
-
-    – calories_pct    (number, 0-100, sums to 100)
-
-──────────────────  CALORIE & MACRO DISTRIBUTION  ───────────────────
-**DO NOT CHANGE THE DAILY CALORIES, PROTEIN, AND FAT**
-
-• Use the supplied *meal_structure* to distribute calories, protein, and fat.
-
-  For each meal *i*:
-
-    1. protein_i = daily_protein × (calories_pct_i ÷ 100)
-
-    2. fat_i = daily_fat × (calories_pct_i ÷ 100)
-
-    3. Round to the nearest whole number
-
-──────────────────  MAIN vs ALTERNATIVE MEALS  ───────────────────────
-
-Alternative meal rule:Each alternative must differ from its main meal in all of the following:(1) protein source (2) carb base (3) cooking method (4) flavour profile.Never repeat the same core ingredient in both options.
-
-──────────────────────────  PREFERENCE LOGIC  ─────────────────────────
-
-• Omit anything in food_allergies or "dislikes …" items.• Feature every "likes / loves …" item exactly once across the day.• Do not repeat the same primary ingredient across meals.
-
-────────────────────  ADDITIONAL GENERATION RULES  ───────────────────
-
-• For every meal output two options (main & alternative) using everyday ingredients that respect restrictions, allergies, and preferences.
-
-• Focus on practical, realistic meal options with clear main protein sources.
-
-──────────────────────────  RESPONSE FORMAT  ──────────────────────────
-
-Return valid JSON only – no Markdown fences, no commentary.
-**REMEMBER: ALL text fields (meal, name, main_protein_source) MUST be in ENGLISH only.**
+**OUTPUT FORMAT:**
+Return ONLY valid JSON - no markdown, no commentary.
 
 Schema:
+{{
+  "main_name": "<English dish name for main option>",
+  "alternative_name": "<English dish name for alternative option>",
+  "main_protein_source": "<English protein name for main>",
+  "alternative_protein_source": "<English protein name for alternative>"
+}}
+
+**EXAMPLES:**
+{{
+  "main_name": "Scrambled Eggs with Whole Wheat Toast",
+  "alternative_name": "Greek Yogurt with Berries and Granola",
+  "main_protein_source": "eggs",
+  "alternative_protein_source": "yogurt"
+}}
 
 {{
-
-"template": [
-
-{{
-
-"meal": "<English meal name>",
-
-"main": {{
-
-"name": "<English dish name>",
-
-"calories": <number>,
-
-"protein": <number>,
-
-"fat": <number>,
-
-"main_protein_source": "<English protein name>"
-
-}},
-
-"alternative": {{
-
-"name": "<English dish name>",
-
-"calories": <number>,
-
-"protein": <number>,
-
-"fat": <number>,
-
-"main_protein_source": "<English protein name>"
-
-}}
-
-}},
-
-… one object per meal …
-
-]
-
-}}
-
-──────────────────────────────  EXAMPLE  ──────────────────────────────
-
-(Shortened to two meals for illustration – use the full list in practise)
-
-{{
-
-"template": [
-
-{{
-
-"meal": "Breakfast",
-
-"main": {{
-
-"name": "Scrambled Eggs with Toast",
-
-"calories": 500,
-
-"protein": 38,
-
-"fat": 21,
-
-"main_protein_source": "eggs"
-
-}},
-
-"alternative": {{
-
-"name": "Greek Yogurt with Berries",
-
-"calories": 500,
-
-"protein": 38,
-
-"fat": 21,
-
-"main_protein_source": "yogurt"
-
-}}
-
-}},
-
-{{
-
-"meal": "Lunch",
-
-"main": {{
-
-"name": "Grilled Chicken & Quinoa Salad",
-
-"calories": 600,
-
-"protein": 45,
-
-"fat": 20,
-
-"main_protein_source": "chicken"
-
-}},
-
-"alternative": {{
-
-"name": "Baked Salmon with Sweet Potato",
-
-"calories": 600,
-
-"protein": 45,
-
-"fat": 20,
-
-"main_protein_source": "salmon"
-
-}}
-
-}}
-
-]
-
-}}
-
-Generate meal options that are practical, delicious, and respect all dietary restrictions and preferences.
-
-"""
-            user_prompt = {
-                "role": "user",
-                "content": f"User preferences: {json.dumps(preferences, ensure_ascii=False)}",
-            }
-
-            # logger.info("🧠 Sending to OpenAI (/template):\nSystem: %s\nUser: %s", system_prompt, user_prompt["content"])
-
-            # NOTE: Template generator uses 'deployment' variable (default: "obi2")
-            # If you want to use a different model for template generation only,
-            # you can override 'deployment' here or use a separate variable
-            response = client.chat.completions.create(
-                model=deployment,
-                messages=[{"role": "system", "content": system_prompt}, user_prompt],
-            )
-
-            result = response.choices[0].message.content
-            logger.info("✅ Raw response from OpenAI (/template):\n%s", result)
-
-            try:
-                parsed = json.loads(result)
-                logger.info("✅ Parsed template successfully on attempt %d.", attempt)
-
-                # Add debugging for template structure
-                template = parsed.get("template", [])
-
-                if template:
-                    # logger.info(f"🔍 Template has {len(template)} meals")
-
-                    for i, meal in enumerate(template):
-                        meal_name = meal.get("meal", "Unknown")
-                        # logger.info(f"🔍 Meal {i+1}: {meal_name}")
-
-                    meal_count = preferences.get("meal_count", 5)
-                    logger.info(f"✅ Meal names validated for {meal_count} meals")
-
-                # Validate the template before returning
-                if template:
-                    # Test validation to catch issues early
-                    val_res = app.test_client().post(
-                        "/api/validate-template",
-                        json={"template": template, "user_code": user_code},
-                    )
-
-                    val_data = val_res.get_json()
-
-                    if val_data.get("is_valid"):
-                        logger.info("✅ Template passes validation on attempt %d.", attempt)
-                        return jsonify(parsed)
-                    else:
-                        # Collect issues for next attempt
-                        main_issues = val_data.get("issues_main", [])
-                        alt_issues = val_data.get("issues_alt", [])
-                        main_alt_issues = val_data.get("issues_main_alt", [])
-                        similarity_issues = val_data.get("issues_similarity", [])
-
-                        new_issues = main_issues + alt_issues + main_alt_issues + similarity_issues
-
-                        if new_issues:
-                            previous_issues = new_issues
-
-                            logger.warning(
-                                "❌ Template validation failed on attempt %d. Issues: %s",
-                                attempt,
-                                new_issues,
-                            )
-
-                            if attempt < max_retries:
-                                logger.info(
-                                    f"🔄 Retrying template generation with issues feedback..."
-                                )
-                                continue
-                            else:
-                                logger.warning(
-                                    "⚠️ Returning template despite validation failure after all attempts"
-                                )
-                                return jsonify(parsed)
-                        else:
-                            return jsonify(parsed)
-                else:
-                    logger.error("❌ No template found in parsed response")
-
-                    if attempt < max_retries:
-                        previous_issues = ["No template structure found in response"]
-                        continue
-                    else:
-                        return (
-                            jsonify({"error": "No valid template generated after all attempts"}),
-                            500,
-                        )
-
-            except json.JSONDecodeError:
-                logger.error(
-                    "❌ JSON decode error in /api/template (attempt %d):\n%s", attempt, result
-                )
-
-                if attempt < max_retries:
-                    previous_issues = ["Invalid JSON response from AI"]
-                    logger.info(f"🔄 Retrying template generation due to JSON decode error...")
-                    continue
-                else:
-                    return (
-                        jsonify(
-                            {"error": "Invalid JSON from OpenAI after all attempts", "raw": result}
-                        ),
-                        500,
-                    )
-
-        except Exception as e:
-            logger.error(
-                "❌ Exception in /api/template (attempt %d):\n%s", attempt, traceback.format_exc()
-            )
-
-            if attempt < max_retries:
-                previous_issues = [f"Exception occurred: {str(e)}"]
-                logger.info(f"🔄 Retrying template generation due to exception...")
+  "main_name": "Grilled Chicken & Quinoa Salad",
+  "alternative_name": "Baked Salmon with Sweet Potato",
+  "main_protein_source": "chicken",
+  "alternative_protein_source": "salmon"
+}}"""
+        
+        template = []
+        
+        # Process each meal in the structure
+        for meal_data in meal_structure:
+            meal_name = meal_data.get("meal", "Unnamed Meal")
+            calories_pct = meal_data.get("calories_pct", 0)
+            description = meal_data.get("description", "")
+            
+            if calories_pct == 0:
+                logger.warning(f"⚠️ Meal '{meal_name}' has 0% calories, skipping")
                 continue
-            else:
-                return jsonify({"error": str(e)}), 500
+            
+            # Calculate macros using Python
+            macros_calculated = _calculate_macros_from_calories(
+                calories=None,  # Will be calculated from calories_pct
+                calories_pct=calories_pct,
+                daily_calories=daily_calories,
+                daily_protein=daily_protein,
+                daily_fat=daily_fat
+            )
+            
+            # Generate meal names using AI
+            user_prompt = f"""Generate meal names for:
+- Meal Type: {meal_name}
+- Description: {description if description else "No specific description"}
+- Calories: {macros_calculated['calories']} kcal
+- Protein: {macros_calculated['protein']}g
+- Fat: {macros_calculated['fat']}g
+- Carbs: {macros_calculated['carbs']}g
 
-    # If we get here, all attempts failed
-    logger.error("❌ All %d attempts to generate template failed", max_retries)
-
-    return jsonify({"error": f"Failed to generate template after {max_retries} attempts"}), 500
+Generate a main option and an alternative option that are different in protein source, carb base, cooking method, and flavour profile."""
+            
+            result_text = None
+            try:
+                response = client.chat.completions.create(
+                    model=deployment,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    max_tokens=300,
+                    temperature=0.7
+                )
+                
+                result_text = response.choices[0].message.content
+                logger.info(f"✅ AI response for '{meal_name}': {result_text}")
+                
+                # Parse JSON response
+                cleaned_result = _strip_markdown_fences(result_text)
+                meal_names = json.loads(cleaned_result)
+                
+                # Build main option
+                main_option = {
+                    "name": meal_names.get("main_name", f"{meal_name} Main"),
+                    "calories": macros_calculated["calories"],
+                    "protein": macros_calculated["protein"],
+                    "fat": macros_calculated["fat"],
+                    "carbs": macros_calculated["carbs"],
+                    "main_protein_source": meal_names.get("main_protein_source", "protein")
+                }
+                
+                # Build alternative option
+                alt_option = {
+                    "name": meal_names.get("alternative_name", f"{meal_name} Alternative"),
+                    "calories": macros_calculated["calories"],
+                    "protein": macros_calculated["protein"],
+                    "fat": macros_calculated["fat"],
+                    "carbs": macros_calculated["carbs"],
+                    "main_protein_source": meal_names.get("alternative_protein_source", "protein")
+                }
+                
+                template.append({
+                    "meal": meal_name,
+                    "main": main_option,
+                    "alternative": alt_option
+                })
+                
+                logger.info(f"✅ Generated template for '{meal_name}': Main={main_option['name']}, Alt={alt_option['name']}")
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Failed to parse AI response for '{meal_name}': {e}")
+                if result_text:
+                    logger.error(f"Raw response: {result_text}")
+                # Fallback: use default names
+                main_option = {
+                    "name": f"{meal_name} Main",
+                    "calories": macros_calculated["calories"],
+                    "protein": macros_calculated["protein"],
+                    "fat": macros_calculated["fat"],
+                    "carbs": macros_calculated["carbs"],
+                    "main_protein_source": "protein"
+                }
+                alt_option = {
+                    "name": f"{meal_name} Alternative",
+                    "calories": macros_calculated["calories"],
+                    "protein": macros_calculated["protein"],
+                    "fat": macros_calculated["fat"],
+                    "carbs": macros_calculated["carbs"],
+                    "main_protein_source": "protein"
+                }
+                template.append({
+                    "meal": meal_name,
+                    "main": main_option,
+                    "alternative": alt_option
+                })
+            except Exception as e:
+                logger.error(f"❌ Error generating meal names for '{meal_name}': {e}")
+                # Fallback: use default names
+                main_option = {
+                    "name": f"{meal_name} Main",
+                    "calories": macros_calculated["calories"],
+                    "protein": macros_calculated["protein"],
+                    "fat": macros_calculated["fat"],
+                    "carbs": macros_calculated["carbs"],
+                    "main_protein_source": "protein"
+                }
+                alt_option = {
+                    "name": f"{meal_name} Alternative",
+                    "calories": macros_calculated["calories"],
+                    "protein": macros_calculated["protein"],
+                    "fat": macros_calculated["fat"],
+                    "carbs": macros_calculated["carbs"],
+                    "main_protein_source": "protein"
+                }
+                template.append({
+                    "meal": meal_name,
+                    "main": main_option,
+                    "alternative": alt_option
+                })
+        
+        logger.info(f"✅ Generated template with {len(template)} meals using new approach")
+        return jsonify({"template": template})
+        
+    except Exception as e:
+        logger.error(f"❌ Exception in /api/template: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
 
 
 def calculate_totals(meals):
