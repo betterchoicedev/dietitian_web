@@ -449,6 +449,7 @@ const EditableIngredient = ({
   alternativeIndex,
   translations,
   autoFocus = false,
+  onPortionDialog,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
@@ -584,70 +585,138 @@ const EditableIngredient = ({
     }
   };
 
-  const handleBlur = () => {
-    // Always revert to original value - only database suggestions should trigger changes
-    setEditValue(originalValue);
-    setIsEditing(false);
-    setShowSuggestions(false);
-    setSuggestions([]);
+  const handleBlur = (e) => {
+    // Don't close if clicking on suggestions dropdown
+    if (e.relatedTarget && e.relatedTarget.closest('.suggestions-dropdown')) {
+      return;
+    }
+    // Use setTimeout to allow click events to fire first
+    setTimeout(() => {
+      // Always revert to original value - only database suggestions should trigger changes
+      setEditValue(originalValue);
+      setIsEditing(false);
+      setShowSuggestions(false);
+      setSuggestions([]);
+    }, 200);
   };
 
+  const handleSelectRef = useRef(false);
+  
   const handleSelect = async (suggestion) => {
+    // Prevent multiple rapid calls
+    if (handleSelectRef.current) {
+      return;
+    }
+    handleSelectRef.current = true;
+    
+    let updatedValues;
+    
     try {
-      let updatedValues;
-      
       // Check if this is from the enhanced API (MenuCreate style)
       if (suggestion.hebrew && suggestion.english) {
-        const response = await fetch(`https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`);
-        if (response.ok) {
-          const nutritionData = await response.json();
-          updatedValues = {
-            item: suggestion.hebrew || suggestion.english,
-            household_measure: suggestion.household_measure || '',
-            calories: nutritionData.Energy || 0,
-            protein: nutritionData.Protein || 0,
-            fat: nutritionData.Total_lipid__fat_ || 0,
-            carbs: nutritionData.Carbohydrate__by_difference || 0,
-            'brand of pruduct': nutritionData.brand || ''
-          };
-        } else {
-          // Fallback to basic data
-          updatedValues = {
-            item: suggestion.hebrew || suggestion.english,
-            household_measure: suggestion.household_measure || '',
-            calories: 0,
-            protein: 0,
-            fat: 0,
-            carbs: 0,
-            'brand of pruduct': ''
-          };
+        // Use nutrition data from suggestion first (it's already available from the database)
+        let nutritionData = {
+          Energy: suggestion.calories || 0,
+          Protein: suggestion.protein || 0,
+          Total_lipid__fat_: suggestion.fat || 0,
+          Carbohydrate__by_difference: suggestion.carbs || 0,
+          brand: suggestion.brand || ''
+        };
+        
+        // Try to fetch additional data from API if suggestion doesn't have complete data
+        if (!suggestion.calories || suggestion.calories === 0) {
+          try {
+            const response = await fetch(`https://sqlservice-erdve2fpeda4f5hg.eastus2-01.azurewebsites.net/api/ingredient-nutrition?name=${encodeURIComponent(suggestion.english)}`);
+            if (response.ok) {
+              const apiData = await response.json();
+              // Merge API data, but prefer suggestion data if it exists
+              nutritionData = {
+                Energy: nutritionData.Energy || apiData.Energy || 0,
+                Protein: nutritionData.Protein || apiData.Protein || 0,
+                Total_lipid__fat_: nutritionData.Total_lipid__fat_ || apiData.Total_lipid__fat_ || 0,
+                Carbohydrate__by_difference: nutritionData.Carbohydrate__by_difference || apiData.Carbohydrate__by_difference || 0,
+                brand: nutritionData.brand || apiData.brand || ''
+              };
+            }
+          } catch (apiError) {
+            console.warn('⚠️ Failed to fetch nutrition data from API, using suggestion data:', apiError);
+          }
         }
+        
+        updatedValues = {
+          item: suggestion.hebrew || suggestion.english,
+          item_english: suggestion.english,
+          item_hebrew: suggestion.hebrew,
+          household_measure: suggestion.household_measure || '',
+          calories: nutritionData.Energy || suggestion.calories || 0,
+          protein: nutritionData.Protein || suggestion.protein || 0,
+          fat: nutritionData.Total_lipid__fat_ || suggestion.fat || 0,
+          carbs: nutritionData.Carbohydrate__by_difference || suggestion.carbs || 0,
+          'brand of pruduct': nutritionData.brand || '',
+          'portionSI(gram)': suggestion['portionSI(gram)'] || null
+        };
+        
         setEditValue(suggestion.hebrew || suggestion.english);
       } else {
         // Handle original API format
         const nutritionData = {
-          calories: Math.round(suggestion.Energy || 0),
-          protein: Math.round(suggestion.Protein || 0),
-          fat: Math.round(suggestion.Fat || 0),
-          carbs: Math.round(suggestion.Carbohydrate__by_difference || 0)
+          calories: Math.round(suggestion.Energy || suggestion.calories || 0),
+          protein: Math.round(suggestion.Protein || suggestion.protein || 0),
+          fat: Math.round(suggestion.Fat || suggestion.fat || 0),
+          carbs: Math.round(suggestion.Carbohydrate__by_difference || suggestion.carbs || 0)
         };
 
         updatedValues = {
           item: suggestion.name,
+          item_english: suggestion.name,
+          item_hebrew: suggestion.name,
           household_measure: suggestion.household_measure || '',
           ...nutritionData,
-          'brand of pruduct': ''
+          'brand of pruduct': '',
+          'portionSI(gram)': suggestion['portionSI(gram)'] || null
         };
         setEditValue(suggestion.name);
       }
-
-      onChange(updatedValues, mealIndex, optionIndex, ingredientIndex, alternativeIndex);
-      setShowSuggestions(false);
-      setIsEditing(false);
-      setSuggestions([]);
     } catch (error) {
-      console.error('Error fetching nutrition data:', error);
+      console.error('❌ Error in handleSelect:', error);
+      // Create basic updatedValues even if everything fails
+      updatedValues = {
+        item: suggestion.hebrew || suggestion.english || suggestion.name || '',
+        item_english: suggestion.english || suggestion.name || '',
+        item_hebrew: suggestion.hebrew || suggestion.name || '',
+        household_measure: suggestion.household_measure || '',
+        calories: suggestion.calories || 0,
+        protein: suggestion.protein || 0,
+        fat: suggestion.fat || 0,
+        carbs: suggestion.carbs || 0,
+        'brand of pruduct': '',
+        'portionSI(gram)': suggestion['portionSI(gram)'] || null
+      };
     }
+    
+    if (onPortionDialog) {
+      console.log('✅ Opening portion dialog...');
+      try {
+        onPortionDialog(updatedValues, mealIndex, optionIndex, ingredientIndex, alternativeIndex);
+      } catch (error) {
+        console.error('❌ Error opening portion dialog:', error);
+        // Fallback to direct update if dialog fails
+        onChange(updatedValues, mealIndex, optionIndex, ingredientIndex, alternativeIndex);
+      }
+    } else {
+      console.log('⚠️ No onPortionDialog handler, directly updating ingredient');
+      // If no dialog handler, directly update the ingredient
+      onChange(updatedValues, mealIndex, optionIndex, ingredientIndex, alternativeIndex);
+    }
+
+    setShowSuggestions(false);
+    setIsEditing(false);
+    setSuggestions([]);
+    
+    // Reset flag after a short delay
+    setTimeout(() => {
+      handleSelectRef.current = false;
+    }, 500);
   };
 
   const startEditing = () => {
@@ -697,13 +766,23 @@ const EditableIngredient = ({
         </div>
       )}
       
-      {showSuggestions && suggestions.length > 0 && (
-        <div className="absolute z-50 w-64 bg-white border border-gray-300 rounded-md shadow-lg mt-1">
-          {suggestions.map((suggestion, idx) => (
+      {showSuggestions && suggestions.length > 0 && (() => {
+        return (
+          <div 
+            className="suggestions-dropdown absolute z-50 w-64 bg-white border border-gray-300 rounded-md shadow-lg mt-1"
+            onMouseDown={(e) => {
+              e.preventDefault(); // Prevent input blur
+            }}
+          >
+            {suggestions.map((suggestion, idx) => (
             <div
               key={idx}
               className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
-              onClick={() => handleSelect(suggestion)}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleSelect(suggestion);
+              }}
             >
               {suggestion.hebrew && suggestion.english ? (
                 <div className="flex flex-col">
@@ -719,9 +798,10 @@ const EditableIngredient = ({
                 </div>
               )}
             </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        );
+      })()}
     </div>
   );
 };
@@ -3751,6 +3831,7 @@ const MenuLoad = () => {
                         alternativeIndex={option.alternativeIndex}
                         translations={translations}
                         autoFocus={ingredient.item === ''}
+                        onPortionDialog={handleOpenPortionDialog}
                       />
                       <div className="flex items-center gap-1">
                         {ingredient['portionSI(gram)'] && (
