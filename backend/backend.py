@@ -1603,8 +1603,28 @@ def api_template():
         }
         region_instruction = region_instructions.get(region, region_instructions["israel"])
         
-        # Build system prompt for meal name generation
-        system_prompt = f"""You are an expert nutritionist generating meal names for a meal plan.
+        # Build system prompt for translating main meal description to English
+        translate_prompt = f"""You are a translator and nutritionist. Translate meal descriptions to proper English meal names.
+
+**CRITICAL: ALL OUTPUT MUST BE IN ENGLISH ONLY**
+• Translate Hebrew/Arabic descriptions to English
+• Preserve the client's food preferences and intent
+• Make it a proper, appetizing meal name in English
+• Example: "סלט עם ביצים קשות" → "Hard Boiled Eggs with Mixed Salad"
+• Example: "yogurt with granola" → "Yogurt with Granola and Fresh Berries"
+• Example: "meatballs with rice" → "Beef Meatballs with Rice and Tomato Sauce"
+
+**OUTPUT FORMAT:**
+Return ONLY valid JSON - no markdown, no commentary.
+
+Schema:
+{{
+  "main_name": "<English meal name>",
+  "main_protein_source": "<protein source in English>"
+}}"""
+        
+        # Build system prompt for alternative meal generation only
+        alt_system_prompt = f"""You are an expert nutritionist generating alternative meal names for a meal plan.
 
 **CRITICAL: ALL OUTPUT MUST BE IN ENGLISH ONLY**
 • All meal names MUST be in English (e.g., "Scrambled Eggs with Toast", "Grilled Chicken Salad")
@@ -1617,41 +1637,26 @@ def api_template():
 • ALLERGIES (LIFE THREATENING - ZERO TOLERANCE): {allergies_list}
 • DIETARY LIMITATIONS: {limitations_list}
 
-**MAIN vs ALTERNATIVE RULES:**
+**ALTERNATIVE MEAL RULES:**
 • Alternative meal must differ from main meal in:
   1. Protein source (different protein)
   2. Carb base (different carb source)
   3. Cooking method (different preparation)
   4. Flavour profile (different cuisine style)
 • Never repeat the same core ingredient in both options
+• Must be UNIQUE - not the same as any previously generated alternative
 
 **OUTPUT FORMAT:**
 Return ONLY valid JSON - no markdown, no commentary.
 
 Schema:
 {{
-  "main_name": "<English dish name for main option>",
   "alternative_name": "<English dish name for alternative option>",
-  "main_protein_source": "<English protein name for main>",
   "alternative_protein_source": "<English protein name for alternative>"
-}}
-
-**EXAMPLES:**
-{{
-  "main_name": "Scrambled Eggs with Whole Wheat Toast",
-  "alternative_name": "Greek Yogurt with Berries and Granola",
-  "main_protein_source": "eggs",
-  "alternative_protein_source": "yogurt"
-}}
-
-{{
-  "main_name": "Grilled Chicken & Quinoa Salad",
-  "alternative_name": "Baked Salmon with Sweet Potato",
-  "main_protein_source": "chicken",
-  "alternative_protein_source": "salmon"
 }}"""
         
         template = []
+        generated_alternatives = []  # Track all generated alternatives to avoid duplicates
         
         # Process each meal in the structure
         for meal_data in meal_structure:
@@ -1672,114 +1677,148 @@ Schema:
                 daily_fat=daily_fat
             )
             
-            # Generate meal names using AI
-            user_prompt = f"""Generate meal names for:
+            # STEP 1: Translate main meal description to English
+            main_meal_name = None
+            main_protein_source = None
+            
+            if description:
+                try:
+                    translate_user_prompt = f"""Translate this meal description to a proper English meal name:
+
+**DESCRIPTION:** {description}
+
+**MEAL TYPE:** {meal_name}
+
+Return a proper, appetizing English meal name that preserves the client's food preferences."""
+                    
+                    translate_response = client.chat.completions.create(
+                        model=deployment,
+                        messages=[
+                            {"role": "system", "content": translate_prompt},
+                            {"role": "user", "content": translate_user_prompt}
+                        ],
+                        max_tokens=150,
+                        temperature=0.3
+                    )
+                    
+                    translate_result = translate_response.choices[0].message.content
+                    cleaned_translate = _strip_markdown_fences(translate_result)
+                    translate_data = json.loads(cleaned_translate)
+                    main_meal_name = translate_data.get("main_name", description)
+                    main_protein_source = translate_data.get("main_protein_source", "protein")
+                    
+                    logger.info(f"✅ Translated main meal: '{description}' → '{main_meal_name}'")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to translate description, using as-is: {e}")
+                    main_meal_name = description
+                    # Extract protein source from name
+                    name_lower = description.lower()
+                    proteins = [
+                        "chicken", "beef", "steak", "turkey", "fish", "salmon", "tuna",
+                        "eggs", "egg", "tofu", "cottage cheese", "cheese", "yogurt",
+                        "lentils", "beans", "quinoa", "meat", "poultry", "hummus", "falafel"
+                    ]
+                    main_protein_source = "protein"
+                    for protein in proteins:
+                        if protein in name_lower:
+                            main_protein_source = protein
+                            break
+            else:
+                main_meal_name = f"{meal_name} Main"
+                main_protein_source = "protein"
+            
+            # STEP 2: Generate alternative meal using AI based on main meal
+            alt_result_text = None
+            alt_meal_name = None
+            alt_protein_source = None
+            
+            try:
+                alt_prompt = f"""Generate a DIFFERENT alternative meal for this specific main dish:
+
+**MAIN DISH:** {main_meal_name}
+**MAIN PROTEIN SOURCE:** {main_protein_source}
+
+**MEAL DETAILS:**
 - Meal Type: {meal_name}
-- Description: {description if description else "No specific description"}
 - Calories: {macros_calculated['calories']} kcal
 - Protein: {macros_calculated['protein']}g
 - Fat: {macros_calculated['fat']}g
 - Carbs: {macros_calculated['carbs']}g
 
-Generate a main option and an alternative option that are different in protein source, carb base, cooking method, and flavour profile."""
-            
-            result_text = None
-            try:
-                response = client.chat.completions.create(
+**PREVIOUSLY GENERATED ALTERNATIVES (MUST AVOID DUPLICATES):**
+{chr(10).join([f"- {alt}" for alt in generated_alternatives]) if generated_alternatives else "None yet"}
+
+**REQUIREMENTS:**
+- Generate a COMPLETELY DIFFERENT meal from the main dish "{main_meal_name}"
+- Must differ in: protein source, carb base, cooking method, and flavour profile
+- Must be UNIQUE - not the same as any previously generated alternative listed above
+- Return ONLY a JSON object with: {{"alternative_name": "<English meal name>", "alternative_protein_source": "<protein source>"}}"""
+                
+                alt_response = client.chat.completions.create(
                     model=deployment,
                     messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
+                        {"role": "system", "content": alt_system_prompt},
+                        {"role": "user", "content": alt_prompt}
                     ],
-                    max_tokens=300,
-                    temperature=0.7
+                    max_tokens=200,
+                    temperature=0.8  # Higher temperature for more variety
                 )
                 
-                result_text = response.choices[0].message.content
-                logger.info(f"✅ AI response for '{meal_name}': {result_text}")
+                alt_result_text = alt_response.choices[0].message.content
+                logger.info(f"✅ AI response for alternative '{meal_name}': {alt_result_text}")
                 
                 # Parse JSON response
-                cleaned_result = _strip_markdown_fences(result_text)
-                meal_names = json.loads(cleaned_result)
+                cleaned_alt = _strip_markdown_fences(alt_result_text)
+                alt_data = json.loads(cleaned_alt)
+                alt_meal_name = alt_data.get("alternative_name", f"{meal_name} Alternative")
+                alt_protein_source = alt_data.get("alternative_protein_source", "protein")
                 
-                # Build main option
-                main_option = {
-                    "name": meal_names.get("main_name", f"{meal_name} Main"),
-                    "calories": macros_calculated["calories"],
-                    "protein": macros_calculated["protein"],
-                    "fat": macros_calculated["fat"],
-                    "carbs": macros_calculated["carbs"],
-                    "main_protein_source": meal_names.get("main_protein_source", "protein")
-                }
+                # Track this alternative to avoid duplicates
+                generated_alternatives.append(alt_meal_name)
                 
-                # Build alternative option
-                alt_option = {
-                    "name": meal_names.get("alternative_name", f"{meal_name} Alternative"),
-                    "calories": macros_calculated["calories"],
-                    "protein": macros_calculated["protein"],
-                    "fat": macros_calculated["fat"],
-                    "carbs": macros_calculated["carbs"],
-                    "main_protein_source": meal_names.get("alternative_protein_source", "protein")
-                }
-                
-                template.append({
-                    "meal": meal_name,
-                    "main": main_option,
-                    "alternative": alt_option
-                })
-                
-                logger.info(f"✅ Generated template for '{meal_name}': Main={main_option['name']}, Alt={alt_option['name']}")
+                logger.info(f"✅ Generated alternative meal name: {alt_meal_name}")
                 
             except json.JSONDecodeError as e:
                 logger.error(f"❌ Failed to parse AI response for '{meal_name}': {e}")
-                if result_text:
-                    logger.error(f"Raw response: {result_text}")
-                # Fallback: use default names
-                main_option = {
-                    "name": f"{meal_name} Main",
-                    "calories": macros_calculated["calories"],
-                    "protein": macros_calculated["protein"],
-                    "fat": macros_calculated["fat"],
-                    "carbs": macros_calculated["carbs"],
-                    "main_protein_source": "protein"
-                }
-                alt_option = {
-                    "name": f"{meal_name} Alternative",
-                    "calories": macros_calculated["calories"],
-                    "protein": macros_calculated["protein"],
-                    "fat": macros_calculated["fat"],
-                    "carbs": macros_calculated["carbs"],
-                    "main_protein_source": "protein"
-                }
-                template.append({
-                    "meal": meal_name,
-                    "main": main_option,
-                    "alternative": alt_option
-                })
+                if alt_result_text:
+                    logger.error(f"Raw response: {alt_result_text}")
+                # Fallback: generate unique alternative name
+                alt_meal_name = f"{meal_name} Alternative {len(generated_alternatives) + 1}"
+                alt_protein_source = "protein"
+                generated_alternatives.append(alt_meal_name)
+                
             except Exception as e:
-                logger.error(f"❌ Error generating meal names for '{meal_name}': {e}")
-                # Fallback: use default names
-                main_option = {
-                    "name": f"{meal_name} Main",
-                    "calories": macros_calculated["calories"],
-                    "protein": macros_calculated["protein"],
-                    "fat": macros_calculated["fat"],
-                    "carbs": macros_calculated["carbs"],
-                    "main_protein_source": "protein"
-                }
-                alt_option = {
-                    "name": f"{meal_name} Alternative",
-                    "calories": macros_calculated["calories"],
-                    "protein": macros_calculated["protein"],
-                    "fat": macros_calculated["fat"],
-                    "carbs": macros_calculated["carbs"],
-                    "main_protein_source": "protein"
-                }
-                template.append({
-                    "meal": meal_name,
-                    "main": main_option,
-                    "alternative": alt_option
-                })
+                logger.error(f"❌ Error generating alternative meal name for '{meal_name}': {e}")
+                # Fallback: generate unique alternative name
+                alt_meal_name = f"{meal_name} Alternative {len(generated_alternatives) + 1}"
+                alt_protein_source = "protein"
+                generated_alternatives.append(alt_meal_name)
+            
+            # Build main option (format: fat, name, protein, calories, main_protein_source)
+            main_option = {
+                "fat": round(macros_calculated["fat"]),
+                "name": main_meal_name,
+                "protein": round(macros_calculated["protein"]),
+                "calories": round(macros_calculated["calories"]),
+                "main_protein_source": main_protein_source
+            }
+            
+            # Build alternative option (format: fat, name, protein, calories, main_protein_source)
+            alt_option = {
+                "fat": round(macros_calculated["fat"]),
+                "name": alt_meal_name or f"{meal_name} Alternative",
+                "protein": round(macros_calculated["protein"]),
+                "calories": round(macros_calculated["calories"]),
+                "main_protein_source": alt_protein_source or "protein"
+            }
+            
+            template.append({
+                "main": main_option,
+                "meal": meal_name,
+                "alternative": alt_option
+            })
+            
+            logger.info(f"✅ Generated template for '{meal_name}': Main={main_option['name']}, Alt={alt_option['name']}")
         
         logger.info(f"✅ Generated template with {len(template)} meals using new approach")
         return jsonify({"template": template})
@@ -2487,13 +2526,14 @@ def api_build_menu():
             )
 
             # Submit all tasks at once
-            all_results = {}
+            all_results = {}  # Key: (index, meal_name) tuple to handle duplicate meal names
             with ThreadPoolExecutor(max_workers=total_options) as executor:
                 all_futures = {}
 
                 # Submit all MAIN and ALTERNATIVE tasks simultaneously
-                for template_meal in template:
+                for meal_index, template_meal in enumerate(template):
                     meal_name = template_meal.get("meal")
+                    meal_key = (meal_index, meal_name)  # Use index to make unique
 
                     # Submit MAIN task
                     main_future = executor.submit(
@@ -2504,7 +2544,7 @@ def api_build_menu():
                         user_code,
                         region_instruction,
                     )
-                    all_futures[main_future] = (meal_name, "MAIN")
+                    all_futures[main_future] = (meal_key, "MAIN")
 
                     # Submit ALTERNATIVE task (running in parallel with MAIN)
                     # Note: Since they run in parallel, ALTERNATIVE won't have MAIN's ingredients to avoid
@@ -2519,22 +2559,23 @@ def api_build_menu():
                         None,  # avoid_proteins - will be handled by prompt
                         None,  # avoid_ingredients - will be handled by prompt
                     )
-                    all_futures[alt_future] = (meal_name, "ALTERNATIVE")
+                    all_futures[alt_future] = (meal_key, "ALTERNATIVE")
 
                 # Collect all results as they complete
                 for future in as_completed(all_futures):
                     meal_name_returned, option_type_returned, result, error = future.result()
-                    expected_meal, expected_option = all_futures[future]
+                    expected_meal_key, expected_option = all_futures[future]
 
                     if error or not result:
                         logger.error(
-                            f"❌ Failed to build {expected_option} for '{expected_meal}': {error}"
+                            f"❌ Failed to build {expected_option} for meal at index {expected_meal_key[0]}: {error}"
                         )
                         return (
                             jsonify(
                                 {
-                                    "error": f"Failed to build {expected_option.lower()} option for '{expected_meal}'",
-                                    "meal_name": expected_meal,
+                                    "error": f"Failed to build {expected_option.lower()} option for meal at index {expected_meal_key[0]}",
+                                    "meal_index": expected_meal_key[0],
+                                    "meal_name": expected_meal_key[1],
                                     "option_type": expected_option,
                                     "details": error,
                                     "failure_type": f"{expected_option.lower()}_option_build_failed",
@@ -2543,24 +2584,25 @@ def api_build_menu():
                             400,
                         )
 
-                    # Store result with key (meal_name, option_type)
-                    if meal_name_returned not in all_results:
-                        all_results[meal_name_returned] = {}
-                    all_results[meal_name_returned][option_type_returned] = result
+                    # Store result with key (index, meal_name) to handle duplicate meal names
+                    if expected_meal_key not in all_results:
+                        all_results[expected_meal_key] = {}
+                    all_results[expected_meal_key][option_type_returned] = result
 
-                    logger.info(f"✅ Completed {option_type_returned} for '{meal_name_returned}'")
+                    logger.info(f"✅ Completed {option_type_returned} for meal at index {expected_meal_key[0]} ({expected_meal_key[1]})")
 
             logger.info(f"✅ Successfully built all {total_options} meal options in parallel!")
 
             # Assemble the full menu in the correct order
             full_menu = []
-            for template_meal in template:
+            for meal_index, template_meal in enumerate(template):
                 meal_name = template_meal.get("meal")
+                meal_key = (meal_index, meal_name)
                 full_menu.append(
                     {
                         "meal": meal_name,
-                        "main": all_results[meal_name]["MAIN"],
-                        "alternative": all_results[meal_name]["ALTERNATIVE"],
+                        "main": all_results[meal_key]["MAIN"],
+                        "alternative": all_results[meal_key]["ALTERNATIVE"],
                     }
                 )
 
