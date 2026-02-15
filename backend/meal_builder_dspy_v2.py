@@ -148,6 +148,49 @@ class IdentifyIngredients(dspy.Signature):
     - Return raw JSON array directly: [{"item": "...", ...}, ...]
     - Do NOT wrap the response in markdown code blocks
     
+    ⚠️ REQUIRED FIELDS FOR EACH INGREDIENT (EXACT JSON STRUCTURE):
+    {
+      "item": "Ingredient Name",
+      "calories_per_100g": 123.0,
+      "protein_per_100g": 12.0,
+      "fat_per_100g": 5.0,
+      "carbs_per_100g": 15.0,
+      "typical_unit_gram": 55.0,
+      "unit_label": "large",
+      "brand_of_product": "Brand Name or empty string"
+    }
+    
+    ⚠️ EXAMPLE OUTPUT (NO MARKDOWN, RAW JSON):
+    [
+      {
+        "item": "Large Eggs",
+        "calories_per_100g": 155.0,
+        "protein_per_100g": 13.0,
+        "fat_per_100g": 11.0,
+        "carbs_per_100g": 1.1,
+        "typical_unit_gram": 55.0,
+        "unit_label": "large",
+        "brand_of_product": ""
+      },
+      {
+        "item": "Olive Oil",
+        "calories_per_100g": 884.0,
+        "protein_per_100g": 0.0,
+        "fat_per_100g": 100.0,
+        "carbs_per_100g": 0.0,
+        "typical_unit_gram": 0,
+        "unit_label": "",
+        "brand_of_product": ""
+      }
+    ]
+    
+    ⚠️ CRITICAL: You MUST provide nutrition values per 100g (calories_per_100g, protein_per_100g, fat_per_100g, carbs_per_100g)
+    - These are STANDARD USDA values per 100g, NOT portion sizes
+    - Do NOT use "quantity" field - that is calculated later
+    - Do NOT return portion sizes - only return nutrition per 100g
+    - Look up accurate nutrition data from USDA or reliable sources
+    - Every ingredient MUST have all 4 nutrition fields (calories_per_100g, protein_per_100g, fat_per_100g, carbs_per_100g)
+    
     ⚠️ PROTOCOL: UNIT PHYSICS
     - For DISCRETE items (Eggs, Bread, Fruit, Tortillas), you MUST specify:
       1. typical_unit_gram: The weight of ONE piece (e.g. Egg=55, Slice=30, Clove=5).
@@ -192,7 +235,9 @@ class IdentifyIngredients(dspy.Signature):
     user_constraints: str = dspy.InputField()
     user_region: str = dspy.InputField()
     
-    ingredients: List[IngredientDensity] = dspy.OutputField()
+    ingredients: List[IngredientDensity] = dspy.OutputField(
+        desc="JSON array of ingredients with EXACT structure: item, calories_per_100g, protein_per_100g, fat_per_100g, carbs_per_100g, typical_unit_gram, unit_label, brand_of_product. NO markdown, NO code blocks."
+    )
 
 # Stage 2 is now PURE PYTHON (removed LLM-based CalculatePortions signature)
 # See _calculate_portions_with_python() method below
@@ -292,7 +337,7 @@ class MealPlanBuilder(dspy.Module):
     def _chef_with_markdown_fix(self, **kwargs):
         """
         Wrapper around chef that handles markdown code blocks in responses.
-        If parsing fails due to markdown, extracts and re-parses the JSON.
+        Uses a simpler Predict instead of ChainOfThought for better control.
         """
         try:
             return self.chef(**kwargs)
@@ -300,89 +345,51 @@ class MealPlanBuilder(dspy.Module):
             error_str = str(e)
             # Check if error is about parsing a string that looks like markdown
             if "Input should be a valid list" in error_str or "type=list_type" in error_str or "validation error" in error_str.lower():
-                logger.warning(f"⚠️ Parsing error detected, attempting to extract JSON from response...")
+                logger.warning(f"⚠️ ChainOfThought parsing failed, trying Predict instead...")
                 
-                # Try multiple patterns to extract JSON from error message
-                json_str = None
-                
-                # Pattern 1: Look for markdown code blocks with JSON
-                match = re.search(r'```\s*(?:json)?\s*(\[.*?\])\s*```', error_str, re.DOTALL)
-                if match:
-                    json_str = match.group(1)
-                else:
-                    # Pattern 2: Look for JSON array directly (even if truncated)
-                    match = re.search(r'(\[\s*\{.*)', error_str, re.DOTALL)
-                    if match:
-                        json_str = match.group(1)
-                        # Try to find the closing bracket (might be truncated)
-                        # Count open/close braces to find the end
-                        bracket_count = json_str.count('[') - json_str.count(']')
-                        if bracket_count > 0:
-                            # Try to complete the JSON by adding closing brackets
-                            json_str += ']' * bracket_count
-                
-                if json_str:
-                    try:
-                        # Clean up the JSON string
-                        json_str = _strip_markdown_fences(json_str)
-                        parsed_data = json.loads(json_str)
+                try:
+                    # Use a simpler Predict module that gives us more control
+                    simple_chef = dspy.Predict(IdentifyIngredients)
+                    result = simple_chef(**kwargs)
+                    
+                    # If it worked, return it
+                    if result and hasattr(result, 'ingredients'):
+                        logger.info(f"✅ Predict succeeded with {len(result.ingredients)} ingredients")
+                        return result
+                    else:
+                        raise ValueError("Predict returned invalid result")
                         
-                        if not isinstance(parsed_data, list):
-                            raise ValueError("Parsed data is not a list")
-                        
-                        # Manually construct the result object
-                        # Convert parsed data to IngredientDensity objects
-                        ingredients = []
-                        for item in parsed_data:
-                            if not isinstance(item, dict):
-                                continue
-                                
-                            # Handle different field names that might be returned
-                            item_name = item.get('item') or item.get('ingredient') or item.get('name', '')
-                            if not item_name:
-                                continue
-                                
-                            # Get nutrition values (per 100g format expected)
-                            calories = item.get('calories_per_100g') or item.get('calories', 0)
-                            protein = item.get('protein_per_100g') or item.get('protein', 0)
-                            fat = item.get('fat_per_100g') or item.get('fat', 0)
-                            carbs = item.get('carbs_per_100g') or item.get('carbs', 0)
+                except Exception as predict_error:
+                    logger.warning(f"⚠️ Predict also failed: {predict_error}")
+                    # Try to extract JSON from the error message using traceback
+                    import traceback
+                    tb_str = traceback.format_exc()
+                    
+                    # Look for JSON in the full traceback
+                    json_match = re.search(r'```\s*(?:json)?\s*(\[.*?\])\s*```', tb_str, re.DOTALL)
+                    if not json_match:
+                        # Try without markdown
+                        json_match = re.search(r'(\[\s*\{[^}]+\}[^\]]*\])', tb_str, re.DOTALL)
+                    
+                    if json_match:
+                        try:
+                            json_str = json_match.group(1)
+                            json_str = _strip_markdown_fences(json_str)
+                            parsed_data = json.loads(json_str)
                             
-                            # If values are 0, they might be in a different format - skip invalid items
-                            if calories == 0 and protein == 0 and fat == 0 and carbs == 0:
-                                logger.warning(f"⚠️ Skipping ingredient {item_name} with all zero values")
-                                continue
+                            logger.warning(f"⚠️ Extracted JSON from error, but it may be missing nutrition fields")
+                            logger.warning(f"   This indicates the LLM is not following the required structure")
+                            logger.warning(f"   Please check the signature instructions")
                             
-                            brand = item.get('brand_of_product') or item.get('brand of pruduct') or item.get('brand', '')
-                            unit_gram = item.get('typical_unit_gram', 0)
-                            unit_label = item.get('unit_label', '')
-                            
-                            ingredients.append(IngredientDensity(
-                                item=item_name,
-                                calories_per_100g=float(calories),
-                                protein_per_100g=float(protein),
-                                fat_per_100g=float(fat),
-                                carbs_per_100g=float(carbs),
-                                brand_of_product=brand,
-                                typical_unit_gram=float(unit_gram),
-                                unit_label=unit_label
-                            ))
-                        
-                        if ingredients:
-                            # Create a result object that matches the expected structure
-                            class ChefResult:
-                                def __init__(self, ingredients):
-                                    self.ingredients = ingredients
-                            
-                            logger.info(f"✅ Successfully parsed {len(ingredients)} ingredients from markdown-wrapped response")
-                            return ChefResult(ingredients)
-                        else:
-                            logger.error(f"❌ No valid ingredients extracted from response")
-                    except (json.JSONDecodeError, KeyError, ValueError) as parse_error:
-                        logger.error(f"❌ Failed to parse JSON from error message: {parse_error}")
-                        logger.debug(f"   Attempted to parse: {json_str[:500] if json_str else 'None'}...")
+                            # Even if we extract it, it's likely missing nutrition data
+                            # So we still need to raise the error
+                        except:
+                            pass
+                    
+                    # Re-raise the original error
+                    raise e
             
-            # If it's not a markdown parsing error or extraction failed, re-raise the original exception
+            # If it's not a markdown parsing error, re-raise the original exception
             logger.error(f"❌ Chef call failed: {e}")
             raise e
     
