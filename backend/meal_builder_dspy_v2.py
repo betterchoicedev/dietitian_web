@@ -871,7 +871,7 @@ def configure_dspy(force: bool = False) -> bool:
 
             
             # DSPy uses LiteLLM internally, which requires gemini/ prefix for Gemini models
-            # Force Google AI Studio endpoint (not Vertex AI) by setting api_base
+            # LiteLLM automatically constructs the correct Google AI Studio endpoint
             if gemini_model.startswith('gemini/'):
                 model_name = gemini_model
             elif gemini_model.startswith('google/'):
@@ -881,23 +881,20 @@ def configure_dspy(force: bool = False) -> bool:
                 # Add gemini/ prefix for LiteLLM
                 model_name = f"gemini/{gemini_model}"
             
-            # Force Google AI Studio endpoint (not Vertex AI)
-            # This matches the curl command: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
-            api_base = "https://generativelanguage.googleapis.com/v1beta"
-            
-            # Configure DSPy LM with Gemini API key and explicit API base
-            # This forces LiteLLM to use Google AI Studio REST API, not Vertex AI
+            # Configure DSPy LM with Gemini API key
+            # LiteLLM automatically uses Google AI Studio REST API endpoint:
+            # https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
+            # Do NOT set api_base - LiteLLM handles URL construction automatically
             lm = dspy.LM(
                 model=model_name,
                 api_key=gemini_api_key,
-                api_base=api_base,
                 max_tokens=2048,
                 temperature=0.7
             )
             dspy.configure(lm=lm)
             
             _dspy_configured = True
-            logger.info(f"DSPy configured successfully with Gemini REST API: {model_name} at {api_base} (API key via X-goog-api-key)")
+            logger.info(f"DSPy configured successfully with Gemini REST API: {model_name} (API key via X-goog-api-key)")
             return True
         
         # Fall back to Azure OpenAI configuration
