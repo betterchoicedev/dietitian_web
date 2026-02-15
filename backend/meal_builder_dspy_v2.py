@@ -29,6 +29,8 @@ Features:
 
 import dspy
 import os
+import json
+import re
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -141,6 +143,11 @@ class IdentifyIngredients(dspy.Signature):
     Step 1: The Iron Chef (Unit Aware).
     Generate a precise ingredient list (max 7 items) for the requested dish.
     
+    ⚠️ CRITICAL OUTPUT FORMAT:
+    - Return ONLY a valid JSON array, NO markdown code blocks, NO ```json fences
+    - Return raw JSON array directly: [{"item": "...", ...}, ...]
+    - Do NOT wrap the response in markdown code blocks
+    
     ⚠️ PROTOCOL: UNIT PHYSICS
     - For DISCRETE items (Eggs, Bread, Fruit, Tortillas), you MUST specify:
       1. typical_unit_gram: The weight of ONE piece (e.g. Egg=55, Slice=30, Clove=5).
@@ -211,6 +218,54 @@ class MeasureConverter(dspy.Signature):
 
 
 # ============================================================================
+# Helper Functions
+# ============================================================================
+
+def _strip_markdown_fences(s: str) -> str:
+    """Strip markdown code fences from a string."""
+    s = s.strip()
+    
+    if s.startswith("```"):
+        s = s.split("```", 1)[-1]
+        
+        # Remove language tag (e.g., "json", "python") if present on first line
+        first_newline = s.find("\n")
+        if first_newline > 0 and first_newline < 20:  # Language tag is usually short
+            first_line = s[:first_newline].strip()
+            # Check if first line is just a language identifier (no special chars)
+            if first_line and first_line.isalpha():
+                s = s[first_newline + 1:]
+        
+        if "```" in s:
+            s = s.rsplit("```", 1)[0]
+    
+    return s.strip()
+
+
+def _extract_json_from_markdown(text: str) -> Any:
+    """Extract JSON from markdown code blocks or plain text."""
+    # First try to strip markdown
+    cleaned = _strip_markdown_fences(text)
+    
+    # Try to parse as JSON
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        # If that fails, try to find JSON-like structures in the text
+        # Look for array patterns
+        array_match = re.search(r'\[\s*\{.*?\}\s*\]', cleaned, re.DOTALL)
+        if array_match:
+            try:
+                return json.loads(array_match.group(0))
+            except json.JSONDecodeError:
+                pass
+        
+        # If all else fails, return the cleaned text
+        logger.warning(f"Could not parse JSON from text: {text[:200]}...")
+        return cleaned
+
+
+# ============================================================================
 # DSPy Module
 # ============================================================================
 
@@ -233,6 +288,103 @@ class MealPlanBuilder(dspy.Module):
         # Stage 2: Pure Python math (no LLM needed!)
         # Stage 3: LLM-based household measure refinement
         self.measure_converter = dspy.Predict(MeasureConverter)
+    
+    def _chef_with_markdown_fix(self, **kwargs):
+        """
+        Wrapper around chef that handles markdown code blocks in responses.
+        If parsing fails due to markdown, extracts and re-parses the JSON.
+        """
+        try:
+            return self.chef(**kwargs)
+        except (ValueError, Exception) as e:
+            error_str = str(e)
+            # Check if error is about parsing a string that looks like markdown
+            if "Input should be a valid list" in error_str or "type=list_type" in error_str or "validation error" in error_str.lower():
+                logger.warning(f"⚠️ Parsing error detected, attempting to extract JSON from response...")
+                
+                # Try multiple patterns to extract JSON from error message
+                json_str = None
+                
+                # Pattern 1: Look for markdown code blocks with JSON
+                match = re.search(r'```\s*(?:json)?\s*(\[.*?\])\s*```', error_str, re.DOTALL)
+                if match:
+                    json_str = match.group(1)
+                else:
+                    # Pattern 2: Look for JSON array directly (even if truncated)
+                    match = re.search(r'(\[\s*\{.*)', error_str, re.DOTALL)
+                    if match:
+                        json_str = match.group(1)
+                        # Try to find the closing bracket (might be truncated)
+                        # Count open/close braces to find the end
+                        bracket_count = json_str.count('[') - json_str.count(']')
+                        if bracket_count > 0:
+                            # Try to complete the JSON by adding closing brackets
+                            json_str += ']' * bracket_count
+                
+                if json_str:
+                    try:
+                        # Clean up the JSON string
+                        json_str = _strip_markdown_fences(json_str)
+                        parsed_data = json.loads(json_str)
+                        
+                        if not isinstance(parsed_data, list):
+                            raise ValueError("Parsed data is not a list")
+                        
+                        # Manually construct the result object
+                        # Convert parsed data to IngredientDensity objects
+                        ingredients = []
+                        for item in parsed_data:
+                            if not isinstance(item, dict):
+                                continue
+                                
+                            # Handle different field names that might be returned
+                            item_name = item.get('item') or item.get('ingredient') or item.get('name', '')
+                            if not item_name:
+                                continue
+                                
+                            # Get nutrition values (per 100g format expected)
+                            calories = item.get('calories_per_100g') or item.get('calories', 0)
+                            protein = item.get('protein_per_100g') or item.get('protein', 0)
+                            fat = item.get('fat_per_100g') or item.get('fat', 0)
+                            carbs = item.get('carbs_per_100g') or item.get('carbs', 0)
+                            
+                            # If values are 0, they might be in a different format - skip invalid items
+                            if calories == 0 and protein == 0 and fat == 0 and carbs == 0:
+                                logger.warning(f"⚠️ Skipping ingredient {item_name} with all zero values")
+                                continue
+                            
+                            brand = item.get('brand_of_product') or item.get('brand of pruduct') or item.get('brand', '')
+                            unit_gram = item.get('typical_unit_gram', 0)
+                            unit_label = item.get('unit_label', '')
+                            
+                            ingredients.append(IngredientDensity(
+                                item=item_name,
+                                calories_per_100g=float(calories),
+                                protein_per_100g=float(protein),
+                                fat_per_100g=float(fat),
+                                carbs_per_100g=float(carbs),
+                                brand_of_product=brand,
+                                typical_unit_gram=float(unit_gram),
+                                unit_label=unit_label
+                            ))
+                        
+                        if ingredients:
+                            # Create a result object that matches the expected structure
+                            class ChefResult:
+                                def __init__(self, ingredients):
+                                    self.ingredients = ingredients
+                            
+                            logger.info(f"✅ Successfully parsed {len(ingredients)} ingredients from markdown-wrapped response")
+                            return ChefResult(ingredients)
+                        else:
+                            logger.error(f"❌ No valid ingredients extracted from response")
+                    except (json.JSONDecodeError, KeyError, ValueError) as parse_error:
+                        logger.error(f"❌ Failed to parse JSON from error message: {parse_error}")
+                        logger.debug(f"   Attempted to parse: {json_str[:500] if json_str else 'None'}...")
+            
+            # If it's not a markdown parsing error or extraction failed, re-raise the original exception
+            logger.error(f"❌ Chef call failed: {e}")
+            raise e
     
     def _calculate_nutrition(self, ingredients: List[Ingredient]) -> Nutrition:
         """Calculate nutrition totals from ingredient list."""
@@ -624,7 +776,8 @@ class MealPlanBuilder(dspy.Module):
             
             # ===== STAGE 1: CHEF - Get ingredients with FIXED densities =====
             # Pass all targets so Chef picks appropriate ingredients (protein/fat/carb sources)
-            chef_result = self.chef(
+            # Use wrapper that handles markdown code blocks in responses
+            chef_result = self._chef_with_markdown_fix(
                 meal_title=meal_title_input,
                 main_source=option_data['main_protein_source'],
                 target_protein=targets['protein'],
