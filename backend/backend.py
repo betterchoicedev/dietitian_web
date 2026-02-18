@@ -2071,7 +2071,8 @@ def _build_option_with_retries(
             user_constraints = {
                 "food_allergies": preferences.get("food_allergies", ""),
                 "food_limitations": preferences.get("food_limitations", ""),
-                "medical_conditions": preferences.get("medical_conditions", "")
+                "medical_conditions": preferences.get("medical_conditions", ""),
+                "client_preference": preferences.get("client_preference", {}),
             }
             
             # Get region from preferences

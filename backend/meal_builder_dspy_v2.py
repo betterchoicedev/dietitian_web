@@ -701,11 +701,11 @@ class MealPlanBuilder(dspy.Module):
         Helper to format database columns into a prompt-friendly string.
         
         Args:
-            user_data: Dictionary with keys like 'food_allergies', 'food_limitations', 'medical_conditions'
-                       Values may be strings or lists (backend sometimes passes lists).
+            user_data: Dictionary with keys like 'food_allergies', 'food_limitations', 'medical_conditions',
+                       'client_preference' (likes/dislikes). Values may be strings, lists, or dicts.
         
         Returns:
-            Formatted string like: "ALLERGIES: Peanuts | DIETARY LIMITATIONS: Vegan | MEDICAL CONDITIONS: Diabetes"
+            Formatted string like: "ALLERGIES: Peanuts | DIETARY LIMITATIONS: Vegan | MEDICAL CONDITIONS: Diabetes | CLIENT PREFERENCES: loves pasta"
         """
         def _to_str(val):
             """Handle both string and list (e.g. ['Vegetarian', 'Gluten-free'])."""
@@ -731,6 +731,17 @@ class MealPlanBuilder(dspy.Module):
         conditions = _to_str(user_data.get('medical_conditions'))
         if conditions and conditions.lower() not in ['none', 'n/a', '']:
             parts.append(f"MEDICAL CONDITIONS: {conditions}")
+        
+        # Client preferences (likes/dislikes - what they enjoy or avoid by choice)
+        prefs_raw = user_data.get('client_preference')
+        if prefs_raw is not None:
+            if isinstance(prefs_raw, dict):
+                val = prefs_raw.get('text') or prefs_raw.get('preferences') or ""
+                pref_str = ", ".join(str(v).strip() for v in val if v) if isinstance(val, list) else str(val).strip()
+            else:
+                pref_str = _to_str(prefs_raw)
+            if pref_str and pref_str.lower() not in ['none', 'n/a', '']:
+                parts.append(f"CLIENT PREFERENCES: {pref_str}")
         
         if not parts:
             return "None"
@@ -1158,7 +1169,7 @@ def build_single_meal_with_constraints(
         meal_type: Type of meal (e.g., "Breakfast", "Lunch")
         macro_targets: Dictionary with keys: 'name', 'calories', 'protein', 'fat', 'carbs'
         required_protein_source: Main protein source for the meal
-        user_constraints: Dictionary with 'food_allergies', 'food_limitations', 'medical_conditions'
+        user_constraints: Dictionary with 'food_allergies', 'food_limitations', 'medical_conditions', 'client_preference'
         user_region: User's region for ingredient preferences
         option_type: "MAIN" or "ALTERNATIVE"
     
@@ -1179,7 +1190,8 @@ def build_single_meal_with_constraints(
             user_constraints={
                 "food_allergies": "Peanuts",
                 "food_limitations": "Vegetarian",
-                "medical_conditions": "Diabetes"
+                "medical_conditions": "Diabetes",
+                "client_preference": "loves pasta, avoids spicy food"
             },
             user_region="Israel"
         )
