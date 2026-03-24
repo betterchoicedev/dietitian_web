@@ -200,25 +200,20 @@ class IdentifyIngredients(dspy.Signature):
       1. typical_unit_gram: Set to 0.
       2. unit_label: Leave empty.
     
-    ⚠️ PROTOCOL 2: THE "TUNER" STRATEGY (CRITICAL)
-    To ensure the math engine can hit exact targets, you MUST include "Pure Macro" sources:
-    
-    1. THE FAT KNOB: If the dish allows, add "Olive Oil", "Avocado", or "Nuts".
-       * (Pure Fat allows us to hit Fat targets without adding Carbs/Protein).
-       
-    2. THE PROTEIN KNOB: Add "Egg Whites", "Tuna", "Seitan", or "Protein Powder".
-       * (Pure Protein allows us to hit Protein targets without adding Fat/Carbs).
-       
-    3. THE CARB KNOB: Add "Fruit", "Rice", or "Veggies".
-       * (Allows us to hit Carb targets).
-       
-    DO NOT provide only "Compound Foods" (like Hummus or Cheese) because their ratios are locked.
-    
+    ⚠️ PROTOCOL 2: CULINARY LOGIC & SCALING (CRITICAL)
+    - SCALING OVER WEIRD ADDITIONS: To hit protein targets, RELY on the main protein source (e.g., Steak, Chicken Breast, Salmon, Tofu). The math engine will automatically increase its portion size. 
+    - DO NOT ruin dishes by adding mismatched "Pure Macro" ingredients (e.g., NEVER add Egg Whites to a Steak dish, NEVER add Tuna to Oatmeal).
+    - APPROPRIATE TUNERS: If you must add items to balance macros, they MUST make culinary sense:
+      * FAT: Olive Oil, Avocado, Nuts, Butter (if it fits the flavor profile).
+      * CARBS: Rice, Potatoes, Fruit, Veggies.
+      * PROTEIN: Only add supplementary pure protein (Egg Whites, Protein Powder) if it physically belongs in the recipe (e.g., protein powder in a smoothie, egg whites in an omelet).
+      
     ⚠️ PROTOCOL 3: MACRO "DECOUPLING" STRATEGY
+    - To help the math engine hit exact targets, ensure you have independent sources for Fat and Carbs (if the dish allows).
     - FAT TUNER: Olive Oil, Spray Oil (typical_unit_gram=0).
-    - CARB TUNER: Fruit, Veggies, Rice (continuous or unit as appropriate).
-    - PROTEIN TUNER: Egg Whites, Seitan, Tuna, Protein Powder.
-    - AVOID pairing high-fat meat with high-fat nuts if fat target is low.
+    - CARB TUNER: Fruit, Veggies, Rice.
+    - PROTEIN: Let the main_source handle the protein! Do not add secondary random proteins just for math's sake.
+    - AVOID pairing high-fat meat with high-fat nuts if the fat target is low.
       
     ⚠️ PROTOCOL 4: REGIONAL BRANDS
     - Region: {user_region}
